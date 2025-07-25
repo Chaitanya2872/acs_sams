@@ -1,0 +1,48 @@
+name: NodeJS TS Backend Application Deployment via PM2
+
+on:
+  push:
+    branches: [main]  # Change to your branch
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    environment: production # 🔐 Enables environment-specific secrets
+
+    steps:
+      - name: Clone the project
+        uses: actions/checkout@v3
+      
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+      
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ds.pem
+          chmod 600 ~/.ssh/ds.pem
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+            
+      - name: Creating ENV File
+        run: |
+          echo "${{ secrets.ENV_DATA }}" >> .env
+          npm i
+      
+      - name: Deploying Backend
+        run: |
+          rsync -avz --delete -e "ssh -i ~/.ssh/ds.pem" ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/${{ secrets.SERVER_USER }}/backend/
+          ssh -i ~/.ssh/ds.pem ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} <<EOF
+            cd backend/
+            sudo pm2 delete backend
+            sudo pm2 start "npm start" --name backend
+            sudo pm2 save
+            sudo pm2 restart backend
+          EOF
+      
+      - name: Cleanup SSH key
+        run: rm -f ~/.ssh/ds.pem
+
