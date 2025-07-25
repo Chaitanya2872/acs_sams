@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
  * Create email transporter
  */
 const createTransporter = () => {
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({ // Fixed: removed 'er' from createTransporter
     host: process.env.EMAIL_HOST,
     port: process.env.EMAIL_PORT,
     secure: false, // true for 465, false for other ports
