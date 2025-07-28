@@ -83,11 +83,11 @@ const floorDetailsSchema = new mongoose.Schema({
 });
 
 const structureSchema = new mongoose.Schema({
-  // Structure Identity
+  // Structure Identity - FIXED: Made optional since it's auto-generated
   structuralIdentityNumber: {
     type: String,
     unique: true,
-    required: true
+    // REMOVED required: true - will be auto-generated
   },
   stateCode: {
     type: String,
@@ -214,18 +214,37 @@ const structureSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate unique structure identity number
+// FIXED: Enhanced pre-save hook with better error handling and logic
 structureSchema.pre('save', async function(next) {
-  if (!this.structuralIdentityNumber) {
-    const count = await mongoose.model('Structure').countDocuments();
-    this.structuralIdentityNumber = `${this.stateCode}${this.districtCode}${this.cityName.substring(0, 4).toUpperCase()}${String(count + 1).padStart(4, '0')}`;
+  try {
+    // Only generate if it's a new document and doesn't already have an identity number
+    if (this.isNew && !this.structuralIdentityNumber) {
+      console.log('🔢 Generating structural identity number...');
+      
+      // Get count of existing structures for sequential numbering
+      const count = await this.constructor.countDocuments();
+      const sequentialNumber = String(count + 1).padStart(4, '0');
+      
+      // Extract first 4 characters of city name, convert to uppercase
+      const cityCode = this.cityName.substring(0, 4).toUpperCase();
+      
+      // Generate the identity number: StateCode + DistrictCode + CityCode + SequentialNumber
+      this.structuralIdentityNumber = `${this.stateCode}${this.districtCode}${cityCode}${sequentialNumber}`;
+      
+      console.log(`✅ Generated ID: ${this.structuralIdentityNumber}`);
+    }
+    
+    next();
+  } catch (error) {
+    console.error('❌ Error generating structural identity number:', error);
+    next(error);
   }
-  next();
 });
 
 // Index for efficient queries
 structureSchema.index({ stateCode: 1, districtCode: 1, cityName: 1 });
 structureSchema.index({ createdBy: 1 });
 structureSchema.index({ inspectionStatus: 1 });
+structureSchema.index({ structuralIdentityNumber: 1 }); // Added index for identity number
 
 module.exports = mongoose.model('Structure', structureSchema);

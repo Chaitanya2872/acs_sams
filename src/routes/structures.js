@@ -22,6 +22,9 @@ router.get('/', structureController.getStructures);
 // Get structure statistics
 router.get('/stats', structureController.getStructureStats);
 
+// NEW: Get structures by user ID
+router.get('/user/:userId', structureController.getStructuresByUserId);
+
 // Get structure by ID
 router.get('/:id', structureController.getStructureById);
 

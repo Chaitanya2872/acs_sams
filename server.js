@@ -1,45 +1,60 @@
-// Load environment variables first, before anything else
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+// Load environment variables first
+require('dotenv').config({ 
+  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env' 
+});
 
 const app = require('./app');
 const connectDB = require('./src/config/database');
+const { createLogDirectory, logger } = require('./src/utils/logger');
 
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+// Create logs directory for production
+if (NODE_ENV === 'production') {
+  createLogDirectory();
+}
+
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-    console.log('UNCAUGHT EXCEPTION! 💥 Shutting down...');
-    console.log(err.name, err.message);
+    logger.error('UNCAUGHT EXCEPTION! 💥 Shutting down...', {
+      error: err.message,
+      stack: err.stack
+    });
     process.exit(1);
 });
-
-// Debug environment variables
-console.log('🔍 Environment Debug Info:');
-console.log('📁 Working Directory:', process.cwd());
-console.log('🌍 NODE_ENV:', NODE_ENV);
-console.log('🔌 PORT:', PORT);
-console.log('🗄️  MongoDB URI:', process.env.MONGODB_URI ? 'SET' : 'NOT SET');
 
 // Connect to database
 connectDB();
 
 // Start server
 const server = app.listen(PORT, () => {
-    console.log(`
+    const message = `
     🚀 SAMS API Server is running!
     📍 Environment: ${NODE_ENV}
     🌐 Port: ${PORT}
     🔗 URL: http://localhost:${PORT}
     📚 Health Check: http://localhost:${PORT}/api/health
-    `);
+    ⏰ Started at: ${new Date().toISOString()}
+    `;
+    
+    if (NODE_ENV === 'development') {
+      console.log(message);
+    } else {
+      logger.info('SAMS API Server Started', {
+        environment: NODE_ENV,
+        port: PORT,
+        timestamp: new Date().toISOString()
+      });
+    }
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
-    console.log('UNHANDLED REJECTION! 💥 Shutting down...');
-    console.log(err.name, err.message);
+    logger.error('UNHANDLED REJECTION! 💥 Shutting down...', {
+      error: err.message,
+      stack: err.stack
+    });
     server.close(() => {
         process.exit(1);
     });
@@ -47,8 +62,18 @@ process.on('unhandledRejection', (err) => {
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-    console.log('👋 SIGTERM RECEIVED. Shutting down gracefully');
+    logger.info('👋 SIGTERM RECEIVED. Shutting down gracefully');
     server.close(() => {
-        console.log('💥 Process terminated!');
+        logger.info('💥 Process terminated!');
     });
 });
+
+// Handle SIGINT (Ctrl+C)
+process.on('SIGINT', () => {
+    logger.info('👋 SIGINT RECEIVED. Shutting down gracefully');
+    server.close(() => {
+        logger.info('💥 Process terminated!');
+    });
+});
+
+module.exports = server;

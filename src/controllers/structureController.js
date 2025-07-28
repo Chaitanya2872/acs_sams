@@ -1,17 +1,32 @@
 const Structure = require('../models/Structure');
+const User = require('../models/User');
 
 class StructureController {
   async createStructure(req, res) {
     try {
+      console.log('📝 Creating new structure...');
+      console.log('👤 User:', req.user._id);
+      console.log('📋 Data received:', {
+        stateCode: req.body.stateCode,
+        districtCode: req.body.districtCode,
+        cityName: req.body.cityName,
+        typeOfStructure: req.body.typeOfStructure
+      });
+
       const structureData = {
         ...req.body,
         createdBy: req.user._id
       };
       
+      // Remove structuralIdentityNumber from request if provided (let it auto-generate)
+      delete structureData.structuralIdentityNumber;
+      
       const structure = new Structure(structureData);
       await structure.save();
       
       await structure.populate('createdBy', 'name email');
+      
+      console.log('✅ Structure created with ID:', structure.structuralIdentityNumber);
       
       res.status(201).json({
         success: true,
@@ -19,6 +34,8 @@ class StructureController {
         data: structure
       });
     } catch (error) {
+      console.error('❌ Structure creation error:', error);
+      
       if (error.name === 'ValidationError') {
         return res.status(400).json({
           success: false,
@@ -27,6 +44,14 @@ class StructureController {
             field: err.path,
             message: err.message
           }))
+        });
+      }
+      
+      if (error.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: 'Structure with this identity number already exists',
+          error: 'Duplicate structure identity'
         });
       }
       
@@ -81,6 +106,83 @@ class StructureController {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch structures',
+        error: error.message
+      });
+    }
+  }
+
+  // NEW: Get structures by specific user ID
+  async getStructuresByUserId(req, res) {
+    try {
+      const { userId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+
+      console.log('🔍 Fetching structures for user:', userId);
+
+      // Check if the user exists
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Permission check: Users can only see their own structures unless they're admin
+      if (req.user.role !== 'admin' && req.user._id.toString() !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. You can only view your own structures.'
+        });
+      }
+
+      const filter = { 
+        createdBy: userId,
+        isActive: true 
+      };
+
+      // Add additional filters if provided
+      if (req.query.stateCode) filter.stateCode = req.query.stateCode;
+      if (req.query.districtCode) filter.districtCode = req.query.districtCode;
+      if (req.query.cityName) filter.cityName = new RegExp(req.query.cityName, 'i');
+      if (req.query.typeOfStructure) filter.typeOfStructure = req.query.typeOfStructure;
+      if (req.query.inspectionStatus) filter.inspectionStatus = req.query.inspectionStatus;
+
+      const structures = await Structure.find(filter)
+        .populate('createdBy', 'name email designation')
+        .populate('inspectorId', 'name email designation')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
+      const total = await Structure.countDocuments(filter);
+
+      console.log(`✅ Found ${structures.length} structures for user ${user.name}`);
+
+      res.status(200).json({
+        success: true,
+        message: `Structures for user: ${user.name}`,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        },
+        data: structures,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          totalItems: total,
+          itemsPerPage: limit
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching structures by user ID:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch structures for user',
         error: error.message
       });
     }
@@ -142,10 +244,14 @@ class StructureController {
           message: 'Access denied'
         });
       }
+
+      // Prevent updating the auto-generated structuralIdentityNumber
+      const updateData = { ...req.body };
+      delete updateData.structuralIdentityNumber;
       
       const updatedStructure = await Structure.findByIdAndUpdate(
         id,
-        req.body,
+        updateData,
         { new: true, runValidators: true }
       ).populate('createdBy', 'name email')
        .populate('inspectorId', 'name email');
@@ -263,6 +369,22 @@ class StructureController {
                 }
               }
             },
+            hospital: {
+              $size: {
+                $filter: {
+                  input: '$byType',
+                  cond: { $eq: ['$$this.type', 'hospital'] }
+                }
+              }
+            },
+            industrial: {
+              $size: {
+                $filter: {
+                  input: '$byType',
+                  cond: { $eq: ['$$this.type', 'industrial'] }
+                }
+              }
+            },
             pendingInspections: {
               $size: {
                 $filter: {
@@ -278,6 +400,22 @@ class StructureController {
                   cond: { $eq: ['$$this.status', 'completed'] }
                 }
               }
+            },
+            inProgressInspections: {
+              $size: {
+                $filter: {
+                  input: '$byType',
+                  cond: { $eq: ['$$this.status', 'in_progress'] }
+                }
+              }
+            },
+            requiresReinspection: {
+              $size: {
+                $filter: {
+                  input: '$byType',
+                  cond: { $eq: ['$$this.status', 'requires_reinspection'] }
+                }
+              }
             }
           }
         }
@@ -290,8 +428,12 @@ class StructureController {
           residential: 0,
           commercial: 0,
           educational: 0,
+          hospital: 0,
+          industrial: 0,
           pendingInspections: 0,
-          completedInspections: 0
+          completedInspections: 0,
+          inProgressInspections: 0,
+          requiresReinspection: 0
         }
       });
     } catch (error) {

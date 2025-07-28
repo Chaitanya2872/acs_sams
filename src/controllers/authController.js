@@ -34,7 +34,8 @@ class AuthController {
         success: true,
         message: 'Login successful',
         user: result.user,
-        accessToken: result.accessToken
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken
       });
     } catch (error) {
       res.status(400).json({

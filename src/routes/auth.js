@@ -37,7 +37,7 @@ router.post('/reset-password/:token', authController.resetPassword);
 
 // Google OAuth
 router.get('/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
+  passport.authenticate('google', { scope: ['openid', 'profile', 'email'] })
 );
 
 router.get('/google/callback',
