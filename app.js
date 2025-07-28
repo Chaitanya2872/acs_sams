@@ -25,6 +25,12 @@ if (isProduction) {
   app.set('trust proxy', 1);
 }
 
+app.use(cors({
+  origin: process.env.CORS_ORIGIN||'https://acs-sams.onrender.com/api',
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
+
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: isProduction ? undefined : false,
