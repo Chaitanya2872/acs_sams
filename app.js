@@ -1,173 +1,177 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
-const passport = require('passport');
-const { logger } = require('./src/utils/logger');
 require('dotenv').config();
-
-// Import routes
-const authRoutes = require('./src/routes/auth');
-const structureRoutes = require('./src/routes/structures');
-const userRoutes = require('./src/routes/users');
-
-// Import passport config
-require('./src/config/passport');
 
 const app = express();
 
-const isProduction = process.env.NODE_ENV === 'production';
+// ===== ESSENTIAL MIDDLEWARE SETUP =====
+// This MUST come before your routes!
 
-// Trust proxy for production (if behind load balancer)
-if (isProduction) {
-  app.set('trust proxy', 1);
-}
-
-app.use(cors({
-  origin: process.env.CORS_ORIGIN||'https://acs-sams.onrender.com/api',
-  credentials: true,
-  optionsSuccessStatus: 200
-}));
-
-// Security middleware
+// 1. Security middleware
 app.use(helmet({
-  contentSecurityPolicy: isProduction ? undefined : false,
-  crossOriginEmbedderPolicy: false
-}));
-
-// Compression middleware
-app.use(compression({
-  level: parseInt(process.env.COMPRESSION_LEVEL) || 6,
-  threshold: 1024
-}));
-
-// CORS configuration
-const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = process.env.CORS_ORIGINS 
-      ? process.env.CORS_ORIGINS.split(',') 
-      : [process.env.CLIENT_URL];
-    
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"]
     }
-  },
+  }
+}));
+
+// 2. CORS configuration
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
-  optionsSuccessStatus: 200
-};
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
-app.use(cors(corsOptions));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
-  message: {
-    success: false,
-    message: 'Too many requests from this IP, please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
-
-// Logging middleware
-if (isProduction) {
-  app.use(morgan('combined', {
-    stream: { write: message => logger.info(message.trim()) }
-  }));
-} else {
+// 3. Request logging (development only)
+if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// Body parsing middleware
+// 4. **CRITICAL**: Body parsing middleware - MUST be before routes
 app.use(express.json({ 
-  limit: '10mb',
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
+  limit: '50mb',
+  strict: true,
+  type: 'application/json'
 }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Passport middleware
-app.use(passport.initialize());
+app.use(express.urlencoded({ 
+  extended: true, 
+  limit: '50mb',
+  type: 'application/x-www-form-urlencoded'
+}));
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/structures', structureRoutes);
-app.use('/api/users', userRoutes);
-
-// Health check route with detailed info
-app.get('/api/health', (req, res) => {
-  const healthData = {
-    success: true,
-    message: 'SAMS API is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    version: process.env.npm_package_version || '1.0.0',
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    pid: process.pid
-  };
-
-  res.status(200).json(healthData);
+// 5. Additional middleware for better request handling
+app.use((req, res, next) => {
+  // Log request details for debugging
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`\n📥 ${req.method} ${req.path}`);
+    console.log('├─ Content-Type:', req.headers['content-type'] || 'Not set');
+    console.log('├─ Body exists:', !!req.body);
+    console.log('└─ Body type:', typeof req.body);
+  }
+  next();
 });
 
-// API documentation route
-app.get('/api', (req, res) => {
-  res.status(200).json({
+// ===== DATABASE CONNECTION =====
+const mongoose = require('mongoose');
+
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => {
+  console.log('✅ Connected to MongoDB');
+  console.log('📊 Database:', mongoose.connection.name);
+})
+.catch((error) => {
+  console.error('❌ MongoDB connection error:', error.message);
+  process.exit(1);
+});
+
+// ===== ROUTES =====
+// Import your routes
+const authRoutes = require('./src/routes/authRoutes');
+const userRoutes = require('./src/routes/users');
+// Add other routes as needed
+// const structureRoutes = require('./src/routes/structures');
+// const adminRoutes = require('./src/routes/admin');
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({
     success: true,
-    message: 'SAMS API Documentation',
-    version: '1.0.0',
-    endpoints: {
-      auth: '/api/auth',
-      structures: '/api/structures',
-      users: '/api/users',
-      health: '/api/health'
-    },
-    documentation: 'https://documenter.getpostman.com/view/your-postman-docs'
+    message: 'SAMS API is running!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    port: process.env.PORT
+  });
+});
+
+// API routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+// app.use('/api/structures', structureRoutes);
+// app.use('/api/admin', adminRoutes);
+
+// ===== ERROR HANDLING =====
+
+// Handle 404 for API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `API endpoint ${req.method} ${req.originalUrl} not found`,
+    availableEndpoints: {
+      auth: '/api/auth/*',
+      users: '/api/users/*'
+    }
   });
 });
 
 // Global error handler
-app.use((err, req, res, next) => {
-  // Log error
-  logger.error('Global Error Handler', {
-    error: err.message,
-    stack: err.stack,
-    url: req.url,
-    method: req.method,
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
+app.use((error, req, res, next) => {
+  console.error('💥 Global Error Handler:');
+  console.error('├─ Error:', error.message);
+  console.error('├─ Stack:', error.stack);
+  console.error('├─ Request:', req.method, req.path);
+  console.error('└─ Body:', req.body);
 
-  // Don't leak error details in production
-  const errorMessage = isProduction ? 'Internal Server Error' : err.message;
-  const errorDetails = isProduction ? {} : { stack: err.stack };
+  // Handle specific error types
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid JSON in request body',
+      details: 'Please check your JSON syntax'
+    });
+  }
 
-  res.status(err.statusCode || 500).json({
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      error: 'Request body too large',
+      details: 'Maximum size is 50MB'
+    });
+  }
+
+  // Default error response
+  res.status(error.status || 500).json({
     success: false,
-    message: errorMessage,
-    error: errorDetails
+    error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { 
+      stack: error.stack,
+      details: error
+    })
   });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  logger.warn('404 Not Found', {
-    url: req.originalUrl,
-    method: req.method,
-    ip: req.ip
-  });
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Promise Rejection:');
+  console.error('├─ Reason:', reason);
+  console.error('└─ Promise:', promise);
+});
 
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-    path: req.originalUrl
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:');
+  console.error('├─ Error:', error.message);
+  console.error('└─ Stack:', error.stack);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received. Shutting down gracefully...');
+  mongoose.connection.close(() => {
+    console.log('📊 MongoDB connection closed.');
+    process.exit(0);
   });
 });
 

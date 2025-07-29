@@ -1,32 +1,57 @@
-const Structure = require('../models/Structure');
-const User = require('../models/User');
+const { Structure, User } = require('../models/schemas');
+const { catchAsync } = require('../middlewares/errorHandler');
+const {
+  sendSuccessResponse,
+  sendErrorResponse,
+  sendCreatedResponse,
+  sendUpdatedResponse,
+  sendPaginatedResponse
+} = require('../utils/responseHandler');
+const { MESSAGES, PAGINATION } = require('../utils/constants');
 
 class StructureController {
   async createStructure(req, res) {
     try {
       console.log('📝 Creating new structure...');
-      console.log('👤 User:', req.user._id);
+      console.log('👤 User:', req.user.userId);
       console.log('📋 Data received:', {
-        stateCode: req.body.stateCode,
-        districtCode: req.body.districtCode,
-        cityName: req.body.cityName,
-        typeOfStructure: req.body.typeOfStructure
+        stateCode: req.body.structural_identity?.state_code,
+        districtCode: req.body.structural_identity?.district_code,
+        cityName: req.body.structural_identity?.city_name,
+        typeOfStructure: req.body.structural_identity?.type_of_structure
       });
 
+      // Generate unique UID for the structure
+      const generateUID = () => {
+        const timestamp = Date.now().toString(36);
+        const random = Math.random().toString(36).substr(2, 5);
+        return `STR_${timestamp}_${random}`.toUpperCase();
+      };
+
+      // Ensure structural_identity has UID
+      if (!req.body.structural_identity?.uid) {
+        req.body.structural_identity = {
+          ...req.body.structural_identity,
+          uid: generateUID()
+        };
+      }
+
+      // Set creation info
       const structureData = {
         ...req.body,
-        createdBy: req.user._id
+        creation_info: {
+          created_by: req.user.userId,
+          created_date: new Date()
+        },
+        status: req.body.status || 'draft'
       };
-      
-      // Remove structuralIdentityNumber from request if provided (let it auto-generate)
-      delete structureData.structuralIdentityNumber;
       
       const structure = new Structure(structureData);
       await structure.save();
       
-      await structure.populate('createdBy', 'name email');
+      await structure.populate('creation_info.created_by', 'username email role');
       
-      console.log('✅ Structure created with ID:', structure.structuralIdentityNumber);
+      console.log('✅ Structure created with UID:', structure.structural_identity.uid);
       
       res.status(201).json({
         success: true,
@@ -37,20 +62,23 @@ class StructureController {
       console.error('❌ Structure creation error:', error);
       
       if (error.name === 'ValidationError') {
+        const validationErrors = Object.values(error.errors).map(err => ({
+          field: err.path,
+          message: err.message,
+          value: err.value
+        }));
+        
         return res.status(400).json({
           success: false,
           message: 'Validation failed',
-          errors: Object.values(error.errors).map(err => ({
-            field: err.path,
-            message: err.message
-          }))
+          errors: validationErrors
         });
       }
       
       if (error.code === 11000) {
         return res.status(400).json({
           success: false,
-          message: 'Structure with this identity number already exists',
+          message: 'Structure with this UID already exists',
           error: 'Duplicate structure identity'
         });
       }
@@ -65,58 +93,54 @@ class StructureController {
   
   async getStructures(req, res) {
     try {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 10;
+      const page = parseInt(req.query.page) || PAGINATION.DEFAULT_PAGE;
+      const limit = Math.min(parseInt(req.query.limit) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
       const skip = (page - 1) * limit;
       
-      const filter = { isActive: true };
+      const filter = {};
       
       // Add filters based on query parameters
-      if (req.query.stateCode) filter.stateCode = req.query.stateCode;
-      if (req.query.districtCode) filter.districtCode = req.query.districtCode;
-      if (req.query.cityName) filter.cityName = new RegExp(req.query.cityName, 'i');
-      if (req.query.typeOfStructure) filter.typeOfStructure = req.query.typeOfStructure;
-      if (req.query.inspectionStatus) filter.inspectionStatus = req.query.inspectionStatus;
+      if (req.query.state_code) filter['structural_identity.state_code'] = req.query.state_code;
+      if (req.query.district_code) filter['structural_identity.district_code'] = req.query.district_code;
+      if (req.query.city_name) filter['structural_identity.city_name'] = new RegExp(req.query.city_name, 'i');
+      if (req.query.type_of_structure) filter['structural_identity.type_of_structure'] = req.query.type_of_structure;
+      if (req.query.status) filter.status = req.query.status;
+      
+      // Search functionality
+      if (req.query.search) {
+        filter.$or = [
+          { 'structural_identity.uid': { $regex: req.query.search, $options: 'i' } },
+          { 'administration.client_name': { $regex: req.query.search, $options: 'i' } },
+          { 'location.address': { $regex: req.query.search, $options: 'i' } }
+        ];
+      }
       
       // If user is not admin, only show their structures
       if (req.user.role !== 'admin') {
-        filter.createdBy = req.user._id;
+        filter['creation_info.created_by'] = req.user.userId;
       }
       
       const structures = await Structure.find(filter)
-        .populate('createdBy', 'name email')
-        .populate('inspectorId', 'name email')
+        .populate('creation_info.created_by', 'username email role')
+        .populate('creation_info.last_updated_by', 'username email role')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit);
       
       const total = await Structure.countDocuments(filter);
       
-      res.status(200).json({
-        success: true,
-        data: structures,
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          itemsPerPage: limit
-        }
-      });
+      sendPaginatedResponse(res, structures, page, limit, total, MESSAGES.DATA_RETRIEVED);
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch structures',
-        error: error.message
-      });
+      console.error('❌ Error fetching structures:', error);
+      sendErrorResponse(res, 'Failed to fetch structures', 500, error.message);
     }
   }
 
-  // NEW: Get structures by specific user ID
   async getStructuresByUserId(req, res) {
     try {
       const { userId } = req.params;
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 10;
+      const page = parseInt(req.query.page) || PAGINATION.DEFAULT_PAGE;
+      const limit = Math.min(parseInt(req.query.limit) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
       const skip = (page - 1) * limit;
 
       console.log('🔍 Fetching structures for user:', userId);
@@ -124,67 +148,56 @@ class StructureController {
       // Check if the user exists
       const user = await User.findById(userId);
       if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
+        return sendErrorResponse(res, 'User not found', 404);
       }
 
       // Permission check: Users can only see their own structures unless they're admin
-      if (req.user.role !== 'admin' && req.user._id.toString() !== userId) {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied. You can only view your own structures.'
-        });
+      if (req.user.role !== 'admin' && req.user.userId.toString() !== userId) {
+        return sendErrorResponse(res, 'Access denied. You can only view your own structures.', 403);
       }
 
       const filter = { 
-        createdBy: userId,
-        isActive: true 
+        'creation_info.created_by': userId
       };
 
       // Add additional filters if provided
-      if (req.query.stateCode) filter.stateCode = req.query.stateCode;
-      if (req.query.districtCode) filter.districtCode = req.query.districtCode;
-      if (req.query.cityName) filter.cityName = new RegExp(req.query.cityName, 'i');
-      if (req.query.typeOfStructure) filter.typeOfStructure = req.query.typeOfStructure;
-      if (req.query.inspectionStatus) filter.inspectionStatus = req.query.inspectionStatus;
+      if (req.query.state_code) filter['structural_identity.state_code'] = req.query.state_code;
+      if (req.query.district_code) filter['structural_identity.district_code'] = req.query.district_code;
+      if (req.query.city_name) filter['structural_identity.city_name'] = new RegExp(req.query.city_name, 'i');
+      if (req.query.type_of_structure) filter['structural_identity.type_of_structure'] = req.query.type_of_structure;
+      if (req.query.status) filter.status = req.query.status;
 
       const structures = await Structure.find(filter)
-        .populate('createdBy', 'name email designation')
-        .populate('inspectorId', 'name email designation')
+        .populate('creation_info.created_by', 'username email role')
+        .populate('creation_info.last_updated_by', 'username email role')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit);
 
       const total = await Structure.countDocuments(filter);
 
-      console.log(`✅ Found ${structures.length} structures for user ${user.name}`);
+      console.log(`✅ Found ${structures.length} structures for user ${user.username}`);
 
-      res.status(200).json({
-        success: true,
-        message: `Structures for user: ${user.name}`,
+      const response = {
         user: {
           _id: user._id,
-          name: user.name,
+          username: user.username,
           email: user.email,
           role: user.role
         },
-        data: structures,
+        structures,
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(total / limit),
           totalItems: total,
           itemsPerPage: limit
         }
-      });
+      };
+
+      sendSuccessResponse(res, `Structures for user: ${user.username}`, response);
     } catch (error) {
       console.error('❌ Error fetching structures by user ID:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch structures for user',
-        error: error.message
-      });
+      sendErrorResponse(res, 'Failed to fetch structures for user', 500, error.message);
     }
   }
   
@@ -193,34 +206,22 @@ class StructureController {
       const { id } = req.params;
       
       const structure = await Structure.findById(id)
-        .populate('createdBy', 'name email designation')
-        .populate('inspectorId', 'name email designation');
+        .populate('creation_info.created_by', 'username email role')
+        .populate('creation_info.last_updated_by', 'username email role');
       
       if (!structure) {
-        return res.status(404).json({
-          success: false,
-          message: 'Structure not found'
-        });
+        return sendErrorResponse(res, 'Structure not found', 404);
       }
       
       // Check permissions
-      if (req.user.role !== 'admin' && structure.createdBy._id.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied'
-        });
+      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
       }
       
-      res.status(200).json({
-        success: true,
-        data: structure
-      });
+      sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, structure);
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch structure',
-        error: error.message
-      });
+      console.error('❌ Error fetching structure by ID:', error);
+      sendErrorResponse(res, 'Failed to fetch structure', 500, error.message);
     }
   }
   
@@ -231,53 +232,53 @@ class StructureController {
       const structure = await Structure.findById(id);
       
       if (!structure) {
-        return res.status(404).json({
-          success: false,
-          message: 'Structure not found'
-        });
+        return sendErrorResponse(res, 'Structure not found', 404);
       }
       
       // Check permissions
-      if (req.user.role !== 'admin' && structure.createdBy.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied'
-        });
+      if (req.user.role !== 'admin' && structure.creation_info.created_by.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
       }
 
-      // Prevent updating the auto-generated structuralIdentityNumber
+      // Prevent updating the auto-generated UID
       const updateData = { ...req.body };
-      delete updateData.structuralIdentityNumber;
+      if (updateData.structural_identity?.uid) {
+        delete updateData.structural_identity.uid;
+      }
+      
+      // Update last modified info
+      updateData.creation_info = {
+        ...structure.creation_info,
+        last_updated_by: req.user.userId,
+        last_updated_date: new Date()
+      };
       
       const updatedStructure = await Structure.findByIdAndUpdate(
         id,
         updateData,
         { new: true, runValidators: true }
-      ).populate('createdBy', 'name email')
-       .populate('inspectorId', 'name email');
+      ).populate('creation_info.created_by', 'username email role')
+       .populate('creation_info.last_updated_by', 'username email role');
       
-      res.status(200).json({
-        success: true,
-        message: 'Structure updated successfully',
-        data: updatedStructure
-      });
+      sendUpdatedResponse(res, updatedStructure, 'Structure updated successfully');
     } catch (error) {
+      console.error('❌ Error updating structure:', error);
+      
       if (error.name === 'ValidationError') {
+        const validationErrors = Object.values(error.errors).map(err => ({
+          field: err.path,
+          message: err.message,
+          value: err.value
+        }));
+        
         return res.status(400).json({
           success: false,
           message: 'Validation failed',
-          errors: Object.values(error.errors).map(err => ({
-            field: err.path,
-            message: err.message
-          }))
+          errors: validationErrors
         });
       }
       
-      res.status(500).json({
-        success: false,
-        message: 'Failed to update structure',
-        error: error.message
-      });
+      sendErrorResponse(res, 'Failed to update structure', 500, error.message);
     }
   }
   
@@ -288,44 +289,31 @@ class StructureController {
       const structure = await Structure.findById(id);
       
       if (!structure) {
-        return res.status(404).json({
-          success: false,
-          message: 'Structure not found'
-        });
+        return sendErrorResponse(res, 'Structure not found', 404);
       }
       
       // Check permissions
-      if (req.user.role !== 'admin' && structure.createdBy.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied'
-        });
+      if (req.user.role !== 'admin' && structure.creation_info.created_by.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
       }
       
-      // Soft delete
-      structure.isActive = false;
-      await structure.save();
+      // Hard delete (you could implement soft delete by updating status instead)
+      await Structure.findByIdAndDelete(id);
       
-      res.status(200).json({
-        success: true,
-        message: 'Structure deleted successfully'
-      });
+      sendSuccessResponse(res, 'Structure deleted successfully');
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to delete structure',
-        error: error.message
-      });
+      console.error('❌ Error deleting structure:', error);
+      sendErrorResponse(res, 'Failed to delete structure', 500, error.message);
     }
   }
   
   async getStructureStats(req, res) {
     try {
-      const filter = { isActive: true };
+      const filter = {};
       
       // If user is not admin, only show their structures
       if (req.user.role !== 'admin') {
-        filter.createdBy = req.user._id;
+        filter['creation_info.created_by'] = req.user.userId;
       }
       
       const stats = await Structure.aggregate([
@@ -336,9 +324,12 @@ class StructureController {
             totalStructures: { $sum: 1 },
             byType: {
               $push: {
-                type: '$typeOfStructure',
-                status: '$inspectionStatus'
+                type: '$structural_identity.type_of_structure',
+                status: '$status'
               }
+            },
+            byState: {
+              $push: '$structural_identity.state_code'
             }
           }
         },
@@ -385,63 +376,175 @@ class StructureController {
                 }
               }
             },
-            pendingInspections: {
+            draftStructures: {
               $size: {
                 $filter: {
                   input: '$byType',
-                  cond: { $eq: ['$$this.status', 'pending'] }
+                  cond: { $eq: ['$$this.status', 'draft'] }
                 }
               }
             },
-            completedInspections: {
+            submittedStructures: {
               $size: {
                 $filter: {
                   input: '$byType',
-                  cond: { $eq: ['$$this.status', 'completed'] }
+                  cond: { $eq: ['$$this.status', 'submitted'] }
                 }
               }
             },
-            inProgressInspections: {
+            approvedStructures: {
               $size: {
                 $filter: {
                   input: '$byType',
-                  cond: { $eq: ['$$this.status', 'in_progress'] }
+                  cond: { $eq: ['$$this.status', 'approved'] }
                 }
               }
             },
-            requiresReinspection: {
+            requiresInspection: {
               $size: {
                 $filter: {
                   input: '$byType',
-                  cond: { $eq: ['$$this.status', 'requires_reinspection'] }
+                  cond: { $eq: ['$$this.status', 'requires_inspection'] }
                 }
               }
-            }
+            },
+            maintenanceNeeded: {
+              $size: {
+                $filter: {
+                  input: '$byType',
+                  cond: { $eq: ['$$this.status', 'maintenance_needed'] }
+                }
+              }
+            },
+            stateDistribution: '$byState'
           }
         }
       ]);
-      
-      res.status(200).json({
-        success: true,
-        data: stats[0] || {
-          totalStructures: 0,
-          residential: 0,
-          commercial: 0,
-          educational: 0,
-          hospital: 0,
-          industrial: 0,
-          pendingInspections: 0,
-          completedInspections: 0,
-          inProgressInspections: 0,
-          requiresReinspection: 0
+
+      // Get state-wise distribution
+      const stateStats = await Structure.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: '$structural_identity.state_code',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { count: -1 }
         }
+      ]);
+      
+      const result = stats[0] || {
+        totalStructures: 0,
+        residential: 0,
+        commercial: 0,
+        educational: 0,
+        hospital: 0,
+        industrial: 0,
+        draftStructures: 0,
+        submittedStructures: 0,
+        approvedStructures: 0,
+        requiresInspection: 0,
+        maintenanceNeeded: 0
+      };
+
+      result.stateWiseDistribution = stateStats;
+      
+      sendSuccessResponse(res, 'Structure statistics retrieved successfully', result);
+    } catch (error) {
+      console.error('❌ Error fetching structure statistics:', error);
+      sendErrorResponse(res, 'Failed to fetch structure statistics', 500, error.message);
+    }
+  }
+
+  // New method to get structure by UID
+  async getStructureByUID(req, res) {
+    try {
+      const { uid } = req.params;
+      
+      const structure = await Structure.findOne({ 'structural_identity.uid': uid })
+        .populate('creation_info.created_by', 'username email role')
+        .populate('creation_info.last_updated_by', 'username email role');
+      
+      if (!structure) {
+        return sendErrorResponse(res, 'Structure not found', 404);
+      }
+      
+      // Check permissions
+      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
+      
+      sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, structure);
+    } catch (error) {
+      console.error('❌ Error fetching structure by UID:', error);
+      sendErrorResponse(res, 'Failed to fetch structure', 500, error.message);
+    }
+  }
+
+  // New method to get floors of a structure
+  async getStructureFloors(req, res) {
+    try {
+      const { id } = req.params;
+      
+      const structure = await Structure.findById(id)
+        .select('geometric_details.floors structural_identity.uid administration.client_name')
+        .populate('creation_info.created_by', 'username email role');
+      
+      if (!structure) {
+        return sendErrorResponse(res, 'Structure not found', 404);
+      }
+      
+      // Check permissions
+      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
+      
+      sendSuccessResponse(res, 'Structure floors retrieved successfully', {
+        structure_uid: structure.structural_identity.uid,
+        client_name: structure.administration.client_name,
+        floors: structure.geometric_details.floors
       });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch structure statistics',
-        error: error.message
+      console.error('❌ Error fetching structure floors:', error);
+      sendErrorResponse(res, 'Failed to fetch structure floors', 500, error.message);
+    }
+  }
+
+  // New method to get flats of a specific floor
+  async getFloorFlats(req, res) {
+    try {
+      const { id, floorNumber } = req.params;
+      
+      const structure = await Structure.findById(id)
+        .select('geometric_details.floors structural_identity.uid')
+        .populate('creation_info.created_by', 'username email role');
+      
+      if (!structure) {
+        return sendErrorResponse(res, 'Structure not found', 404);
+      }
+      
+      // Check permissions
+      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
+
+      const floor = structure.geometric_details.floors.find(f => f.floor_number === parseInt(floorNumber));
+      
+      if (!floor) {
+        return sendErrorResponse(res, 'Floor not found', 404);
+      }
+      
+      sendSuccessResponse(res, 'Floor flats retrieved successfully', {
+        structure_uid: structure.structural_identity.uid,
+        floor_number: floor.floor_number,
+        floor_type: floor.floor_type,
+        flats: floor.flats
       });
+    } catch (error) {
+      console.error('❌ Error fetching floor flats:', error);
+      sendErrorResponse(res, 'Failed to fetch floor flats', 500, error.message);
     }
   }
 }

@@ -1,14 +1,5 @@
 const { catchAsync } = require('../middlewares/errorHandler');
-const User = require('../models/User');
-const Structure = require('../models/Structure');
-const {
-  StateCode,
-  DistrictCode,
-  StructureType,
-  StructuralForm,
-  MaterialConstruction,
-  RatingDescription
-} = require('../models/Codes');
+const { User, Structure, Inspection } = require('../models/schemas');
 const {
   sendSuccessResponse,
   sendErrorResponse,
@@ -51,9 +42,8 @@ const getUsers = catchAsync(async (req, res) => {
   // Search functionality
   if (search) {
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-      { designation: { $regex: search, $options: 'i' } }
+      { username: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } }
     ];
   }
 
@@ -88,12 +78,12 @@ const getUser = catchAsync(async (req, res) => {
   }
 
   // Get user's structure count
-  const structureCount = await Structure.countDocuments({ submittedBy: id });
+  const structureCount = await Structure.countDocuments({ 'creation_info.created_by': id });
 
   const userData = {
     ...user.toObject(),
     stats: {
-      structuresSubmitted: structureCount
+      structuresCreated: structureCount
     }
   };
 
@@ -106,12 +96,23 @@ const getUser = catchAsync(async (req, res) => {
  * @access Private (Admin only)
  */
 const createUser = catchAsync(async (req, res) => {
-  const { name, email, role, designation, contactNumber } = req.body;
+  const { username, email, role } = req.body;
 
   // Check if user already exists
-  const existingUser = await User.findOne({ email: email.toLowerCase() });
+  const existingUser = await User.findOne({ 
+    $or: [
+      { email: email.toLowerCase() },
+      { username }
+    ]
+  });
+  
   if (existingUser) {
-    return sendErrorResponse(res, 'User already exists with this email', 400);
+    if (existingUser.email === email.toLowerCase()) {
+      return sendErrorResponse(res, 'User already exists with this email', 400);
+    }
+    if (existingUser.username === username) {
+      return sendErrorResponse(res, 'Username already taken', 400);
+    }
   }
 
   // Generate random password
@@ -119,19 +120,17 @@ const createUser = catchAsync(async (req, res) => {
 
   // Create user
   const user = await User.create({
-    name,
+    username,
     email: email.toLowerCase(),
     password,
-    role,
-    designation,
-    contactNumber,
-    authProvider: 'local',
-    isActive: true
+    role: role || 'engineer',
+    isActive: true,
+    isEmailVerified: false
   });
 
   // Send welcome email with password
   try {
-    await emailService.sendWelcomeEmail(user.email, password);
+    await emailService.sendWelcomeEmail(user.email, username, role);
   } catch (error) {
     console.error('Failed to send welcome email:', error);
   }
@@ -150,7 +149,7 @@ const createUser = catchAsync(async (req, res) => {
  */
 const updateUser = catchAsync(async (req, res) => {
   const { id } = req.params;
-  const { name, role, designation, contactNumber, isActive } = req.body;
+  const { username, role, isActive } = req.body;
 
   const user = await User.findById(id);
   if (!user) {
@@ -159,10 +158,8 @@ const updateUser = catchAsync(async (req, res) => {
 
   // Update allowed fields
   const fieldsToUpdate = {};
-  if (name) fieldsToUpdate.name = name;
+  if (username) fieldsToUpdate.username = username;
   if (role) fieldsToUpdate.role = role;
-  if (designation) fieldsToUpdate.designation = designation;
-  if (contactNumber) fieldsToUpdate.contactNumber = contactNumber;
   if (isActive !== undefined) fieldsToUpdate.isActive = isActive;
 
   const updatedUser = await User.findByIdAndUpdate(
@@ -187,10 +184,10 @@ const deleteUser = catchAsync(async (req, res) => {
     return sendErrorResponse(res, 'User not found', 404);
   }
 
-  // Check if user has submitted structures
-  const structureCount = await Structure.countDocuments({ submittedBy: id });
+  // Check if user has created structures
+  const structureCount = await Structure.countDocuments({ 'creation_info.created_by': id });
   if (structureCount > 0) {
-    return sendErrorResponse(res, 'Cannot delete user who has submitted structures', 400);
+    return sendErrorResponse(res, 'Cannot delete user who has created structures', 400);
   }
 
   // Soft delete by deactivating
@@ -223,7 +220,7 @@ const resetUserPassword = catchAsync(async (req, res) => {
 
   // Send email with new password
   try {
-    await emailService.sendPasswordReset(user.email, newPassword);
+    await emailService.sendPasswordResetOTP(user.email, newPassword);
   } catch (error) {
     console.error('Failed to send password reset email:', error);
   }
@@ -232,174 +229,115 @@ const resetUserPassword = catchAsync(async (req, res) => {
 });
 
 /**
- * Get all state codes
- * @route GET /api/admin/codes/states
- * @access Private
- */
-const getStateCodes = catchAsync(async (req, res) => {
-  const stateCodes = await StateCode.find({ isActive: true }).sort({ name: 1 });
-  sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, stateCodes);
-});
-
-/**
- * Get district codes by state
- * @route GET /api/admin/codes/districts/:stateCode
- * @access Private
- */
-const getDistrictCodes = catchAsync(async (req, res) => {
-  const { stateCode } = req.params;
-  
-  const districtCodes = await DistrictCode.find({ 
-    stateCode: stateCode.toUpperCase(), 
-    isActive: true 
-  }).sort({ name: 1 });
-  
-  sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, districtCodes);
-});
-
-/**
- * Create district code
- * @route POST /api/admin/codes/districts
+ * Get all structures with admin privileges
+ * @route GET /api/admin/structures
  * @access Private (Admin only)
  */
-const createDistrictCode = catchAsync(async (req, res) => {
-  const { stateCode, code, name } = req.body;
+const getAllStructures = catchAsync(async (req, res) => {
+  const {
+    page = PAGINATION.DEFAULT_PAGE,
+    limit = PAGINATION.DEFAULT_LIMIT,
+    state_code,
+    district_code,
+    type_of_structure,
+    status,
+    search,
+    sortBy = 'createdAt',
+    sortOrder = 'desc'
+  } = req.query;
 
-  // Check if district code already exists
-  const existingDistrict = await DistrictCode.findOne({ 
-    stateCode: stateCode.toUpperCase(), 
-    code 
-  });
+  const pageNum = Math.max(1, parseInt(page));
+  const limitNum = Math.min(parseInt(limit), PAGINATION.MAX_LIMIT);
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build filter
+  const filter = {};
   
-  if (existingDistrict) {
-    return sendErrorResponse(res, 'District code already exists for this state', 400);
+  if (state_code) filter['structural_identity.state_code'] = state_code;
+  if (district_code) filter['structural_identity.district_code'] = district_code;
+  if (type_of_structure) filter['structural_identity.type_of_structure'] = type_of_structure;
+  if (status) filter.status = status;
+
+  // Search functionality
+  if (search) {
+    filter.$or = [
+      { 'structural_identity.uid': { $regex: search, $options: 'i' } },
+      { 'administration.client_name': { $regex: search, $options: 'i' } },
+      { 'location.address': { $regex: search, $options: 'i' } }
+    ];
   }
 
-  const districtCode = await DistrictCode.create({
-    stateCode: stateCode.toUpperCase(),
-    code,
-    name
-  });
+  // Build sort
+  const sort = {};
+  sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
-  sendCreatedResponse(res, districtCode, 'District code created successfully');
+  const [structures, total] = await Promise.all([
+    Structure.find(filter)
+      .populate('creation_info.created_by', 'username email role')
+      .populate('creation_info.last_updated_by', 'username email role')
+      .sort(sort)
+      .skip(skip)
+      .limit(limitNum),
+    Structure.countDocuments(filter)
+  ]);
+
+  sendPaginatedResponse(res, structures, pageNum, limitNum, total, 'Structures retrieved successfully');
 });
 
 /**
- * Get all structure types
- * @route GET /api/admin/codes/structure-types
- * @access Private
- */
-const getStructureTypes = catchAsync(async (req, res) => {
-  const structureTypes = await StructureType.find({ isActive: true }).sort({ name: 1 });
-  sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, structureTypes);
-});
-
-/**
- * Create structure type
- * @route POST /api/admin/codes/structure-types
+ * Get structure details by ID (admin)
+ * @route GET /api/admin/structures/:id
  * @access Private (Admin only)
  */
-const createStructureType = catchAsync(async (req, res) => {
-  const { code, name, description, category } = req.body;
-
-  const existingType = await StructureType.findOne({ code });
-  if (existingType) {
-    return sendErrorResponse(res, 'Structure type code already exists', 400);
-  }
-
-  const structureType = await StructureType.create({
-    code,
-    name,
-    description,
-    category
-  });
-
-  sendCreatedResponse(res, structureType, 'Structure type created successfully');
-});
-
-/**
- * Get all structural forms
- * @route GET /api/admin/codes/structural-forms
- * @access Private
- */
-const getStructuralForms = catchAsync(async (req, res) => {
-  const structuralForms = await StructuralForm.find({ isActive: true }).sort({ code: 1 });
-  sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, structuralForms);
-});
-
-/**
- * Get all construction materials
- * @route GET /api/admin/codes/materials
- * @access Private
- */
-const getConstructionMaterials = catchAsync(async (req, res) => {
-  const materials = await MaterialConstruction.find({ isActive: true }).sort({ code: 1 });
-  sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, materials);
-});
-
-/**
- * Get rating descriptions
- * @route GET /api/admin/codes/rating-descriptions
- * @access Private
- */
-const getRatingDescriptions = catchAsync(async (req, res) => {
-  const { elementType } = req.query;
-  
-  const filter = { isActive: true };
-  if (elementType) {
-    filter.elementType = elementType;
-  }
-
-  const ratingDescriptions = await RatingDescription.find(filter)
-    .sort({ elementType: 1, rating: 1 });
-  
-  sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, ratingDescriptions);
-});
-
-/**
- * Create rating description
- * @route POST /api/admin/codes/rating-descriptions
- * @access Private (Admin only)
- */
-const createRatingDescription = catchAsync(async (req, res) => {
-  const { elementType, rating, condition, description, recommendedAction } = req.body;
-
-  const existingRating = await RatingDescription.findOne({ elementType, rating });
-  if (existingRating) {
-    return sendErrorResponse(res, 'Rating description already exists for this element and rating', 400);
-  }
-
-  const ratingDescription = await RatingDescription.create({
-    elementType,
-    rating,
-    condition,
-    description,
-    recommendedAction
-  });
-
-  sendCreatedResponse(res, ratingDescription, 'Rating description created successfully');
-});
-
-/**
- * Update rating description
- * @route PUT /api/admin/codes/rating-descriptions/:id
- * @access Private (Admin only)
- */
-const updateRatingDescription = catchAsync(async (req, res) => {
+const getStructureById = catchAsync(async (req, res) => {
   const { id } = req.params;
-  const { condition, description, recommendedAction } = req.body;
 
-  const ratingDescription = await RatingDescription.findByIdAndUpdate(
-    id,
-    { condition, description, recommendedAction },
-    { new: true, runValidators: true }
-  );
+  const structure = await Structure.findById(id)
+    .populate('creation_info.created_by', 'username email role')
+    .populate('creation_info.last_updated_by', 'username email role');
 
-  if (!ratingDescription) {
-    return sendErrorResponse(res, 'Rating description not found', 404);
+  if (!structure) {
+    return sendErrorResponse(res, 'Structure not found', 404);
   }
 
-  sendUpdatedResponse(res, ratingDescription, 'Rating description updated successfully');
+  sendSuccessResponse(res, 'Structure retrieved successfully', structure);
+});
+
+/**
+ * Update structure status (admin)
+ * @route PUT /api/admin/structures/:id/status
+ * @access Private (Admin only)
+ */
+const updateStructureStatus = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { status, notes } = req.body;
+
+  const validStatuses = ['draft', 'submitted', 'approved', 'requires_inspection', 'maintenance_needed'];
+  
+  if (!validStatuses.includes(status)) {
+    return sendErrorResponse(res, `Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
+  }
+
+  const structure = await Structure.findById(id);
+  if (!structure) {
+    return sendErrorResponse(res, 'Structure not found', 404);
+  }
+
+  // Update structure status
+  structure.status = status;
+  structure.creation_info.last_updated_by = req.user.userId;
+  structure.creation_info.last_updated_date = new Date();
+  
+  if (notes) {
+    structure.overall_condition_summary = notes;
+  }
+
+  await structure.save();
+
+  await structure.populate('creation_info.created_by', 'username email role');
+  await structure.populate('creation_info.last_updated_by', 'username email role');
+
+  sendUpdatedResponse(res, structure, 'Structure status updated successfully');
 });
 
 /**
@@ -411,6 +349,7 @@ const getSystemStats = catchAsync(async (req, res) => {
   const [
     userStats,
     structureStats,
+    inspectionStats,
     recentActivity
   ] = await Promise.all([
     // User statistics
@@ -424,7 +363,7 @@ const getSystemStats = catchAsync(async (req, res) => {
           adminUsers: { $sum: { $cond: [{ $eq: ['$role', 'admin'] }, 1, 0] } },
           inspectorUsers: { $sum: { $cond: [{ $eq: ['$role', 'inspector'] }, 1, 0] } },
           engineerUsers: { $sum: { $cond: [{ $eq: ['$role', 'engineer'] }, 1, 0] } },
-          regularUsers: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } }
+          viewerUsers: { $sum: { $cond: [{ $eq: ['$role', 'viewer'] }, 1, 0] } }
         }
       }
     ]),
@@ -437,10 +376,50 @@ const getSystemStats = catchAsync(async (req, res) => {
           totalStructures: { $sum: 1 },
           draftStructures: { $sum: { $cond: [{ $eq: ['$status', 'draft'] }, 1, 0] } },
           submittedStructures: { $sum: { $cond: [{ $eq: ['$status', 'submitted'] }, 1, 0] } },
-          underInspectionStructures: { $sum: { $cond: [{ $eq: ['$status', 'under_inspection'] }, 1, 0] } },
-          completedStructures: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
-          criticalStructures: { $sum: { $cond: [{ $eq: ['$priorityLevel', 'critical'] }, 1, 0] } },
-          avgTotalScore: { $avg: '$totalScore' }
+          approvedStructures: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+          requiresInspection: { $sum: { $cond: [{ $eq: ['$status', 'requires_inspection'] }, 1, 0] } },
+          maintenanceNeeded: { $sum: { $cond: [{ $eq: ['$status', 'maintenance_needed'] }, 1, 0] } },
+          residentialCount: { 
+            $sum: { 
+              $cond: [{ $eq: ['$structural_identity.type_of_structure', 'residential'] }, 1, 0] 
+            } 
+          },
+          commercialCount: { 
+            $sum: { 
+              $cond: [{ $eq: ['$structural_identity.type_of_structure', 'commercial'] }, 1, 0] 
+            } 
+          },
+          educationalCount: { 
+            $sum: { 
+              $cond: [{ $eq: ['$structural_identity.type_of_structure', 'educational'] }, 1, 0] 
+            } 
+          },
+          hospitalCount: { 
+            $sum: { 
+              $cond: [{ $eq: ['$structural_identity.type_of_structure', 'hospital'] }, 1, 0] 
+            } 
+          },
+          industrialCount: { 
+            $sum: { 
+              $cond: [{ $eq: ['$structural_identity.type_of_structure', 'industrial'] }, 1, 0] 
+            } 
+          }
+        }
+      }
+    ]),
+
+    // Inspection statistics
+    Inspection.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalInspections: { $sum: 1 },
+          pendingInspections: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+          completedInspections: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+          followupRequired: { $sum: { $cond: [{ $eq: ['$status', 'requires_followup'] }, 1, 0] } },
+          routineInspections: { $sum: { $cond: [{ $eq: ['$inspection_type', 'routine'] }, 1, 0] } },
+          detailedInspections: { $sum: { $cond: [{ $eq: ['$inspection_type', 'detailed'] }, 1, 0] } },
+          emergencyInspections: { $sum: { $cond: [{ $eq: ['$inspection_type', 'emergency'] }, 1, 0] } }
         }
       }
     ]),
@@ -450,21 +429,57 @@ const getSystemStats = catchAsync(async (req, res) => {
       User.find({ isActive: true })
         .sort({ createdAt: -1 })
         .limit(5)
-        .select('name email role createdAt'),
+        .select('username email role createdAt'),
       Structure.find()
-        .populate('submittedBy', 'name email')
+        .populate('creation_info.created_by', 'username email')
         .sort({ createdAt: -1 })
         .limit(5)
-        .select('structureIdentityNumber structureType status createdAt submittedBy')
+        .select('structural_identity status createdAt creation_info'),
+      Inspection.find()
+        .populate('inspector_id', 'username email')
+        .populate('structure_id', 'structural_identity.uid')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('inspection_type status createdAt inspector_id structure_id')
     ])
   ]);
 
   const systemStats = {
-    users: userStats[0] || {},
-    structures: structureStats[0] || {},
+    users: userStats[0] || {
+      totalUsers: 0,
+      activeUsers: 0,
+      verifiedUsers: 0,
+      adminUsers: 0,
+      inspectorUsers: 0,
+      engineerUsers: 0,
+      viewerUsers: 0
+    },
+    structures: structureStats[0] || {
+      totalStructures: 0,
+      draftStructures: 0,
+      submittedStructures: 0,
+      approvedStructures: 0,
+      requiresInspection: 0,
+      maintenanceNeeded: 0,
+      residentialCount: 0,
+      commercialCount: 0,
+      educationalCount: 0,
+      hospitalCount: 0,
+      industrialCount: 0
+    },
+    inspections: inspectionStats[0] || {
+      totalInspections: 0,
+      pendingInspections: 0,
+      completedInspections: 0,
+      followupRequired: 0,
+      routineInspections: 0,
+      detailedInspections: 0,
+      emergencyInspections: 0
+    },
     recentActivity: {
       newUsers: recentActivity[0],
-      newStructures: recentActivity[1]
+      newStructures: recentActivity[1],
+      recentInspections: recentActivity[2]
     }
   };
 
@@ -483,7 +498,7 @@ const bulkUpdateStructures = catchAsync(async (req, res) => {
     return sendErrorResponse(res, 'Structure IDs are required', 400);
   }
 
-  const allowedFields = ['status', 'priorityLevel', 'inspectorId', 'inspectionNotes'];
+  const allowedFields = ['status', 'overall_condition_summary'];
   const filteredUpdateData = {};
   
   for (const field of allowedFields) {
@@ -492,7 +507,9 @@ const bulkUpdateStructures = catchAsync(async (req, res) => {
     }
   }
 
-  filteredUpdateData.lastUpdatedBy = req.user.id;
+  // Add update tracking
+  filteredUpdateData['creation_info.last_updated_by'] = req.user.userId;
+  filteredUpdateData['creation_info.last_updated_date'] = new Date();
 
   const result = await Structure.updateMany(
     { _id: { $in: structureIds } },
@@ -503,6 +520,98 @@ const bulkUpdateStructures = catchAsync(async (req, res) => {
     matchedCount: result.matchedCount,
     modifiedCount: result.modifiedCount
   });
+});
+
+/**
+ * Get structure ratings summary
+ * @route GET /api/admin/structures/ratings-summary
+ * @access Private (Admin only)
+ */
+const getStructureRatingsSummary = catchAsync(async (req, res) => {
+  const ratingsSummary = await Structure.aggregate([
+    {
+      $unwind: '$geometric_details.floors'
+    },
+    {
+      $unwind: '$geometric_details.floors.flats'
+    },
+    {
+      $project: {
+        uid: '$structural_identity.uid',
+        client_name: '$administration.client_name',
+        floor_number: '$geometric_details.floors.floor_number',
+        flat_number: '$geometric_details.floors.flats.flat_number',
+        structural_ratings: '$geometric_details.floors.flats.structural_rating',
+        non_structural_ratings: '$geometric_details.floors.flats.non_structural_rating'
+      }
+    },
+    {
+      $group: {
+        _id: '$uid',
+        client_name: { $first: '$client_name' },
+        total_flats: { $sum: 1 },
+        avg_beam_rating: { $avg: '$structural_ratings.beams.rating' },
+        avg_column_rating: { $avg: '$structural_ratings.columns.rating' },
+        avg_slab_rating: { $avg: '$structural_ratings.slab.rating' },
+        avg_foundation_rating: { $avg: '$structural_ratings.foundation.rating' },
+        critical_flats: {
+          $sum: {
+            $cond: [
+              {
+                $or: [
+                  { $lte: ['$structural_ratings.beams.rating', 2] },
+                  { $lte: ['$structural_ratings.columns.rating', 2] },
+                  { $lte: ['$structural_ratings.slab.rating', 2] },
+                  { $lte: ['$structural_ratings.foundation.rating', 2] }
+                ]
+              },
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      $project: {
+        _id: 1,
+        client_name: 1,
+        total_flats: 1,
+        avg_structural_rating: {
+          $round: [
+            {
+              $avg: [
+                '$avg_beam_rating',
+                '$avg_column_rating', 
+                '$avg_slab_rating',
+                '$avg_foundation_rating'
+              ]
+            },
+            2
+          ]
+        },
+        critical_flats: 1,
+        health_status: {
+          $cond: {
+            if: { $gte: [{ $avg: ['$avg_beam_rating', '$avg_column_rating', '$avg_slab_rating', '$avg_foundation_rating'] }, 4] },
+            then: 'Good',
+            else: {
+              $cond: {
+                if: { $gte: [{ $avg: ['$avg_beam_rating', '$avg_column_rating', '$avg_slab_rating', '$avg_foundation_rating'] }, 3] },
+                then: 'Fair',
+                else: 'Poor'
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      $sort: { avg_structural_rating: 1 }
+    }
+  ]);
+
+  sendSuccessResponse(res, 'Structure ratings summary retrieved successfully', ratingsSummary);
 });
 
 /**
@@ -517,7 +626,7 @@ const getAuditLogs = catchAsync(async (req, res) => {
   const auditLogs = [
     {
       timestamp: new Date(),
-      userId: req.user.id,
+      userId: req.user.userId,
       action: 'LOGIN',
       resource: 'auth',
       details: 'User logged in successfully'
@@ -534,17 +643,11 @@ module.exports = {
   updateUser,
   deleteUser,
   resetUserPassword,
-  getStateCodes,
-  getDistrictCodes,
-  createDistrictCode,
-  getStructureTypes,
-  createStructureType,
-  getStructuralForms,
-  getConstructionMaterials,
-  getRatingDescriptions,
-  createRatingDescription,
-  updateRatingDescription,
+  getAllStructures,
+  getStructureById,
+  updateStructureStatus,
   getSystemStats,
   bulkUpdateStructures,
+  getStructureRatingsSummary,
   getAuditLogs
 };
