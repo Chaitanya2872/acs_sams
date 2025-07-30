@@ -6,7 +6,7 @@ const { authenticateToken } = require('../middlewares/auth');
 const rateLimit = require('express-rate-limit');
 
 // Rate limiting for auth endpoints
-const authLimiter = rateLimit({
+/*const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // limit each IP to 5 requests per windowMs for auth operations
   message: {
@@ -26,7 +26,7 @@ const otpLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-});
+});*/
 
 // Input validation middleware with better error handling
 const validateRegistration = (req, res, next) => {
@@ -170,7 +170,7 @@ const debugMiddleware = (req, res, next) => {
  * @desc    Register a new user
  * @access  Public
  */
-router.post('/register', debugMiddleware, authLimiter, validateRegistration, async (req, res) => {
+router.post('/register', debugMiddleware, validateRegistration, async (req, res) => {
   try {
     console.log('📝 Processing registration for:', req.body.email);
     const result = await authService.register(req.body);
@@ -189,7 +189,7 @@ router.post('/register', debugMiddleware, authLimiter, validateRegistration, asy
  * @desc    Verify email with OTP
  * @access  Public
  */
-router.post('/verify-email', debugMiddleware, authLimiter, validateOTP, async (req, res) => {
+router.post('/verify-email', debugMiddleware,  validateOTP, async (req, res) => {
   try {
     console.log('📧 Processing email verification for:', req.body.email);
     const result = await authService.verifyEmailOTP(req.body.email, req.body.otp);
@@ -223,7 +223,7 @@ router.post('/verify-email', debugMiddleware, authLimiter, validateOTP, async (r
  * @desc    Login user
  * @access  Public
  */
-router.post('/login', debugMiddleware, authLimiter, async (req, res) => {
+router.post('/login', debugMiddleware,  async (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({
@@ -265,7 +265,7 @@ router.post('/login', debugMiddleware, authLimiter, async (req, res) => {
  * @desc    Resend OTP for email verification or password reset
  * @access  Public
  */
-router.post('/resend-otp', debugMiddleware, otpLimiter, validateEmail, async (req, res) => {
+router.post('/resend-otp', debugMiddleware,  validateEmail, async (req, res) => {
   try {
     const { email, type } = req.body;
     
@@ -293,7 +293,7 @@ router.post('/resend-otp', debugMiddleware, otpLimiter, validateEmail, async (re
  * @desc    Send password reset OTP
  * @access  Public
  */
-router.post('/forgot-password', debugMiddleware, otpLimiter, validateEmail, async (req, res) => {
+router.post('/forgot-password', debugMiddleware, validateEmail, async (req, res) => {
   try {
     console.log('🔑 Processing forgot password for:', req.body.email);
     const result = await authService.sendPasswordResetOTP(req.body.email);
@@ -312,7 +312,7 @@ router.post('/forgot-password', debugMiddleware, otpLimiter, validateEmail, asyn
  * @desc    Reset password with OTP
  * @access  Public
  */
-router.post('/reset-password', debugMiddleware, authLimiter, async (req, res) => {
+router.post('/reset-password', debugMiddleware, async (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({

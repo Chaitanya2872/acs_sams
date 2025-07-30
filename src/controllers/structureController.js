@@ -792,6 +792,11 @@ class StructureController {
         industrialStructures: 0
       };
 
+
+
+
+
+      
       sendSuccessResponse(res, 'Structure statistics retrieved successfully', {
         overview: {
           total: result.totalStructures,

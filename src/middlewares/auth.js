@@ -291,53 +291,9 @@ const auditLog = (action) => {
  * Middleware to check API rate limits per user
  */
 const userRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
-  const userRequests = new Map();
-
   return (req, res, next) => {
-    try {
-      if (!req.user) {
-        return next(); // Skip rate limiting for unauthenticated requests
-      }
-
-      const userId = req.user.userId.toString();
-      const now = Date.now();
-      const windowStart = now - windowMs;
-
-      // Get user's request history
-      let requests = userRequests.get(userId) || [];
-      
-      // Remove old requests outside the window
-      requests = requests.filter(timestamp => timestamp > windowStart);
-      
-      // Check if user has exceeded the limit
-      if (requests.length >= maxRequests) {
-        return res.status(429).json({
-          success: false,
-          error: `Rate limit exceeded. Maximum ${maxRequests} requests per ${Math.floor(windowMs / 60000)} minutes.`
-        });
-      }
-
-      // Add current request timestamp
-      requests.push(now);
-      userRequests.set(userId, requests);
-
-      // Clean up old entries periodically
-      if (Math.random() < 0.01) { // 1% chance
-        for (const [key, timestamps] of userRequests.entries()) {
-          const validTimestamps = timestamps.filter(t => t > windowStart);
-          if (validTimestamps.length === 0) {
-            userRequests.delete(key);
-          } else {
-            userRequests.set(key, validTimestamps);
-          }
-        }
-      }
-
-      next();
-    } catch (error) {
-      console.error('User rate limiting error:', error);
-      next(); // Don't fail the request if rate limiting fails
-    }
+    console.log('⚠️ Rate limiting disabled for development');
+    next(); // Always allow requests
   };
 };
 
