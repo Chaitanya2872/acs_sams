@@ -6,37 +6,47 @@ const structureSubSchema = new mongoose.Schema({
   structural_identity: {
     uid: {
       type: String,
-      required: true
+      required: true // Always required - generated during initialization
+    },
+    structural_identity_number: {
+      type: String,
+      required: false // Generated during location screen
     },
     state_code: {
       type: String,
-      required: true,
+      required: false, // Will be required during location screen validation
       length: 2
     },
     district_code: {
       type: String,
-      required: true,
+      required: false, // Will be required during location screen validation
       length: 2
     },
     city_name: {
       type: String,
-      required: true,
+      required: false, // Will be required during location screen validation
       maxlength: 4
     },
     location_code: {
       type: String,
-      required: true,
+      required: false, // Will be required during location screen validation
       maxlength: 2
     },
     structure_number: {
       type: String,
-      required: true,
+      required: false, // Auto-generated during location screen
       maxlength: 5
     },
     type_of_structure: {
       type: String,
-      required: true,
-      enum: ['residential', 'commercial', 'educational', 'hospital', 'industrial']
+      required: false, // Will be required during location screen validation
+      enum: ['residential', 'commercial', 'educational', 'hospital', 'industrial'],
+      default: 'residential'
+    },
+    type_code: {
+      type: String,
+      required: false, // Auto-generated during location screen
+      maxlength: 2
     }
   },
 
@@ -45,46 +55,52 @@ const structureSubSchema = new mongoose.Schema({
     coordinates: {
       latitude: {
         type: Number,
-        required: true,
+        required: false, // Will be required during location screen validation
         min: -90,
         max: 90
       },
       longitude: {
         type: Number,
-        required: true,
+        required: false, // Will be required during location screen validation
         min: -180,
         max: 180
       }
     },
-    address: String,
-    area_of_structure: Number
+    address: {
+      type: String,
+      required: false
+    },
+    area_of_structure: {
+      type: Number,
+      required: false
+    }
   },
 
   // Administration Details
   administration: {
     client_name: {
       type: String,
-      required: true,
+      required: false, // Will be required during administrative screen validation
       maxlength: 50
     },
     custodian: {
       type: String,
-      required: true,
+      required: false, // Will be required during administrative screen validation
       maxlength: 20
     },
     engineer_designation: {
       type: String,
-      required: true,
+      required: false, // Will be required during administrative screen validation
       maxlength: 30
     },
     contact_details: {
       type: String,
-      required: true,
+      required: false, // Will be required during administrative screen validation
       match: /^[0-9]{10}$/
     },
     email_id: {
       type: String,
-      required: true,
+      required: false, // Will be required during administrative screen validation
       lowercase: true,
       maxlength: 30
     }
@@ -94,32 +110,34 @@ const structureSubSchema = new mongoose.Schema({
   geometric_details: {
     number_of_floors: {
       type: Number,
-      required: true,
-      min: 1
+      required: false, // Will be required during geometric screen validation
+      min: 1,
+      default: 1
     },
     structure_height: {
       type: Number,
-      required: true
+      required: false // Will be required during geometric screen validation
     },
     structure_width: {
       type: Number,
-      required: true
+      required: false // Will be required during geometric screen validation
     },
     structure_length: {
       type: Number,
-      required: true
+      required: false // Will be required during geometric screen validation
     },
     
     // Enhanced Floor Details - Multiple floors support
     floors: [{
       floor_number: {
         type: Number,
-        required: true
+        required: false
       },
       floor_type: {
         type: String,
         enum: ['parking', 'residential', 'commercial', 'common_area', 'mixed_use', 'other'],
-        required: true
+        required: false,
+        default: 'residential'
       },
       floor_height: Number,
       total_area_sq_mts: Number,
@@ -156,22 +174,13 @@ const structureSubSchema = new mongoose.Schema({
               type: Number,
               min: 1,
               max: 5,
-              required: true
+              required: false // Will be validated in ratings screen
             },
             condition_comment: String,
             inspection_date: Date,
             photos: {
               type: [String],
-              validate: {
-                validator: function(photos) {
-                  // If rating < 3, photos are required
-                  if (this.rating && this.rating < 3) {
-                    return photos && photos.length > 0;
-                  }
-                  return true; // Photos optional for rating >= 3
-                },
-                message: 'Photos are required when structural rating is below 3'
-              }
+              default: []
             }
           },
           columns: {
@@ -179,21 +188,13 @@ const structureSubSchema = new mongoose.Schema({
               type: Number,
               min: 1,
               max: 5,
-              required: true
+              required: false // Will be validated in ratings screen
             },
             condition_comment: String,
             inspection_date: Date,
             photos: {
               type: [String],
-              validate: {
-                validator: function(photos) {
-                  if (this.rating && this.rating < 3) {
-                    return photos && photos.length > 0;
-                  }
-                  return true;
-                },
-                message: 'Photos are required when structural rating is below 3'
-              }
+              default: []
             }
           },
           slab: {
@@ -201,21 +202,13 @@ const structureSubSchema = new mongoose.Schema({
               type: Number,
               min: 1,
               max: 5,
-              required: true
+              required: false // Will be validated in ratings screen
             },
             condition_comment: String,
             inspection_date: Date,
             photos: {
               type: [String],
-              validate: {
-                validator: function(photos) {
-                  if (this.rating && this.rating < 3) {
-                    return photos && photos.length > 0;
-                  }
-                  return true;
-                },
-                message: 'Photos are required when structural rating is below 3'
-              }
+              default: []
             }
           },
           foundation: {
@@ -223,21 +216,13 @@ const structureSubSchema = new mongoose.Schema({
               type: Number,
               min: 1,
               max: 5,
-              required: true
+              required: false // Will be validated in ratings screen
             },
             condition_comment: String,
             inspection_date: Date,
             photos: {
               type: [String],
-              validate: {
-                validator: function(photos) {
-                  if (this.rating && this.rating < 3) {
-                    return photos && photos.length > 0;
-                  }
-                  return true;
-                },
-                message: 'Photos are required when structural rating is below 3'
-              }
+              default: []
             }
           }
         },
@@ -245,81 +230,59 @@ const structureSubSchema = new mongoose.Schema({
         // Non-Structural Rating with Image Requirements
         non_structural_rating: {
           brick_plaster: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: {
-              type: [String],
-              validate: {
-                validator: function(photos) {
-                  if (this.rating && this.rating < 3) {
-                    return photos && photos.length > 0;
-                  }
-                  return true;
-                },
-                message: 'Photos are required when rating is below 3'
-              }
-            }
+            photos: { type: [String], default: [] }
           },
           doors_windows: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: {
-              type: [String],
-              validate: {
-                validator: function(photos) {
-                  if (this.rating && this.rating < 3) {
-                    return photos && photos.length > 0;
-                  }
-                  return true;
-                },
-                message: 'Photos are required when rating is below 3'
-              }
-            }
+            photos: { type: [String], default: [] }
           },
           flooring_tiles: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           electrical_wiring: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           sanitary_fittings: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           railings: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           water_tanks: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           plumbing: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           sewage_system: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           panel_board: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           },
           lifts: {
-            rating: { type: Number, min: 1, max: 5, required: true },
+            rating: { type: Number, min: 1, max: 5, required: false },
             condition_comment: String,
-            photos: [String]
+            photos: { type: [String], default: [] }
           }
         },
         
@@ -453,6 +416,7 @@ const otpSchema = new mongoose.Schema({
 userSchema.index({ email: 1 });
 userSchema.index({ username: 1 });
 userSchema.index({ 'structures.structural_identity.uid': 1 });
+userSchema.index({ 'structures.structural_identity.structural_identity_number': 1 });
 userSchema.index({ 'structures.structural_identity.state_code': 1, 'structures.structural_identity.district_code': 1 });
 otpSchema.index({ email: 1, type: 1 });
 otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

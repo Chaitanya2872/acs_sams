@@ -13,7 +13,7 @@ const authenticateToken = async (req, res, next) => {
     if (!token) {
       return res.status(401).json({
         success: false,
-        error: 'Access token required',
+        error: 'Access token required',    
         code : 'NO_TOKEN'
       });
     }
@@ -68,6 +68,8 @@ if (error.name === 'TokenExpiredError') {
     code: 'TOKEN_EXPIRED'
   });
 }
+
+
 
     return res.status(500).json({
       success: false,
