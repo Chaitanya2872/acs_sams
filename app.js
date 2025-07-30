@@ -79,6 +79,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 // ===== ROUTES =====
 // Import your routes
 const authRoutes = require('./src/routes/authRoutes');
+const structuresRoutes = require('./src/routes/structures');
 const userRoutes = require('./src/routes/users');
 // Add other routes as needed
 // const structureRoutes = require('./src/routes/structures');
@@ -98,6 +99,7 @@ app.get('/', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/structures', structuresRoutes);
 // app.use('/api/structures', structureRoutes);
 // app.use('/api/admin', adminRoutes);
 

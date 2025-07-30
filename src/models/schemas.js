@@ -1,83 +1,11 @@
 const mongoose = require('mongoose');
 
-// User Schema
-const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6
-  },
-  role: {
-    type: String,
-    enum: ['admin', 'engineer', 'inspector', 'viewer'],
-    default: 'engineer'
-  },
-  isEmailVerified: {
-    type: Boolean,
-    default: false
-  },
-  emailVerificationToken: String,
-  emailVerificationExpires: Date,
-  passwordResetToken: String,
-  passwordResetExpires: Date,
-  lastLogin: Date,
-  isActive: {
-    type: Boolean,
-    default: true
-  }
-}, {
-  timestamps: true
-});
-
-// OTP Schema for email verification
-const otpSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: true,
-    lowercase: true
-  },
-  otp: {
-    type: String,
-    required: true
-  },
-  type: {
-    type: String,
-    enum: ['email_verification', 'password_reset', 'login'],
-    required: true
-  },
-  expiresAt: {
-    type: Date,
-    required: true,
-    default: () => new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
-  },
-  isUsed: {
-    type: Boolean,
-    default: false
-  }
-}, {
-  timestamps: true
-});
-
-// Structure Schema - Enhanced with floor/flat hierarchy
-const structureSchema = new mongoose.Schema({
+// Structure Schema - Will be embedded in User
+const structureSubSchema = new mongoose.Schema({
   // Structural Identity Number
   structural_identity: {
     uid: {
       type: String,
-      unique: true,
       required: true
     },
     state_code: {
@@ -162,7 +90,7 @@ const structureSchema = new mongoose.Schema({
     }
   },
 
-  // Geometric Details
+  // Geometric Details with Enhanced Multiple Floors Support
   geometric_details: {
     number_of_floors: {
       type: Number,
@@ -182,7 +110,7 @@ const structureSchema = new mongoose.Schema({
       required: true
     },
     
-    // Enhanced Floor Details
+    // Enhanced Floor Details - Multiple floors support
     floors: [{
       floor_number: {
         type: Number,
@@ -190,7 +118,7 @@ const structureSchema = new mongoose.Schema({
       },
       floor_type: {
         type: String,
-        enum: ['parking', 'parking_with_flats', 'flats_only', 'open_area', 'commercial', 'mixed_use'],
+        enum: ['parking', 'residential', 'commercial', 'common_area', 'mixed_use', 'other'],
         required: true
       },
       floor_height: Number,
@@ -221,7 +149,7 @@ const structureSchema = new mongoose.Schema({
           default: 'occupied'
         },
         
-        // Structured Data - Ratings
+        // Structural Rating with Image Requirements
         structural_rating: {
           beams: {
             rating: {
@@ -232,7 +160,19 @@ const structureSchema = new mongoose.Schema({
             },
             condition_comment: String,
             inspection_date: Date,
-            photos: [String]
+            photos: {
+              type: [String],
+              validate: {
+                validator: function(photos) {
+                  // If rating < 3, photos are required
+                  if (this.rating && this.rating < 3) {
+                    return photos && photos.length > 0;
+                  }
+                  return true; // Photos optional for rating >= 3
+                },
+                message: 'Photos are required when structural rating is below 3'
+              }
+            }
           },
           columns: {
             rating: {
@@ -243,7 +183,18 @@ const structureSchema = new mongoose.Schema({
             },
             condition_comment: String,
             inspection_date: Date,
-            photos: [String]
+            photos: {
+              type: [String],
+              validate: {
+                validator: function(photos) {
+                  if (this.rating && this.rating < 3) {
+                    return photos && photos.length > 0;
+                  }
+                  return true;
+                },
+                message: 'Photos are required when structural rating is below 3'
+              }
+            }
           },
           slab: {
             rating: {
@@ -254,7 +205,18 @@ const structureSchema = new mongoose.Schema({
             },
             condition_comment: String,
             inspection_date: Date,
-            photos: [String]
+            photos: {
+              type: [String],
+              validate: {
+                validator: function(photos) {
+                  if (this.rating && this.rating < 3) {
+                    return photos && photos.length > 0;
+                  }
+                  return true;
+                },
+                message: 'Photos are required when structural rating is below 3'
+              }
+            }
           },
           foundation: {
             rating: {
@@ -265,21 +227,54 @@ const structureSchema = new mongoose.Schema({
             },
             condition_comment: String,
             inspection_date: Date,
-            photos: [String]
+            photos: {
+              type: [String],
+              validate: {
+                validator: function(photos) {
+                  if (this.rating && this.rating < 3) {
+                    return photos && photos.length > 0;
+                  }
+                  return true;
+                },
+                message: 'Photos are required when structural rating is below 3'
+              }
+            }
           }
         },
         
-        // Non-Structural Rating
+        // Non-Structural Rating with Image Requirements
         non_structural_rating: {
           brick_plaster: {
             rating: { type: Number, min: 1, max: 5, required: true },
             condition_comment: String,
-            photos: [String]
+            photos: {
+              type: [String],
+              validate: {
+                validator: function(photos) {
+                  if (this.rating && this.rating < 3) {
+                    return photos && photos.length > 0;
+                  }
+                  return true;
+                },
+                message: 'Photos are required when rating is below 3'
+              }
+            }
           },
           doors_windows: {
             rating: { type: Number, min: 1, max: 5, required: true },
             condition_comment: String,
-            photos: [String]
+            photos: {
+              type: [String],
+              validate: {
+                validator: function(photos) {
+                  if (this.rating && this.rating < 3) {
+                    return photos && photos.length > 0;
+                  }
+                  return true;
+                },
+                message: 'Photos are required when rating is below 3'
+              }
+            }
           },
           flooring_tiles: {
             rating: { type: Number, min: 1, max: 5, required: true },
@@ -328,7 +323,7 @@ const structureSchema = new mongoose.Schema({
           }
         },
         
-        // Unstructured Data
+        // Additional flat data
         additional_notes: String,
         maintenance_history: [{
           date: Date,
@@ -346,7 +341,7 @@ const structureSchema = new mongoose.Schema({
         }
       }],
       
-      // Floor-level unstructured data
+      // Floor-level data
       floor_notes: String,
       common_amenities: [{
         amenity_type: String,
@@ -356,20 +351,11 @@ const structureSchema = new mongoose.Schema({
     }]
   },
 
-  // Overall Structure Metadata
+  // Creation info
   creation_info: {
-    created_by: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
     created_date: {
       type: Date,
       default: Date.now
-    },
-    last_updated_by: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
     },
     last_updated_date: Date
   },
@@ -389,71 +375,96 @@ const structureSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Inspection Schema
-const inspectionSchema = new mongoose.Schema({
-  structure_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Structure',
-    required: true
-  },
-  inspector_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  inspection_type: {
+// Enhanced User Schema with Embedded Structures
+const userSchema = new mongoose.Schema({
+  username: {
     type: String,
-    enum: ['routine', 'detailed', 'emergency'],
+    required: true,
+    unique: true,
+    trim: true
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  password: {
+    type: String,
+    required: true,
+    minlength: 6
+  },
+  role: {
+    type: String,
+    enum: ['admin', 'engineer', 'inspector', 'viewer'],
+    default: 'engineer'
+  },
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
+  emailVerificationToken: String,
+  emailVerificationExpires: Date,
+  passwordResetToken: String,
+  passwordResetExpires: Date,
+  lastLogin: Date,
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  
+  // EMBEDDED STRUCTURES ARRAY
+  structures: [structureSubSchema]
+}, {
+  timestamps: true
+});
+
+// OTP Schema (unchanged)
+const otpSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    lowercase: true
+  },
+  otp: {
+    type: String,
     required: true
   },
-  inspection_date: {
+  type: {
+    type: String,
+    enum: ['email_verification', 'password_reset', 'login'],
+    required: true
+  },
+  expiresAt: {
     type: Date,
-    required: true
+    required: true,
+    default: () => new Date(Date.now() + 10 * 60 * 1000)
   },
-  findings: [{
-    component: String,
-    issue_description: String,
-    severity: {
-      type: String,
-      enum: ['low', 'medium', 'high', 'critical']
-    },
-    recommended_action: String,
-    photos: [String]
-  }],
-  overall_recommendation: String,
-  next_inspection_date: Date,
-  status: {
-    type: String,
-    enum: ['pending', 'completed', 'requires_followup'],
-    default: 'pending'
+  isUsed: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true
 });
 
-// Create indexes for better performance
+// Create indexes
 userSchema.index({ email: 1 });
 userSchema.index({ username: 1 });
+userSchema.index({ 'structures.structural_identity.uid': 1 });
+userSchema.index({ 'structures.structural_identity.state_code': 1, 'structures.structural_identity.district_code': 1 });
 otpSchema.index({ email: 1, type: 1 });
 otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-structureSchema.index({ 'structural_identity.uid': 1 });
-structureSchema.index({ 'structural_identity.state_code': 1, 'structural_identity.district_code': 1 });
-structureSchema.index({ 'location.coordinates.latitude': 1, 'location.coordinates.longitude': 1 });
-inspectionSchema.index({ structure_id: 1, inspection_date: -1 });
 
 // Export models
 const User = mongoose.model('User', userSchema);
 const OTP = mongoose.model('OTP', otpSchema);
-const Structure = mongoose.model('Structure', structureSchema);
-const Inspection = mongoose.model('Inspection', inspectionSchema);
 
 module.exports = {
   User,
   OTP,
-  Structure,
-  Inspection,
   userSchema,
   otpSchema,
-  structureSchema,
-  inspectionSchema
+  structureSubSchema
 };

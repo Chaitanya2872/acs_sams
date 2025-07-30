@@ -1,5 +1,4 @@
-const { Structure, User } = require('../models/schemas');
-const { catchAsync } = require('../middlewares/errorHandler');
+const { User } = require('../models/schemas');
 const {
   sendSuccessResponse,
   sendErrorResponse,
@@ -10,16 +9,178 @@ const {
 const { MESSAGES, PAGINATION } = require('../utils/constants');
 
 class StructureController {
+  constructor() {
+    // Bind all methods to maintain 'this' context
+    this.validateRatingImages = this.validateRatingImages.bind(this);
+    this.calculateOverallRatings = this.calculateOverallRatings.bind(this);
+    this.createStructure = this.createStructure.bind(this);
+    this.getStructures = this.getStructures.bind(this);
+    this.getStructuresByUserId = this.getStructuresByUserId.bind(this);
+    this.getStructureById = this.getStructureById.bind(this);
+    this.getStructureByUID = this.getStructureByUID.bind(this);
+    this.getStructureFloors = this.getStructureFloors.bind(this);
+    this.getFloorFlats = this.getFloorFlats.bind(this);
+    this.updateStructure = this.updateStructure.bind(this);
+    this.deleteStructure = this.deleteStructure.bind(this);
+    this.getStructureStats = this.getStructureStats.bind(this);
+    this.getStructuresRequiringInspection = this.getStructuresRequiringInspection.bind(this);
+    this.getMaintenanceRecommendations = this.getMaintenanceRecommendations.bind(this);
+  }
+  
+  // Helper function to validate images based on ratings
+  validateRatingImages(structureData) {
+    const errors = [];
+    
+    if (structureData.geometric_details?.floors) {
+      structureData.geometric_details.floors.forEach((floor, floorIndex) => {
+        if (floor.flats) {
+          floor.flats.forEach((flat, flatIndex) => {
+            // Check structural ratings
+            if (flat.structural_rating) {
+              ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
+                const rating = flat.structural_rating[component];
+                if (rating && rating.rating < 3) {
+                  if (!rating.photos || rating.photos.length === 0) {
+                    errors.push({
+                      field: `geometric_details.floors[${floorIndex}].flats[${flatIndex}].structural_rating.${component}.photos`,
+                      message: `Photos are required for ${component} rating below 3 (Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1})`,
+                      rating: rating.rating
+                    });
+                  }
+                }
+              });
+            }
+            
+            // Check non-structural ratings
+            if (flat.non_structural_rating) {
+              ['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring', 
+               'sanitary_fittings', 'railings', 'water_tanks', 'plumbing', 
+               'sewage_system', 'panel_board', 'lifts'].forEach(component => {
+                const rating = flat.non_structural_rating[component];
+                if (rating && rating.rating < 3) {
+                  if (!rating.photos || rating.photos.length === 0) {
+                    errors.push({
+                      field: `geometric_details.floors[${floorIndex}].flats[${flatIndex}].non_structural_rating.${component}.photos`,
+                      message: `Photos are required for ${component.replace('_', ' ')} rating below 3 (Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1})`,
+                      rating: rating.rating
+                    });
+                  }
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    return errors;
+  }
+
+  // Helper function to calculate overall ratings
+  calculateOverallRatings(structure) {
+    if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) {
+      return null;
+    }
+
+    const allRatings = {
+      structural: { beams: [], columns: [], slab: [], foundation: [] },
+      nonStructural: {
+        brick_plaster: [], doors_windows: [], flooring_tiles: [], electrical_wiring: [],
+        sanitary_fittings: [], railings: [], water_tanks: [], plumbing: [],
+        sewage_system: [], panel_board: [], lifts: []
+      }
+    };
+
+    // Collect all ratings
+    structure.geometric_details.floors.forEach(floor => {
+      if (floor.flats && floor.flats.length > 0) {
+        floor.flats.forEach(flat => {
+          // Structural ratings
+          if (flat.structural_rating) {
+            Object.keys(allRatings.structural).forEach(component => {
+              if (flat.structural_rating[component]?.rating) {
+                allRatings.structural[component].push(flat.structural_rating[component].rating);
+              }
+            });
+          }
+
+          // Non-structural ratings
+          if (flat.non_structural_rating) {
+            Object.keys(allRatings.nonStructural).forEach(component => {
+              if (flat.non_structural_rating[component]?.rating) {
+                allRatings.nonStructural[component].push(flat.non_structural_rating[component].rating);
+              }
+            });
+          }
+        });
+      }
+    });
+
+    // Calculate averages
+    const overallRating = { structural: {}, nonStructural: {} };
+    let structuralTotal = 0, structuralCount = 0;
+    let nonStructuralTotal = 0, nonStructuralCount = 0;
+
+    // Structural averages
+    Object.entries(allRatings.structural).forEach(([component, ratings]) => {
+      if (ratings.length > 0) {
+        const average = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+        overallRating.structural[component] = Math.round(average * 10) / 10;
+        structuralTotal += average;
+        structuralCount++;
+      }
+    });
+
+    // Non-structural averages
+    Object.entries(allRatings.nonStructural).forEach(([component, ratings]) => {
+      if (ratings.length > 0) {
+        const average = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+        overallRating.nonStructural[component] = Math.round(average * 10) / 10;
+        nonStructuralTotal += average;
+        nonStructuralCount++;
+      }
+    });
+
+    // Overall averages
+    overallRating.structural.overall = structuralCount > 0 ? 
+      Math.round((structuralTotal / structuralCount) * 10) / 10 : 0;
+    overallRating.nonStructural.overall = nonStructuralCount > 0 ? 
+      Math.round((nonStructuralTotal / nonStructuralCount) * 10) / 10 : 0;
+
+    // Health status based on structural rating
+    const structuralAvg = overallRating.structural.overall;
+    if (structuralAvg >= 4) {
+      overallRating.healthStatus = 'Good';
+      overallRating.priority = 'Low';
+    } else if (structuralAvg >= 3) {
+      overallRating.healthStatus = 'Fair';
+      overallRating.priority = 'Medium';
+    } else if (structuralAvg >= 2) {
+      overallRating.healthStatus = 'Poor';
+      overallRating.priority = 'High';
+    } else {
+      overallRating.healthStatus = 'Critical';
+      overallRating.priority = 'Critical';
+    }
+
+    return overallRating;
+  }
+
   async createStructure(req, res) {
     try {
       console.log('📝 Creating new structure...');
       console.log('👤 User:', req.user.userId);
-      console.log('📋 Data received:', {
-        stateCode: req.body.structural_identity?.state_code,
-        districtCode: req.body.structural_identity?.district_code,
-        cityName: req.body.structural_identity?.city_name,
-        typeOfStructure: req.body.structural_identity?.type_of_structure
-      });
+      console.log('📋 Data received - Floors:', req.body.geometric_details?.floors?.length || 0);
+
+      // Validate rating-based image requirements
+      const imageValidationErrors = this.validateRatingImages(req.body);
+      if (imageValidationErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Image validation failed for low ratings',
+          errors: imageValidationErrors
+        });
+      }
 
       // Generate unique UID for the structure
       const generateUID = () => {
@@ -36,27 +197,94 @@ class StructureController {
         };
       }
 
+      // Validate and process multiple floors data
+      if (req.body.geometric_details?.floors) {
+        console.log('📊 Processing multiple floors:');
+        req.body.geometric_details.floors.forEach((floor, index) => {
+          console.log(`├─ Floor ${floor.floor_number}: ${floor.flats?.length || 0} flats`);
+          
+          // Ensure each flat has proper structure
+          if (floor.flats) {
+            floor.flats.forEach((flat, flatIndex) => {
+              // Add inspection date if missing for structural ratings
+              if (flat.structural_rating) {
+                ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
+                  if (flat.structural_rating[component] && !flat.structural_rating[component].inspection_date) {
+                    flat.structural_rating[component].inspection_date = new Date();
+                  }
+                });
+              }
+
+              // Ensure flat has a number if not provided
+              if (!flat.flat_number) {
+                flat.flat_number = `${floor.floor_number}-${String(flatIndex + 1).padStart(2, '0')}`;
+              }
+            });
+          }
+        });
+      }
+
       // Set creation info
       const structureData = {
         ...req.body,
         creation_info: {
-          created_by: req.user.userId,
           created_date: new Date()
         },
         status: req.body.status || 'draft'
       };
+
+      // Find user and add structure to their structures array
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Check for duplicate UIDs within user's structures
+      const existingStructure = user.structures.find(
+        s => s.structural_identity.uid === structureData.structural_identity.uid
+      );
+
+      if (existingStructure) {
+        return res.status(400).json({
+          success: false,
+          message: 'Structure with this UID already exists for this user'
+        });
+      }
+
+      // Add structure to user's structures array
+      user.structures.push(structureData);
+      await user.save();
+
+      // Get the newly created structure
+      const newStructure = user.structures[user.structures.length - 1];
       
-      const structure = new Structure(structureData);
-      await structure.save();
+      // Calculate overall ratings
+      const overallRatings = this.calculateOverallRatings(newStructure);
       
-      await structure.populate('creation_info.created_by', 'username email role');
-      
-      console.log('✅ Structure created with UID:', structure.structural_identity.uid);
+      console.log('✅ Structure created with UID:', newStructure.structural_identity.uid);
+      console.log('📊 Total floors processed:', newStructure.geometric_details.floors.length);
+      console.log('🏥 Health status:', overallRatings?.healthStatus || 'Unknown');
       
       res.status(201).json({
         success: true,
         message: 'Structure created successfully',
-        data: structure
+        data: {
+          _id: newStructure._id,
+          ...newStructure.toObject(),
+          creation_info: {
+            ...newStructure.creation_info,
+            created_by: {
+              _id: user._id,
+              username: user.username,
+              email: user.email,
+              role: user.role
+            }
+          },
+          overall_ratings: overallRatings
+        }
       });
     } catch (error) {
       console.error('❌ Structure creation error:', error);
@@ -75,14 +303,6 @@ class StructureController {
         });
       }
       
-      if (error.code === 11000) {
-        return res.status(400).json({
-          success: false,
-          message: 'Structure with this UID already exists',
-          error: 'Duplicate structure identity'
-        });
-      }
-      
       res.status(500).json({
         success: false,
         message: 'Failed to create structure',
@@ -90,46 +310,117 @@ class StructureController {
       });
     }
   }
-  
+
   async getStructures(req, res) {
     try {
       const page = parseInt(req.query.page) || PAGINATION.DEFAULT_PAGE;
       const limit = Math.min(parseInt(req.query.limit) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
       const skip = (page - 1) * limit;
       
-      const filter = {};
-      
-      // Add filters based on query parameters
-      if (req.query.state_code) filter['structural_identity.state_code'] = req.query.state_code;
-      if (req.query.district_code) filter['structural_identity.district_code'] = req.query.district_code;
-      if (req.query.city_name) filter['structural_identity.city_name'] = new RegExp(req.query.city_name, 'i');
-      if (req.query.type_of_structure) filter['structural_identity.type_of_structure'] = req.query.type_of_structure;
-      if (req.query.status) filter.status = req.query.status;
-      
-      // Search functionality
-      if (req.query.search) {
-        filter.$or = [
-          { 'structural_identity.uid': { $regex: req.query.search, $options: 'i' } },
-          { 'administration.client_name': { $regex: req.query.search, $options: 'i' } },
-          { 'location.address': { $regex: req.query.search, $options: 'i' } }
-        ];
-      }
+      // Build aggregation pipeline
+      const matchStage = {};
       
       // If user is not admin, only show their structures
       if (req.user.role !== 'admin') {
-        filter['creation_info.created_by'] = req.user.userId;
+        matchStage._id = req.user.userId;
       }
       
-      const structures = await Structure.find(filter)
-        .populate('creation_info.created_by', 'username email role')
-        .populate('creation_info.last_updated_by', 'username email role')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit);
+      // Build structure filters
+      const structureMatch = {};
+      if (req.query.state_code) structureMatch['structures.structural_identity.state_code'] = req.query.state_code;
+      if (req.query.district_code) structureMatch['structures.structural_identity.district_code'] = req.query.district_code;
+      if (req.query.city_name) structureMatch['structures.structural_identity.city_name'] = new RegExp(req.query.city_name, 'i');
+      if (req.query.type_of_structure) structureMatch['structures.structural_identity.type_of_structure'] = req.query.type_of_structure;
+      if (req.query.status) structureMatch['structures.status'] = req.query.status;
+
+      const pipeline = [
+        { $match: matchStage },
+        { $unwind: '$structures' }
+      ];
+
+      if (Object.keys(structureMatch).length > 0) {
+        pipeline.push({ $match: structureMatch });
+      }
+
+      // Search functionality
+      if (req.query.search) {
+        pipeline.push({
+          $match: {
+            $or: [
+              { 'structures.structural_identity.uid': { $regex: req.query.search, $options: 'i' } },
+              { 'structures.administration.client_name': { $regex: req.query.search, $options: 'i' } },
+              { 'structures.location.address': { $regex: req.query.search, $options: 'i' } }
+            ]
+          }
+        });
+      }
+
+      pipeline.push(
+        { $sort: { 'structures.createdAt': -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $project: {
+            _id: '$structures._id',
+            structural_identity: '$structures.structural_identity',
+            location: '$structures.location',
+            administration: '$structures.administration',
+            geometric_details: '$structures.geometric_details',
+            status: '$structures.status',
+            creation_info: {
+              created_date: '$structures.creation_info.created_date',
+              last_updated_date: '$structures.creation_info.last_updated_date',
+              created_by: {
+                _id: '$_id',
+                username: '$username',
+                email: '$email',
+                role: '$role'
+              }
+            },
+            additional_photos: '$structures.additional_photos',
+            documents: '$structures.documents',
+            overall_condition_summary: '$structures.overall_condition_summary',
+            createdAt: '$structures.createdAt',
+            updatedAt: '$structures.updatedAt'
+          }
+        }
+      );
+
+      const structures = await User.aggregate(pipeline);
       
-      const total = await Structure.countDocuments(filter);
+      // Add overall ratings to each structure
+      const structuresWithRatings = structures.map(structure => ({
+        ...structure,
+        overall_ratings: this.calculateOverallRatings(structure)
+      }));
       
-      sendPaginatedResponse(res, structures, page, limit, total, MESSAGES.DATA_RETRIEVED);
+      // Get total count
+      const countPipeline = [
+        { $match: matchStage },
+        { $unwind: '$structures' }
+      ];
+      
+      if (Object.keys(structureMatch).length > 0) {
+        countPipeline.push({ $match: structureMatch });
+      }
+      
+      if (req.query.search) {
+        countPipeline.push({
+          $match: {
+            $or: [
+              { 'structures.structural_identity.uid': { $regex: req.query.search, $options: 'i' } },
+              { 'structures.administration.client_name': { $regex: req.query.search, $options: 'i' } },
+              { 'structures.location.address': { $regex: req.query.search, $options: 'i' } }
+            ]
+          }
+        });
+      }
+      
+      countPipeline.push({ $count: 'total' });
+      const totalResult = await User.aggregate(countPipeline);
+      const total = totalResult[0]?.total || 0;
+      
+      sendPaginatedResponse(res, structuresWithRatings, page, limit, total, MESSAGES.DATA_RETRIEVED);
     } catch (error) {
       console.error('❌ Error fetching structures:', error);
       sendErrorResponse(res, 'Failed to fetch structures', 500, error.message);
@@ -143,103 +434,241 @@ class StructureController {
       const limit = Math.min(parseInt(req.query.limit) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
       const skip = (page - 1) * limit;
 
-      console.log('🔍 Fetching structures for user:', userId);
+      // Check permissions
+      if (req.user.role !== 'admin' && req.user.userId.toString() !== userId) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
 
-      // Check if the user exists
       const user = await User.findById(userId);
       if (!user) {
         return sendErrorResponse(res, 'User not found', 404);
       }
 
-      // Permission check: Users can only see their own structures unless they're admin
-      if (req.user.role !== 'admin' && req.user.userId.toString() !== userId) {
-        return sendErrorResponse(res, 'Access denied. You can only view your own structures.', 403);
+      // Apply filters if provided
+      let filteredStructures = user.structures;
+      
+      if (req.query.status) {
+        filteredStructures = filteredStructures.filter(s => s.status === req.query.status);
+      }
+      
+      if (req.query.type_of_structure) {
+        filteredStructures = filteredStructures.filter(s => s.structural_identity.type_of_structure === req.query.type_of_structure);
       }
 
-      const filter = { 
-        'creation_info.created_by': userId
-      };
+      // Apply search
+      if (req.query.search) {
+        const searchRegex = new RegExp(req.query.search, 'i');
+        filteredStructures = filteredStructures.filter(s => 
+          searchRegex.test(s.structural_identity.uid) ||
+          searchRegex.test(s.administration.client_name) ||
+          searchRegex.test(s.location.address)
+        );
+      }
 
-      // Add additional filters if provided
-      if (req.query.state_code) filter['structural_identity.state_code'] = req.query.state_code;
-      if (req.query.district_code) filter['structural_identity.district_code'] = req.query.district_code;
-      if (req.query.city_name) filter['structural_identity.city_name'] = new RegExp(req.query.city_name, 'i');
-      if (req.query.type_of_structure) filter['structural_identity.type_of_structure'] = req.query.type_of_structure;
-      if (req.query.status) filter.status = req.query.status;
+      const total = filteredStructures.length;
+      const paginatedStructures = filteredStructures.slice(skip, skip + limit);
 
-      const structures = await Structure.find(filter)
-        .populate('creation_info.created_by', 'username email role')
-        .populate('creation_info.last_updated_by', 'username email role')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit);
-
-      const total = await Structure.countDocuments(filter);
-
-      console.log(`✅ Found ${structures.length} structures for user ${user.username}`);
-
-      const response = {
-        user: {
-          _id: user._id,
-          username: user.username,
-          email: user.email,
-          role: user.role
+      // Add overall ratings and user info
+      const structuresWithRatings = paginatedStructures.map(structure => ({
+        ...structure.toObject(),
+        creation_info: {
+          ...structure.creation_info,
+          created_by: {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+          }
         },
-        structures,
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          itemsPerPage: limit
-        }
-      };
+        overall_ratings: this.calculateOverallRatings(structure)
+      }));
 
-      sendSuccessResponse(res, `Structures for user: ${user.username}`, response);
+      sendPaginatedResponse(res, structuresWithRatings, page, limit, total, MESSAGES.DATA_RETRIEVED);
     } catch (error) {
       console.error('❌ Error fetching structures by user ID:', error);
-      sendErrorResponse(res, 'Failed to fetch structures for user', 500, error.message);
+      sendErrorResponse(res, 'Failed to fetch structures', 500, error.message);
     }
   }
-  
+
   async getStructureById(req, res) {
     try {
       const { id } = req.params;
       
-      const structure = await Structure.findById(id)
-        .populate('creation_info.created_by', 'username email role')
-        .populate('creation_info.last_updated_by', 'username email role');
+      // Find user with the structure
+      const user = await User.findOne({ 'structures._id': id });
       
-      if (!structure) {
+      if (!user) {
         return sendErrorResponse(res, 'Structure not found', 404);
       }
       
+      const structure = user.structures.id(id);
+      
       // Check permissions
-      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
         return sendErrorResponse(res, 'Access denied', 403);
       }
       
-      sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, structure);
+      // Calculate overall ratings
+      const overallRatings = this.calculateOverallRatings(structure);
+      
+      const responseData = {
+        ...structure.toObject(),
+        creation_info: {
+          ...structure.creation_info,
+          created_by: {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+          }
+        },
+        overall_ratings: overallRatings
+      };
+      
+      sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, responseData);
     } catch (error) {
       console.error('❌ Error fetching structure by ID:', error);
       sendErrorResponse(res, 'Failed to fetch structure', 500, error.message);
     }
   }
-  
+
+  async getStructureByUID(req, res) {
+    try {
+      const { uid } = req.params;
+      
+      // Find user with the structure by UID
+      const user = await User.findOne({ 'structures.structural_identity.uid': uid });
+      
+      if (!user) {
+        return sendErrorResponse(res, 'Structure not found', 404);
+      }
+      
+      const structure = user.structures.find(s => s.structural_identity.uid === uid);
+      
+      // Check permissions
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
+      
+      // Calculate overall ratings
+      const overallRatings = this.calculateOverallRatings(structure);
+      
+      const responseData = {
+        ...structure.toObject(),
+        creation_info: {
+          ...structure.creation_info,
+          created_by: {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+          }
+        },
+        overall_ratings: overallRatings
+      };
+      
+      sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, responseData);
+    } catch (error) {
+      console.error('❌ Error fetching structure by UID:', error);
+      sendErrorResponse(res, 'Failed to fetch structure', 500, error.message);
+    }
+  }
+
+  async getStructureFloors(req, res) {
+    try {
+      const { id } = req.params;
+      
+      const user = await User.findOne({ 'structures._id': id });
+      
+      if (!user) {
+        return sendErrorResponse(res, 'Structure not found', 404);
+      }
+      
+      const structure = user.structures.id(id);
+      
+      // Check permissions
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
+      
+      const floors = structure.geometric_details?.floors || [];
+      
+      sendSuccessResponse(res, 'Floors retrieved successfully', {
+        structure_id: id,
+        total_floors: floors.length,
+        floors: floors
+      });
+    } catch (error) {
+      console.error('❌ Error fetching structure floors:', error);
+      sendErrorResponse(res, 'Failed to fetch floors', 500, error.message);
+    }
+  }
+
+  async getFloorFlats(req, res) {
+    try {
+      const { id, floorNumber } = req.params;
+      
+      const user = await User.findOne({ 'structures._id': id });
+      
+      if (!user) {
+        return sendErrorResponse(res, 'Structure not found', 404);
+      }
+      
+      const structure = user.structures.id(id);
+      
+      // Check permissions
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
+        return sendErrorResponse(res, 'Access denied', 403);
+      }
+      
+      const floor = structure.geometric_details?.floors?.find(f => f.floor_number == floorNumber);
+      
+      if (!floor) {
+        return sendErrorResponse(res, 'Floor not found', 404);
+      }
+      
+      const flats = floor.flats || [];
+      
+      sendSuccessResponse(res, 'Floor flats retrieved successfully', {
+        structure_id: id,
+        floor_number: floorNumber,
+        total_flats: flats.length,
+        flats: flats
+      });
+    } catch (error) {
+      console.error('❌ Error fetching floor flats:', error);
+      sendErrorResponse(res, 'Failed to fetch flats', 500, error.message);
+    }
+  }
+
   async updateStructure(req, res) {
     try {
       const { id } = req.params;
       
-      const structure = await Structure.findById(id);
+      // Validate rating-based image requirements
+      const imageValidationErrors = this.validateRatingImages(req.body);
+      if (imageValidationErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Image validation failed for low ratings',
+          errors: imageValidationErrors
+        });
+      }
+
+      // Find user with the structure
+      const user = await User.findOne({ 'structures._id': id });
       
-      if (!structure) {
+      if (!user) {
         return sendErrorResponse(res, 'Structure not found', 404);
       }
       
       // Check permissions
-      if (req.user.role !== 'admin' && structure.creation_info.created_by.toString() !== req.user.userId.toString()) {
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
         return sendErrorResponse(res, 'Access denied', 403);
       }
 
+      const structure = user.structures.id(id);
+      
       // Prevent updating the auto-generated UID
       const updateData = { ...req.body };
       if (updateData.structural_identity?.uid) {
@@ -249,18 +678,34 @@ class StructureController {
       // Update last modified info
       updateData.creation_info = {
         ...structure.creation_info,
-        last_updated_by: req.user.userId,
         last_updated_date: new Date()
       };
       
-      const updatedStructure = await Structure.findByIdAndUpdate(
-        id,
-        updateData,
-        { new: true, runValidators: true }
-      ).populate('creation_info.created_by', 'username email role')
-       .populate('creation_info.last_updated_by', 'username email role');
+      // Update structure fields
+      Object.keys(updateData).forEach(key => {
+        structure[key] = updateData[key];
+      });
       
-      sendUpdatedResponse(res, updatedStructure, 'Structure updated successfully');
+      await user.save();
+      
+      // Calculate overall ratings for updated structure
+      const overallRatings = this.calculateOverallRatings(structure);
+      
+      const responseData = {
+        ...structure.toObject(),
+        creation_info: {
+          ...structure.creation_info,
+          created_by: {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+          }
+        },
+        overall_ratings: overallRatings
+      };
+      
+      sendUpdatedResponse(res, responseData, 'Structure updated successfully');
     } catch (error) {
       console.error('❌ Error updating structure:', error);
       
@@ -281,271 +726,344 @@ class StructureController {
       sendErrorResponse(res, 'Failed to update structure', 500, error.message);
     }
   }
-  
+
   async deleteStructure(req, res) {
     try {
       const { id } = req.params;
       
-      const structure = await Structure.findById(id);
+      const user = await User.findOne({ 'structures._id': id });
       
-      if (!structure) {
+      if (!user) {
         return sendErrorResponse(res, 'Structure not found', 404);
       }
       
       // Check permissions
-      if (req.user.role !== 'admin' && structure.creation_info.created_by.toString() !== req.user.userId.toString()) {
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
         return sendErrorResponse(res, 'Access denied', 403);
       }
       
-      // Hard delete (you could implement soft delete by updating status instead)
-      await Structure.findByIdAndDelete(id);
+      // Remove structure from user's structures array
+      user.structures.id(id).remove();
+      await user.save();
       
-      sendSuccessResponse(res, 'Structure deleted successfully');
+      sendSuccessResponse(res, 'Structure deleted successfully', { deleted_id: id });
     } catch (error) {
       console.error('❌ Error deleting structure:', error);
       sendErrorResponse(res, 'Failed to delete structure', 500, error.message);
     }
   }
-  
+
   async getStructureStats(req, res) {
     try {
-      const filter = {};
+      const matchCondition = req.user.role === 'admin' ? {} : { _id: req.user.userId };
       
-      // If user is not admin, only show their structures
-      if (req.user.role !== 'admin') {
-        filter['creation_info.created_by'] = req.user.userId;
-      }
-      
-      const stats = await Structure.aggregate([
-        { $match: filter },
+      const stats = await User.aggregate([
+        { $match: matchCondition },
+        { $unwind: '$structures' },
         {
           $group: {
             _id: null,
             totalStructures: { $sum: 1 },
-            byType: {
-              $push: {
-                type: '$structural_identity.type_of_structure',
-                status: '$status'
-              }
-            },
-            byState: {
-              $push: '$structural_identity.state_code'
-            }
-          }
-        },
-        {
-          $project: {
-            totalStructures: 1,
-            residential: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.type', 'residential'] }
-                }
-              }
-            },
-            commercial: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.type', 'commercial'] }
-                }
-              }
-            },
-            educational: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.type', 'educational'] }
-                }
-              }
-            },
-            hospital: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.type', 'hospital'] }
-                }
-              }
-            },
-            industrial: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.type', 'industrial'] }
-                }
-              }
-            },
-            draftStructures: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.status', 'draft'] }
-                }
-              }
-            },
-            submittedStructures: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.status', 'submitted'] }
-                }
-              }
-            },
-            approvedStructures: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.status', 'approved'] }
-                }
-              }
-            },
-            requiresInspection: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.status', 'requires_inspection'] }
-                }
-              }
-            },
-            maintenanceNeeded: {
-              $size: {
-                $filter: {
-                  input: '$byType',
-                  cond: { $eq: ['$$this.status', 'maintenance_needed'] }
-                }
-              }
-            },
-            stateDistribution: '$byState'
+            draftStructures: { $sum: { $cond: [{ $eq: ['$structures.status', 'draft'] }, 1, 0] } },
+            submittedStructures: { $sum: { $cond: [{ $eq: ['$structures.status', 'submitted'] }, 1, 0] } },
+            approvedStructures: { $sum: { $cond: [{ $eq: ['$structures.status', 'approved'] }, 1, 0] } },
+            inspectionRequiredStructures: { $sum: { $cond: [{ $eq: ['$structures.status', 'requires_inspection'] }, 1, 0] } },
+            maintenanceNeededStructures: { $sum: { $cond: [{ $eq: ['$structures.status', 'maintenance_needed'] }, 1, 0] } },
+            residentialStructures: { $sum: { $cond: [{ $eq: ['$structures.structural_identity.type_of_structure', 'residential'] }, 1, 0] } },
+            commercialStructures: { $sum: { $cond: [{ $eq: ['$structures.structural_identity.type_of_structure', 'commercial'] }, 1, 0] } },
+            educationalStructures: { $sum: { $cond: [{ $eq: ['$structures.structural_identity.type_of_structure', 'educational'] }, 1, 0] } },
+            hospitalStructures: { $sum: { $cond: [{ $eq: ['$structures.structural_identity.type_of_structure', 'hospital'] }, 1, 0] } },
+            industrialStructures: { $sum: { $cond: [{ $eq: ['$structures.structural_identity.type_of_structure', 'industrial'] }, 1, 0] } }
           }
         }
       ]);
 
-      // Get state-wise distribution
-      const stateStats = await Structure.aggregate([
-        { $match: filter },
-        {
-          $group: {
-            _id: '$structural_identity.state_code',
-            count: { $sum: 1 }
-          }
-        },
-        {
-          $sort: { count: -1 }
-        }
-      ]);
-      
       const result = stats[0] || {
         totalStructures: 0,
-        residential: 0,
-        commercial: 0,
-        educational: 0,
-        hospital: 0,
-        industrial: 0,
         draftStructures: 0,
         submittedStructures: 0,
         approvedStructures: 0,
-        requiresInspection: 0,
-        maintenanceNeeded: 0
+        inspectionRequiredStructures: 0,
+        maintenanceNeededStructures: 0,
+        residentialStructures: 0,
+        commercialStructures: 0,
+        educationalStructures: 0,
+        hospitalStructures: 0,
+        industrialStructures: 0
       };
 
-      result.stateWiseDistribution = stateStats;
-      
-      sendSuccessResponse(res, 'Structure statistics retrieved successfully', result);
+      sendSuccessResponse(res, 'Structure statistics retrieved successfully', {
+        overview: {
+          total: result.totalStructures,
+          draft: result.draftStructures,
+          submitted: result.submittedStructures,
+          approved: result.approvedStructures,
+          requiresInspection: result.inspectionRequiredStructures,
+          maintenanceNeeded: result.maintenanceNeededStructures
+        },
+        byType: {
+          residential: result.residentialStructures,
+          commercial: result.commercialStructures,
+          educational: result.educationalStructures,
+          hospital: result.hospitalStructures,
+          industrial: result.industrialStructures
+        }
+      });
     } catch (error) {
-      console.error('❌ Error fetching structure statistics:', error);
+      console.error('❌ Error fetching structure stats:', error);
       sendErrorResponse(res, 'Failed to fetch structure statistics', 500, error.message);
     }
   }
 
-  // New method to get structure by UID
-  async getStructureByUID(req, res) {
+  async getStructuresRequiringInspection(req, res) {
     try {
-      const { uid } = req.params;
-      
-      const structure = await Structure.findOne({ 'structural_identity.uid': uid })
-        .populate('creation_info.created_by', 'username email role')
-        .populate('creation_info.last_updated_by', 'username email role');
-      
-      if (!structure) {
-        return sendErrorResponse(res, 'Structure not found', 404);
-      }
-      
-      // Check permissions
-      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
-        return sendErrorResponse(res, 'Access denied', 403);
-      }
-      
-      sendSuccessResponse(res, MESSAGES.DATA_RETRIEVED, structure);
+      const currentDate = new Date();
+      const oneMonthFromNow = new Date();
+      oneMonthFromNow.setMonth(currentDate.getMonth() + 1);
+
+      const matchCondition = req.user.role === 'admin' ? {} : { _id: req.user.userId };
+
+      const pipeline = [
+        { $match: matchCondition },
+        { $unwind: '$structures' },
+        {
+          $match: {
+            $or: [
+              { 'structures.status': 'requires_inspection' },
+              { 'structures.status': 'maintenance_needed' }
+            ]
+          }
+        },
+        {
+          $project: {
+            _id: '$structures._id',
+            structural_identity: '$structures.structural_identity',
+            location: '$structures.location',
+            administration: '$structures.administration',
+            geometric_details: '$structures.geometric_details',
+            status: '$structures.status',
+            creation_info: {
+              created_date: '$structures.creation_info.created_date',
+              last_updated_date: '$structures.creation_info.last_updated_date',
+              created_by: {
+                _id: '$_id',
+                username: '$username',
+                email: '$email',
+                role: '$role'
+              }
+            },
+            createdAt: '$structures.createdAt',
+            updatedAt: '$structures.updatedAt'
+          }
+        },
+        { $sort: { 'creation_info.last_updated_date': -1 } }
+      ];
+
+      const structures = await User.aggregate(pipeline);
+
+      // Add overall ratings to each structure
+      const structuresWithRatings = structures.map(structure => {
+        const overallRatings = this.calculateOverallRatings(structure);
+        return {
+          ...structure,
+          overall_ratings: overallRatings,
+          priority: overallRatings?.priority || 'Medium',
+          healthStatus: overallRatings?.healthStatus || 'Unknown'
+        };
+      });
+
+      // Sort by priority (Critical > High > Medium > Low)
+      const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+      structuresWithRatings.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+      sendSuccessResponse(res, 'Structures requiring inspection retrieved successfully', {
+        total: structuresWithRatings.length,
+        structures: structuresWithRatings
+      });
     } catch (error) {
-      console.error('❌ Error fetching structure by UID:', error);
-      sendErrorResponse(res, 'Failed to fetch structure', 500, error.message);
+      console.error('❌ Error fetching structures requiring inspection:', error);
+      sendErrorResponse(res, 'Failed to fetch structures requiring inspection', 500, error.message);
     }
   }
 
-  // New method to get floors of a structure
-  async getStructureFloors(req, res) {
+  async getMaintenanceRecommendations(req, res) {
     try {
       const { id } = req.params;
       
-      const structure = await Structure.findById(id)
-        .select('geometric_details.floors structural_identity.uid administration.client_name')
-        .populate('creation_info.created_by', 'username email role');
+      const user = await User.findOne({ 'structures._id': id });
       
-      if (!structure) {
+      if (!user) {
         return sendErrorResponse(res, 'Structure not found', 404);
       }
       
+      const structure = user.structures.id(id);
+      
       // Check permissions
-      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
+      if (req.user.role !== 'admin' && user._id.toString() !== req.user.userId.toString()) {
         return sendErrorResponse(res, 'Access denied', 403);
       }
-      
-      sendSuccessResponse(res, 'Structure floors retrieved successfully', {
+
+      const recommendations = [];
+
+      if (!structure.geometric_details?.floors) {
+        return sendSuccessResponse(res, 'Maintenance recommendations retrieved successfully', {
+          structure_id: id,
+          total_recommendations: 0,
+          recommendations: []
+        });
+      }
+
+      structure.geometric_details.floors.forEach((floor, floorIndex) => {
+        if (floor.flats && floor.flats.length > 0) {
+          floor.flats.forEach((flat, flatIndex) => {
+            // Check structural components
+            if (flat.structural_rating) {
+              const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
+              
+              structuralComponents.forEach(component => {
+                const rating = flat.structural_rating[component];
+                if (rating && rating.rating <= 2) {
+                  recommendations.push({
+                    type: 'Structural',
+                    priority: rating.rating === 1 ? 'Critical' : 'High',
+                    component: component.charAt(0).toUpperCase() + component.slice(1),
+                    location: `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`,
+                    issue: rating.condition_comment || `${component} needs attention`,
+                    recommendedAction: this.getStructuralRecommendation(component, rating.rating),
+                    urgency: rating.rating === 1 ? 'Immediate' : 'Within 30 days',
+                    rating: rating.rating,
+                    photos: rating.photos || []
+                  });
+                }
+              });
+            }
+
+            // Check non-structural components
+            if (flat.non_structural_rating) {
+              const nonStructuralComponents = [
+                'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+                'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+                'sewage_system', 'panel_board', 'lifts'
+              ];
+
+              nonStructuralComponents.forEach(component => {
+                const rating = flat.non_structural_rating[component];
+                if (rating && rating.rating <= 2) {
+                  recommendations.push({
+                    type: 'Non-Structural',
+                    priority: rating.rating === 1 ? 'High' : 'Medium',
+                    component: component.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                    location: `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`,
+                    issue: rating.condition_comment || `${component.replace('_', ' ')} needs attention`,
+                    recommendedAction: this.getNonStructuralRecommendation(component, rating.rating),
+                    urgency: rating.rating === 1 ? 'Within 15 days' : 'Within 60 days',
+                    rating: rating.rating,
+                    photos: rating.photos || []
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+
+      // Sort by priority and urgency
+      const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+      recommendations.sort((a, b) => {
+        if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+          return priorityOrder[a.priority] - priorityOrder[b.priority];
+        }
+        return a.urgency.localeCompare(b.urgency);
+      });
+
+      sendSuccessResponse(res, 'Maintenance recommendations retrieved successfully', {
+        structure_id: id,
         structure_uid: structure.structural_identity.uid,
-        client_name: structure.administration.client_name,
-        floors: structure.geometric_details.floors
+        total_recommendations: recommendations.length,
+        critical_issues: recommendations.filter(r => r.priority === 'Critical').length,
+        high_priority_issues: recommendations.filter(r => r.priority === 'High').length,
+        recommendations: recommendations
       });
     } catch (error) {
-      console.error('❌ Error fetching structure floors:', error);
-      sendErrorResponse(res, 'Failed to fetch structure floors', 500, error.message);
+      console.error('❌ Error fetching maintenance recommendations:', error);
+      sendErrorResponse(res, 'Failed to fetch maintenance recommendations', 500, error.message);
     }
   }
 
-  // New method to get flats of a specific floor
-  async getFloorFlats(req, res) {
-    try {
-      const { id, floorNumber } = req.params;
-      
-      const structure = await Structure.findById(id)
-        .select('geometric_details.floors structural_identity.uid')
-        .populate('creation_info.created_by', 'username email role');
-      
-      if (!structure) {
-        return sendErrorResponse(res, 'Structure not found', 404);
+  // Helper method for structural recommendations
+  getStructuralRecommendation(component, rating) {
+    const recommendations = {
+      beams: {
+        1: 'Immediate structural assessment required. Consider beam replacement or strengthening.',
+        2: 'Detailed inspection and repair of cracks/deflection needed within 30 days.'
+      },
+      columns: {
+        1: 'Critical - Immediate structural engineer assessment. Potential load-bearing compromise.',
+        2: 'Repair cracks and assess load-bearing capacity. Monitor closely.'
+      },
+      slab: {
+        1: 'Major slab repair or replacement required. Safety risk present.',
+        2: 'Repair cracks and address deflection issues. Check for water damage.'
+      },
+      foundation: {
+        1: 'Critical foundation issues. Immediate professional assessment required.',
+        2: 'Foundation repair needed. Address settlement and drainage issues.'
       }
-      
-      // Check permissions
-      if (req.user.role !== 'admin' && structure.creation_info.created_by._id.toString() !== req.user.userId.toString()) {
-        return sendErrorResponse(res, 'Access denied', 403);
-      }
+    };
 
-      const floor = structure.geometric_details.floors.find(f => f.floor_number === parseInt(floorNumber));
-      
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
+    return recommendations[component]?.[rating] || `${component} requires professional assessment.`;
+  }
+
+  // Helper method for non-structural recommendations
+  getNonStructuralRecommendation(component, rating) {
+    const recommendations = {
+      brick_plaster: {
+        1: 'Complete replastering required. Address underlying moisture issues.',
+        2: 'Repair cracks and repaint. Check for seepage.'
+      },
+      doors_windows: {
+        1: 'Replace doors/windows. Check for security and weather sealing.',
+        2: 'Repair hardware and improve sealing. Paint/stain as needed.'
+      },
+      electrical_wiring: {
+        1: 'Complete electrical system overhaul required. Safety hazard present.',
+        2: 'Upgrade wiring and replace faulty components. Check circuit capacity.'
+      },
+      plumbing: {
+        1: 'Major plumbing renovation needed. Replace old pipes.',
+        2: 'Repair leaks and replace worn fixtures. Check water pressure.'
+      },
+      sanitary_fittings: {
+        1: 'Replace all sanitary fittings. Address hygiene and functionality issues.',
+        2: 'Repair or replace damaged fittings. Improve drainage.'
+      },
+      flooring_tiles: {
+        1: 'Complete floor replacement required. Safety and aesthetic concerns.',
+        2: 'Repair damaged tiles and improve finishing.'
+      },
+      railings: {
+        1: 'Replace railings immediately. Safety hazard present.',
+        2: 'Repair and strengthen existing railings.'
+      },
+      water_tanks: {
+        1: 'Replace water storage system. Water quality and supply issues.',
+        2: 'Clean and repair water tanks. Check for leaks.'
+      },
+      sewage_system: {
+        1: 'Major sewage system overhaul required. Immediate health hazard.',
+        2: 'Repair drainage issues and improve sewage flow.'
+      },
+      panel_board: {
+        1: 'Replace electrical panel board. Fire and safety hazard.',
+        2: 'Upgrade panel board components and improve safety features.'
+      },
+      lifts: {
+        1: 'Lift system requires immediate replacement or major overhaul.',
+        2: 'Service and repair lift mechanisms. Address safety concerns.'
       }
-      
-      sendSuccessResponse(res, 'Floor flats retrieved successfully', {
-        structure_uid: structure.structural_identity.uid,
-        floor_number: floor.floor_number,
-        floor_type: floor.floor_type,
-        flats: floor.flats
-      });
-    } catch (error) {
-      console.error('❌ Error fetching floor flats:', error);
-      sendErrorResponse(res, 'Failed to fetch floor flats', 500, error.message);
-    }
+    };
+
+    return recommendations[component]?.[rating] || `${component.replace('_', ' ')} needs maintenance attention.`;
   }
 }
 

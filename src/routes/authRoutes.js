@@ -360,6 +360,44 @@ router.post('/reset-password', debugMiddleware, authLimiter, async (req, res) =>
 });
 
 /**
+ * @route   POST /api/auth/refresh-token
+ * @desc    Refresh access token using refresh token
+ * @access  Public
+ */
+router.post('/refresh-token', debugMiddleware, async (req, res) => {
+  try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Request body is missing. Send JSON data with Content-Type: application/json'
+      });
+    }
+
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken || typeof refreshToken !== 'string') {
+      return res.status(401).json({
+        success: false,
+        error: 'Refresh token is required',
+        code: 'NO_REFRESH_TOKEN'
+      });
+    }
+    
+    console.log('🔄 Processing token refresh...');
+    const result = await authService.refreshTokens(refreshToken);
+    
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(401).json({
+      success: false,
+      error: error.message,
+      code: 'REFRESH_FAILED'
+    });
+  }
+});
+
+/**
  * @route   PUT /api/auth/change-password
  * @desc    Change password for logged-in user
  * @access  Private

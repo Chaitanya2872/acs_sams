@@ -13,12 +13,13 @@ const authenticateToken = async (req, res, next) => {
     if (!token) {
       return res.status(401).json({
         success: false,
-        error: 'Access token required'
+        error: 'Access token required',
+        code : 'NO_TOKEN'
       });
     }
 
     // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET);
     
     // Get user from database
     const user = await User.findById(decoded.userId).select('-password');
@@ -26,14 +27,16 @@ const authenticateToken = async (req, res, next) => {
     if (!user) {
       return res.status(401).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
       });
     }
 
     if (!user.isActive) {
       return res.status(401).json({
         success: false,
-        error: 'User account is deactivated'
+        error: 'User account is deactivated',
+        code: 'USER_INACTIVE'
       });
     }
 
@@ -57,12 +60,14 @@ const authenticateToken = async (req, res, next) => {
       });
     }
     
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        error: 'Token expired'
-      });
-    }
+    // After line 37 (TokenExpiredError), add:
+if (error.name === 'TokenExpiredError') {
+  return res.status(401).json({
+    success: false,
+    error: 'Token expired',
+    code: 'TOKEN_EXPIRED'
+  });
+}
 
     return res.status(500).json({
       success: false,
@@ -70,6 +75,8 @@ const authenticateToken = async (req, res, next) => {
     });
   }
 };
+
+
 
 /**
  * Middleware to check if user has required role

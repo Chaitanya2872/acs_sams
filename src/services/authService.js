@@ -16,23 +16,25 @@ class AuthService {
   }
 
   validateJWTConfig() {
-    const missing = [];
-    if (!this.accessSecret) missing.push('JWT_ACCESS_SECRET');
-    if (!this.refreshSecret) missing.push('JWT_REFRESH_SECRET');
-    
-    if (missing.length > 0) {
-      console.error('❌ Missing JWT secrets:', missing.join(', '));
-      console.error('📝 Add these to your .env file:');
-      missing.forEach(key => console.error(`├─ ${key}=your-secret-here`));
-      throw new Error(`Missing JWT configuration: ${missing.join(', ')}`);
-    }
-    
-    console.log('✅ JWT configuration loaded successfully');
-    console.log('├─ Access token expires in:', this.accessExpiresIn);
-    console.log('├─ Refresh token expires in:', this.refreshExpiresIn);
-    console.log('├─ Access secret length:', this.accessSecret.length, 'characters');
-    console.log('└─ Refresh secret length:', this.refreshSecret.length, 'characters');
+  const missing = [];
+  if (!this.accessSecret) missing.push('JWT_SECRET or JWT_ACCESS_SECRET');
+  if (!this.refreshSecret) missing.push('JWT_REFRESH_SECRET');
+  
+  if (missing.length > 0) {
+    console.error('❌ Missing JWT secrets:', missing.join(', '));
+    console.error('📝 Add these to your .env file:');
+    console.error('├─ JWT_SECRET=your-secret-here');
+    console.error('├─ JWT_ACCESS_SECRET=your-access-secret-here'); 
+    console.error('└─ JWT_REFRESH_SECRET=your-refresh-secret-here');
+    throw new Error(`Missing JWT configuration: ${missing.join(', ')}`);
   }
+  
+  console.log('✅ JWT configuration loaded successfully');
+  console.log('├─ Access token expires in:', this.accessExpiresIn);
+  console.log('├─ Refresh token expires in:', this.refreshExpiresIn);
+  console.log('├─ Access secret length:', this.accessSecret.length, 'characters');
+  console.log('└─ Refresh secret length:', this.refreshSecret.length, 'characters');
+}
 
   // Generate Access Token (short-lived)
   generateAccessToken(userId, role) {
