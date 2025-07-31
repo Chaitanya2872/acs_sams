@@ -8,9 +8,7 @@ const ratingComponentSchema = {
     type: Number,
     min: [1, 'Rating must be at least 1'],
     max: [5, 'Rating cannot exceed 5'],
-    required: function() {
-      return this.parent() && this.parent().isModified();
-    }
+  
   },
   condition_comment: {
     type: String,
@@ -187,117 +185,131 @@ const structureSchema = new mongoose.Schema({
       min: [5, 'Structure length must be at least 5 meters'],
       max: [500, 'Structure length cannot exceed 500 meters']
     },
-    floors: [{
-      floor_number: {
-        type: Number,
-        required: true,
-        min: [0, 'Floor number cannot be negative'],
-        max: [200, 'Floor number cannot exceed 200']
+    // =================== SCHEMA FIX ===================
+// In your models/schemas.js file, update the floors schema section:
+
+floors: [{
+  // Don't manually set _id, let MongoDB handle it
+  floor_id: {
+    type: String,
+    required: true,
+    unique: false // Allow duplicates across different structures
+  },
+  floor_number: {
+    type: Number,
+    required: true,
+    min: [0, 'Floor number cannot be negative'],
+    max: [200, 'Floor number cannot exceed 200']
+  },
+  floor_type: {
+    type: String,
+    enum: {
+      values: ['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational'],
+      message: 'Invalid floor type'
+    },
+    default: 'residential'
+  },
+  floor_height: {
+    type: Number,
+    min: [2, 'Floor height must be at least 2 meters'],
+    max: [10, 'Floor height cannot exceed 10 meters']
+  },
+  total_area_sq_mts: {
+    type: Number,
+    min: [1, 'Total area must be at least 1 square meter'],
+    max: [50000, 'Total area cannot exceed 50,000 square meters']
+  },
+  floor_label_name: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 50
+  },
+  // FIXED: Allow 0 flats for parking floors
+  number_of_flats: {
+    type: Number,
+    required: true,
+    min: [0, 'Number of flats cannot be negative'], // Changed from 1 to 0
+    max: [100, 'Number of flats cannot exceed 100 per floor']
+  },
+  flats: [{
+    // Don't manually set _id, let MongoDB handle it
+    flat_id: {
+      type: String,
+      required: true,
+      unique: false // Allow duplicates across different structures
+    },
+    flat_number: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 20
+    },
+    flat_type: {
+      type: String,
+      enum: {
+        values: ['1bhk', '2bhk', '3bhk', '4bhk', '5bhk', 'studio', 'duplex', 'penthouse', 'shop', 'office', 'parking_slot'],
+        message: 'Invalid flat type'
       },
-      floor_type: {
-        type: String,
-        enum: {
-          values: ['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational'],
-          message: 'Invalid floor type'
-        },
-        default: 'residential'
+      default: '2bhk'
+    },
+    area_sq_mts: {
+      type: Number,
+      min: [1, 'Area must be at least 1 square meter'],
+      max: [10000, 'Area cannot exceed 10,000 square meters']
+    },
+    direction_facing: {
+      type: String,
+      enum: {
+        values: ['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest'],
+        message: 'Invalid direction'
       },
-      floor_height: {
-        type: Number,
-        min: [2, 'Floor height must be at least 2 meters'],
-        max: [10, 'Floor height cannot exceed 10 meters']
+      default: 'north'
+    },
+    occupancy_status: {
+      type: String,
+      enum: {
+        values: ['occupied', 'vacant', 'under_renovation', 'locked'],
+        message: 'Invalid occupancy status'
       },
-      total_area_sq_mts: {
-        type: Number,
-        min: [1, 'Total area must be at least 1 square meter'],
-        max: [50000, 'Total area cannot exceed 50,000 square meters']
-      },
-      floor_label_name: {
-        type: String,
-        required: true,
-        trim: true,
-        maxlength: 50
-      },
-      number_of_flats: {
-        type: Number,
-        required: true,
-        min: [1, 'Number of flats must be at least 1'],
-        max: [100, 'Number of flats cannot exceed 100 per floor']
-      },
-      flats: [{
-        flat_number: {
-          type: String,
-          required: true,
-          trim: true,
-          maxlength: 20
-        },
-        flat_type: {
-          type: String,
-          enum: {
-            values: ['1bhk', '2bhk', '3bhk', '4bhk', '5bhk', 'studio', 'duplex', 'penthouse', 'shop', 'office'],
-            message: 'Invalid flat type'
-          },
-          default: '2bhk'
-        },
-        area_sq_mts: {
-          type: Number,
-          min: [1, 'Area must be at least 1 square meter'],
-          max: [10000, 'Area cannot exceed 10,000 square meters']
-        },
-        direction_facing: {
-          type: String,
-          enum: {
-            values: ['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest'],
-            message: 'Invalid direction'
-          },
-          default: 'north'
-        },
-        occupancy_status: {
-          type: String,
-          enum: {
-            values: ['occupied', 'vacant', 'under_renovation', 'locked'],
-            message: 'Invalid occupancy status'
-          },
-          default: 'occupied'
-        },
-        
-        // Screen 4: Flat-wise Structural Ratings
-        structural_rating: {
-          beams: ratingComponentSchema,
-          columns: ratingComponentSchema,
-          slab: ratingComponentSchema,
-          foundation: ratingComponentSchema
-        },
-        
-        // Screen 4: Flat-wise Non-Structural Ratings
-        non_structural_rating: {
-          brick_plaster: ratingComponentSchema,
-          doors_windows: ratingComponentSchema,
-          flooring_tiles: ratingComponentSchema,
-          electrical_wiring: ratingComponentSchema,
-          sanitary_fittings: ratingComponentSchema,
-          railings: ratingComponentSchema,
-          water_tanks: ratingComponentSchema,
-          plumbing: ratingComponentSchema,
-          sewage_system: ratingComponentSchema,
-          panel_board: ratingComponentSchema,
-          lifts: ratingComponentSchema
-        },
-        
-        // Flat-specific metadata
-        flat_notes: {
-          type: String,
-          maxlength: 1000
-        },
-        last_inspection_date: {
-          type: Date
-        }
-      }],
-      floor_notes: {
-        type: String,
-        maxlength: 1000
-      }
-    }],
+      default: 'occupied'
+    },
+    
+    // Rest of the flat schema remains the same...
+    structural_rating: {
+      beams: ratingComponentSchema,
+      columns: ratingComponentSchema,
+      slab: ratingComponentSchema,
+      foundation: ratingComponentSchema
+    },
+    
+    non_structural_rating: {
+      brick_plaster: ratingComponentSchema,
+      doors_windows: ratingComponentSchema,
+      flooring_tiles: ratingComponentSchema,
+      electrical_wiring: ratingComponentSchema,
+      sanitary_fittings: ratingComponentSchema,
+      railings: ratingComponentSchema,
+      water_tanks: ratingComponentSchema,
+      plumbing: ratingComponentSchema,
+      sewage_system: ratingComponentSchema,
+      panel_board: ratingComponentSchema,
+      lifts: ratingComponentSchema
+    },
+    
+    flat_notes: {
+      type: String,
+      maxlength: 1000
+    },
+    last_inspection_date: {
+      type: Date
+    }
+  }],
+  floor_notes: {
+    type: String,
+    maxlength: 1000
+  }
+}],
     building_age: {
       type: Number,
       min: [0, 'Building age cannot be negative'],
@@ -575,16 +587,14 @@ const userSchema = new mongoose.Schema({
     },
     default: 'engineer'
   },
-  profile: {
+ profile: {
     first_name: {
       type: String,
-      required: true,
       trim: true,
       maxlength: [50, 'First name cannot exceed 50 characters']
     },
     last_name: {
       type: String,
-      required: true,
       trim: true,
       maxlength: [50, 'Last name cannot exceed 50 characters']
     },
@@ -614,7 +624,7 @@ const userSchema = new mongoose.Schema({
       maxlength: [500, 'Address cannot exceed 500 characters']
     }
   },
-  permissions: {
+  /*permissions: {
     can_create_structures: {
       type: Boolean,
       default: true
@@ -675,7 +685,7 @@ const userSchema = new mongoose.Schema({
         maxlength: 50
       }
     }
-  },
+  },*/
   
   // =================== EMBEDDED STRUCTURES ARRAY ===================
   structures: [structureSchema], // This embeds all structures as subdocuments
@@ -713,7 +723,7 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-  is_verified: {
+  isEmailVerified: {
     type: Boolean,
     default: false
   },
@@ -1059,9 +1069,9 @@ const otpSchema = new mongoose.Schema({
   purpose: {
     type: String,
     enum: ['registration', 'login', 'password_reset', 'email_verification'],
-    required: true
+    required: false
   },
-  is_verified: {
+  isEmailVerified: {
     type: Boolean,
     default: false
   },

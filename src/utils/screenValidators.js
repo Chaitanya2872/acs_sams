@@ -1,8 +1,8 @@
 const { body, query } = require('express-validator');
 
-// Screen 1: Location (Structure Identification + GPS Coordinates)
+// =================== LOCATION VALIDATION ===================
 const locationValidation = [
-  // Zip Code field (new)
+  // Zip Code field
   body('zip_code')
     .notEmpty()
     .withMessage('Zip code is required')
@@ -88,7 +88,7 @@ const locationValidation = [
     .withMessage('Address cannot exceed 200 characters')
 ];
 
-// Screen 2: Administrative (Admin/Client Details)
+// =================== ADMINISTRATIVE VALIDATION ===================
 const administrativeValidation = [
   body('client_name')
     .notEmpty()
@@ -127,8 +127,8 @@ const administrativeValidation = [
     .withMessage('Email cannot exceed 30 characters')
 ];
 
-// Screen 3: Geometric (Building Dimensions + Floor Details)
-const geometricValidation = [
+// =================== GEOMETRIC DETAILS VALIDATION ===================
+const geometricDetailsValidation = [
   body('number_of_floors')
     .notEmpty()
     .withMessage('Number of floors is required')
@@ -151,331 +151,187 @@ const geometricValidation = [
     .notEmpty()
     .withMessage('Structure height is required')
     .isFloat({ min: 0.1, max: 500 })
-    .withMessage('Structure height must be between 0.1 and 500 meters'),
-
-  // Floor details validation
-  body('floors').optional().isArray(),
-  body('floors.*.floor_number').optional().isInt({ min: 1 }),
-  body('floors.*.floor_type').optional().isIn(['parking', 'residential', 'commercial', 'common_area', 'mixed_use', 'other']),
-  body('floors.*.floor_height').optional().isFloat({ min: 0.1, max: 20 }),
-  body('floors.*.total_area_sq_mts').optional().isFloat({ min: 0.1 }),
-  body('floors.*.number_of_flats').optional().isInt({ min: 1, max: 50 }),
-  
-  // Flat details validation
-  body('floors.*.flats').optional().isArray(),
-  body('floors.*.flats.*.flat_number').optional().isString().trim(),
-  body('floors.*.flats.*.flat_type').optional().isIn(['1bhk', '2bhk', '3bhk', '4bhk', 'studio', 'duplex', 'penthouse', 'shop', 'office', 'parking_slot']),
-  body('floors.*.flats.*.area_sq_mts').optional().isFloat({ min: 1 }),
-  body('floors.*.flats.*.direction_facing').optional().isIn(['north', 'south', 'east', 'west', 'north_east', 'north_west', 'south_east', 'south_west']),
-  body('floors.*.flats.*.occupancy_status').optional().isIn(['occupied', 'vacant', 'under_maintenance'])
+    .withMessage('Structure height must be between 0.1 and 500 meters')
 ];
 
-// Screen 4: Flat-wise Ratings (Structural + Non-Structural for each flat)
-const ratingsValidation = [
-  // Validate that floors and flats data is provided
-  body('floors').notEmpty().withMessage('Floor data is required').isArray(),
+// =================== FLOOR VALIDATION ===================
+const floorValidation = [
+  body('floors')
+    .isArray({ min: 1 })
+    .withMessage('At least one floor is required'),
   
-  body('floors.*.floor_number').notEmpty().withMessage('Floor number is required').isInt({ min: 1 }),
+  body('floors.*.floor_number')
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Floor number must be between 1 and 100'),
   
-  body('floors.*.flats').notEmpty().withMessage('Flat data is required').isArray(),
+  body('floors.*.floor_type')
+    .optional()
+    .isIn(['parking', 'residential', 'commercial', 'common_area', 'mixed_use', 'other'])
+    .withMessage('Invalid floor type'),
   
-  body('floors.*.flats.*.flat_number').notEmpty().withMessage('Flat number is required').isString().trim(),
+  body('floors.*.floor_height')
+    .optional()
+    .isFloat({ min: 2, max: 20 })
+    .withMessage('Floor height must be between 2 and 20 meters'),
+  
+  body('floors.*.total_area_sq_mts')
+    .optional()
+    .isFloat({ min: 1, max: 10000 })
+    .withMessage('Total area must be between 1 and 10,000 square meters'),
+  
+  body('floors.*.floor_label_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Floor label name cannot exceed 50 characters'),
+  
+  // FIXED: Allow 0 flats for parking floors
+  body('floors.*.number_of_flats')
+    .optional()
+    .isInt({ min: 0, max: 50 })
+    .withMessage('Number of flats must be between 0 and 50'),
+  
+  body('floors.*.floor_notes')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Floor notes cannot exceed 500 characters')
+];
 
-  // STRUCTURAL RATINGS VALIDATION for each flat
-  body('floors.*.flats.*.structural_rating').notEmpty().withMessage('Structural ratings are required for each flat'),
+// =================== UPDATED: FLAT VALIDATION ===================
+const flatValidation = [
+  body('flats')
+    .isArray({ min: 1 })
+    .withMessage('At least one flat is required'),
   
-  // Beams rating validation
-  body('floors.*.flats.*.structural_rating.beams.rating')
+  body('flats.*.flat_number')
+    .notEmpty()
+    .withMessage('Flat number is required')
+    .isString()
+    .trim()
+    .isLength({ max: 20 })
+    .withMessage('Flat number cannot exceed 20 characters'),
+  
+  body('flats.*.flat_type')
+    .optional()
+    .isIn(['1bhk', '2bhk', '3bhk', '4bhk', '5bhk', 'studio', 'duplex', 'penthouse', 'shop', 'office', 'parking_slot'])
+    .withMessage('Invalid flat type'),
+  
+  body('flats.*.area_sq_mts')
+    .optional()
+    .isFloat({ min: 1, max: 10000 })
+    .withMessage('Area must be between 1 and 10,000 square meters'),
+  
+  body('flats.*.direction_facing')
+    .optional()
+    .isIn(['north', 'south', 'east', 'west', 'north_east', 'north_west', 'south_east', 'south_west'])
+    .withMessage('Invalid direction'),
+  
+  body('flats.*.occupancy_status')
+    .optional()
+    .isIn(['occupied', 'vacant', 'under_maintenance', 'locked'])
+    .withMessage('Invalid occupancy status'),
+  
+  body('flats.*.flat_notes')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Flat notes cannot exceed 1000 characters')
+];
+
+// =================== FLAT STRUCTURAL RATING VALIDATION ===================
+const flatStructuralRatingValidation = [
+  // Beams rating
+  body('beams.rating')
     .notEmpty()
     .withMessage('Beams rating is required')
     .isInt({ min: 1, max: 5 })
     .withMessage('Beams rating must be between 1 and 5'),
   
-  body('floors.*.flats.*.structural_rating.beams.condition_comment')
+  body('beams.condition_comment')
     .optional()
     .isString()
-    .trim(),
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Beams condition comment cannot exceed 1000 characters'),
   
-  body('floors.*.flats.*.structural_rating.beams.photos')
+  body('beams.photos')
     .optional()
-    .isArray(),
+    .isArray()
+    .withMessage('Beams photos must be an array'),
 
-  // Columns rating validation  
-  body('floors.*.flats.*.structural_rating.columns.rating')
+  // Columns rating
+  body('columns.rating')
     .notEmpty()
     .withMessage('Columns rating is required')
     .isInt({ min: 1, max: 5 })
     .withMessage('Columns rating must be between 1 and 5'),
   
-  body('floors.*.flats.*.structural_rating.columns.condition_comment')
+  body('columns.condition_comment')
     .optional()
     .isString()
-    .trim(),
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Columns condition comment cannot exceed 1000 characters'),
   
-  body('floors.*.flats.*.structural_rating.columns.photos')
+  body('columns.photos')
     .optional()
-    .isArray(),
+    .isArray()
+    .withMessage('Columns photos must be an array'),
 
-  // Slab rating validation
-  body('floors.*.flats.*.structural_rating.slab.rating')
+  // Slab rating
+  body('slab.rating')
     .notEmpty()
     .withMessage('Slab rating is required')
     .isInt({ min: 1, max: 5 })
     .withMessage('Slab rating must be between 1 and 5'),
   
-  body('floors.*.flats.*.structural_rating.slab.condition_comment')
+  body('slab.condition_comment')
     .optional()
     .isString()
-    .trim(),
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Slab condition comment cannot exceed 1000 characters'),
   
-  body('floors.*.flats.*.structural_rating.slab.photos')
+  body('slab.photos')
     .optional()
-    .isArray(),
+    .isArray()
+    .withMessage('Slab photos must be an array'),
 
-  // Foundation rating validation
-  body('floors.*.flats.*.structural_rating.foundation.rating')
+  // Foundation rating
+  body('foundation.rating')
     .notEmpty()
     .withMessage('Foundation rating is required')
     .isInt({ min: 1, max: 5 })
     .withMessage('Foundation rating must be between 1 and 5'),
   
-  body('floors.*.flats.*.structural_rating.foundation.condition_comment')
+  body('foundation.condition_comment')
     .optional()
     .isString()
-    .trim(),
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Foundation condition comment cannot exceed 1000 characters'),
   
-  body('floors.*.flats.*.structural_rating.foundation.photos')
+  body('foundation.photos')
     .optional()
-    .isArray(),
+    .isArray()
+    .withMessage('Foundation photos must be an array'),
 
-  // NON-STRUCTURAL RATINGS VALIDATION for each flat
-  body('floors.*.flats.*.non_structural_rating').notEmpty().withMessage('Non-structural ratings are required for each flat'),
-  
-  // Brick plaster rating validation
-  body('floors.*.flats.*.non_structural_rating.brick_plaster.rating')
-    .notEmpty()
-    .withMessage('Brick plaster rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Brick plaster rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.brick_plaster.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.brick_plaster.photos')
-    .optional()
-    .isArray(),
-
-  // Doors & Windows rating validation
-  body('floors.*.flats.*.non_structural_rating.doors_windows.rating')
-    .notEmpty()
-    .withMessage('Doors & windows rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Doors & windows rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.doors_windows.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.doors_windows.photos')
-    .optional()
-    .isArray(),
-
-  // Flooring/Tiles rating validation
-  body('floors.*.flats.*.non_structural_rating.flooring_tiles.rating')
-    .notEmpty()
-    .withMessage('Flooring/tiles rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Flooring/tiles rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.flooring_tiles.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.flooring_tiles.photos')
-    .optional()
-    .isArray(),
-
-  // Electrical Wiring rating validation
-  body('floors.*.flats.*.non_structural_rating.electrical_wiring.rating')
-    .notEmpty()
-    .withMessage('Electrical wiring rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Electrical wiring rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.electrical_wiring.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.electrical_wiring.photos')
-    .optional()
-    .isArray(),
-
-  // Sanitary Fittings rating validation
-  body('floors.*.flats.*.non_structural_rating.sanitary_fittings.rating')
-    .notEmpty()
-    .withMessage('Sanitary fittings rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Sanitary fittings rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.sanitary_fittings.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.sanitary_fittings.photos')
-    .optional()
-    .isArray(),
-
-  // Railings rating validation
-  body('floors.*.flats.*.non_structural_rating.railings.rating')
-    .notEmpty()
-    .withMessage('Railings rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Railings rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.railings.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.railings.photos')
-    .optional()
-    .isArray(),
-
-  // Water Tanks rating validation
-  body('floors.*.flats.*.non_structural_rating.water_tanks.rating')
-    .notEmpty()
-    .withMessage('Water tanks rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Water tanks rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.water_tanks.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.water_tanks.photos')
-    .optional()
-    .isArray(),
-
-  // Plumbing rating validation
-  body('floors.*.flats.*.non_structural_rating.plumbing.rating')
-    .notEmpty()
-    .withMessage('Plumbing rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Plumbing rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.plumbing.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.plumbing.photos')
-    .optional()
-    .isArray(),
-
-  // Sewage System rating validation
-  body('floors.*.flats.*.non_structural_rating.sewage_system.rating')
-    .notEmpty()
-    .withMessage('Sewage system rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Sewage system rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.sewage_system.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.sewage_system.photos')
-    .optional()
-    .isArray(),
-
-  // Panel Board rating validation
-  body('floors.*.flats.*.non_structural_rating.panel_board.rating')
-    .notEmpty()
-    .withMessage('Panel board rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Panel board rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.panel_board.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.panel_board.photos')
-    .optional()
-    .isArray(),
-
-  // Lifts rating validation
-  body('floors.*.flats.*.non_structural_rating.lifts.rating')
-    .notEmpty()
-    .withMessage('Lifts rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Lifts rating must be between 1 and 5'),
-  
-  body('floors.*.flats.*.non_structural_rating.lifts.condition_comment')
-    .optional()
-    .isString()
-    .trim(),
-  
-  body('floors.*.flats.*.non_structural_rating.lifts.photos')
-    .optional()
-    .isArray(),
-
-  // Custom validation for mandatory images when rating < 3
+  // Custom validation for photos when rating < 3
   body().custom((requestBody) => {
     const errors = [];
+    const components = ['beams', 'columns', 'slab', 'foundation'];
     
-    if (!requestBody.floors || !Array.isArray(requestBody.floors)) {
-      return true; // Let other validators handle the basic structure
-    }
-
-    requestBody.floors.forEach((floor, floorIndex) => {
-      if (!floor.flats || !Array.isArray(floor.flats)) {
-        return;
+    components.forEach(component => {
+      const rating = requestBody[component]?.rating;
+      const photos = requestBody[component]?.photos;
+      
+      if (rating && rating < 3 && (!photos || photos.length === 0)) {
+        errors.push(`Photos are mandatory for ${component} when rating is below 3`);
       }
-
-      floor.flats.forEach((flat, flatIndex) => {
-        const location = `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`;
-
-        // Check structural ratings for photo requirements
-        if (flat.structural_rating) {
-          const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
-          
-          structuralComponents.forEach(component => {
-            const rating = flat.structural_rating[component]?.rating;
-            const photos = flat.structural_rating[component]?.photos;
-            
-            if (rating && rating < 3 && (!photos || photos.length === 0)) {
-              errors.push(`Photos are mandatory for ${component} in ${location} when rating is below 3`);
-            }
-          });
-        }
-
-        // Check non-structural ratings for photo requirements
-        if (flat.non_structural_rating) {
-          const nonStructuralComponents = [
-            'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-            'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-            'sewage_system', 'panel_board', 'lifts'
-          ];
-          
-          nonStructuralComponents.forEach(component => {
-            const rating = flat.non_structural_rating[component]?.rating;
-            const photos = flat.non_structural_rating[component]?.photos;
-            
-            if (rating && rating < 3 && (!photos || photos.length === 0)) {
-              const componentName = component.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-              errors.push(`Photos are mandatory for ${componentName} in ${location} when rating is below 3`);
-            }
-          });
-        }
-      });
     });
     
     if (errors.length > 0) {
@@ -486,48 +342,309 @@ const ratingsValidation = [
   })
 ];
 
+// =================== FLAT NON-STRUCTURAL RATING VALIDATION ===================
+const flatNonStructuralRatingValidation = [
+  // Brick & Plaster
+  body('brick_plaster.rating')
+    .notEmpty()
+    .withMessage('Brick & Plaster rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Brick & Plaster rating must be between 1 and 5'),
+  
+  body('brick_plaster.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Brick & Plaster condition comment cannot exceed 1000 characters'),
+  
+  body('brick_plaster.photos')
+    .optional()
+    .isArray()
+    .withMessage('Brick & Plaster photos must be an array'),
 
-// Screen 5: Overall Structural Rating Validation
-const overallStructuralValidation = [
-  body('beams_rating.rating')
+  // Doors & Windows
+  body('doors_windows.rating')
+    .notEmpty()
+    .withMessage('Doors & Windows rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Doors & Windows rating must be between 1 and 5'),
+  
+  body('doors_windows.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Doors & Windows condition comment cannot exceed 1000 characters'),
+  
+  body('doors_windows.photos')
+    .optional()
+    .isArray()
+    .withMessage('Doors & Windows photos must be an array'),
+
+  // Flooring & Tiles
+  body('flooring_tiles.rating')
+    .notEmpty()
+    .withMessage('Flooring & Tiles rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Flooring & Tiles rating must be between 1 and 5'),
+  
+  body('flooring_tiles.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Flooring & Tiles condition comment cannot exceed 1000 characters'),
+  
+  body('flooring_tiles.photos')
+    .optional()
+    .isArray()
+    .withMessage('Flooring & Tiles photos must be an array'),
+
+  // Electrical Wiring
+  body('electrical_wiring.rating')
+    .notEmpty()
+    .withMessage('Electrical Wiring rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Electrical Wiring rating must be between 1 and 5'),
+  
+  body('electrical_wiring.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Electrical Wiring condition comment cannot exceed 1000 characters'),
+  
+  body('electrical_wiring.photos')
+    .optional()
+    .isArray()
+    .withMessage('Electrical Wiring photos must be an array'),
+
+  // Sanitary Fittings
+  body('sanitary_fittings.rating')
+    .notEmpty()
+    .withMessage('Sanitary Fittings rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Sanitary Fittings rating must be between 1 and 5'),
+  
+  body('sanitary_fittings.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Sanitary Fittings condition comment cannot exceed 1000 characters'),
+  
+  body('sanitary_fittings.photos')
+    .optional()
+    .isArray()
+    .withMessage('Sanitary Fittings photos must be an array'),
+
+  // Railings
+  body('railings.rating')
+    .notEmpty()
+    .withMessage('Railings rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Railings rating must be between 1 and 5'),
+  
+  body('railings.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Railings condition comment cannot exceed 1000 characters'),
+  
+  body('railings.photos')
+    .optional()
+    .isArray()
+    .withMessage('Railings photos must be an array'),
+
+  // Water Tanks
+  body('water_tanks.rating')
+    .notEmpty()
+    .withMessage('Water Tanks rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Water Tanks rating must be between 1 and 5'),
+  
+  body('water_tanks.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Water Tanks condition comment cannot exceed 1000 characters'),
+  
+  body('water_tanks.photos')
+    .optional()
+    .isArray()
+    .withMessage('Water Tanks photos must be an array'),
+
+  // Plumbing
+  body('plumbing.rating')
+    .notEmpty()
+    .withMessage('Plumbing rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Plumbing rating must be between 1 and 5'),
+  
+  body('plumbing.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Plumbing condition comment cannot exceed 1000 characters'),
+  
+  body('plumbing.photos')
+    .optional()
+    .isArray()
+    .withMessage('Plumbing photos must be an array'),
+
+  // Sewage System
+  body('sewage_system.rating')
+    .notEmpty()
+    .withMessage('Sewage System rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Sewage System rating must be between 1 and 5'),
+  
+  body('sewage_system.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Sewage System condition comment cannot exceed 1000 characters'),
+  
+  body('sewage_system.photos')
+    .optional()
+    .isArray()
+    .withMessage('Sewage System photos must be an array'),
+
+  // Panel Board
+  body('panel_board.rating')
+    .notEmpty()
+    .withMessage('Panel Board rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Panel Board rating must be between 1 and 5'),
+  
+  body('panel_board.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Panel Board condition comment cannot exceed 1000 characters'),
+  
+  body('panel_board.photos')
+    .optional()
+    .isArray()
+    .withMessage('Panel Board photos must be an array'),
+
+  // Lifts
+  body('lifts.rating')
+    .notEmpty()
+    .withMessage('Lifts rating is required')
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Lifts rating must be between 1 and 5'),
+  
+  body('lifts.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Lifts condition comment cannot exceed 1000 characters'),
+  
+  body('lifts.photos')
+    .optional()
+    .isArray()
+    .withMessage('Lifts photos must be an array'),
+
+  // Custom validation for photos when rating < 3
+  body().custom((requestBody) => {
+    const errors = [];
+    const components = [
+      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+      'sewage_system', 'panel_board', 'lifts'
+    ];
+    
+    components.forEach(component => {
+      const rating = requestBody[component]?.rating;
+      const photos = requestBody[component]?.photos;
+      
+      if (rating && rating < 3 && (!photos || photos.length === 0)) {
+        const componentName = component.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+        errors.push(`Photos are mandatory for ${componentName} when rating is below 3`);
+      }
+    });
+    
+    if (errors.length > 0) {
+      throw new Error(errors.join(', '));
+    }
+    
+    return true;
+  })
+];
+
+// =================== OVERALL STRUCTURAL RATING VALIDATION ===================
+const overallStructuralRatingValidation = [
+  // Beams
+  body('beams.rating')
     .isInt({ min: 1, max: 5 })
     .withMessage('Beams rating must be between 1 and 5'),
   
-  body('beams_rating.condition_comment')
+  body('beams.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Beams condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Beams condition comment must not exceed 2000 characters'),
   
-  body('columns_rating.rating')
+  body('beams.photos')
+    .optional()
+    .isArray()
+    .withMessage('Beams photos must be an array'),
+
+  // Columns
+  body('columns.rating')
     .isInt({ min: 1, max: 5 })
     .withMessage('Columns rating must be between 1 and 5'),
   
-  body('columns_rating.condition_comment')
+  body('columns.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Columns condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Columns condition comment must not exceed 2000 characters'),
   
-  body('slab_rating.rating')
+  body('columns.photos')
+    .optional()
+    .isArray()
+    .withMessage('Columns photos must be an array'),
+
+  // Slab
+  body('slab.rating')
     .isInt({ min: 1, max: 5 })
     .withMessage('Slab rating must be between 1 and 5'),
   
-  body('slab_rating.condition_comment')
+  body('slab.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Slab condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Slab condition comment must not exceed 2000 characters'),
   
-  body('foundation_rating.rating')
+  body('slab.photos')
+    .optional()
+    .isArray()
+    .withMessage('Slab photos must be an array'),
+
+  // Foundation
+  body('foundation.rating')
     .isInt({ min: 1, max: 5 })
     .withMessage('Foundation rating must be between 1 and 5'),
   
-  body('foundation_rating.condition_comment')
+  body('foundation.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Foundation condition comment must not exceed 500 characters')
+    .isLength({ max: 2000 })
+    .withMessage('Foundation condition comment must not exceed 2000 characters'),
+  
+  body('foundation.photos')
+    .optional()
+    .isArray()
+    .withMessage('Foundation photos must be an array')
 ];
 
-// Screen 6: Overall Non-Structural Rating Validation
-const overallNonStructuralValidation = [
+// =================== OVERALL NON-STRUCTURAL RATING VALIDATION ===================
+const overallNonStructuralRatingValidation = [
   // Brick & Plaster
   body('brick_plaster.rating')
     .isInt({ min: 1, max: 5 })
@@ -535,9 +652,14 @@ const overallNonStructuralValidation = [
   
   body('brick_plaster.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Brick & Plaster condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Brick & Plaster condition comment must not exceed 2000 characters'),
   
+  body('brick_plaster.photos')
+    .optional()
+    .isArray()
+    .withMessage('Brick & Plaster photos must be an array'),
+
   // Doors & Windows
   body('doors_windows.rating')
     .isInt({ min: 1, max: 5 })
@@ -545,9 +667,14 @@ const overallNonStructuralValidation = [
   
   body('doors_windows.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Doors & Windows condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Doors & Windows condition comment must not exceed 2000 characters'),
   
+  body('doors_windows.photos')
+    .optional()
+    .isArray()
+    .withMessage('Doors & Windows photos must be an array'),
+
   // Flooring & Tiles
   body('flooring_tiles.rating')
     .isInt({ min: 1, max: 5 })
@@ -555,9 +682,14 @@ const overallNonStructuralValidation = [
   
   body('flooring_tiles.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Flooring & Tiles condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Flooring & Tiles condition comment must not exceed 2000 characters'),
   
+  body('flooring_tiles.photos')
+    .optional()
+    .isArray()
+    .withMessage('Flooring & Tiles photos must be an array'),
+
   // Electrical Wiring
   body('electrical_wiring.rating')
     .isInt({ min: 1, max: 5 })
@@ -565,9 +697,14 @@ const overallNonStructuralValidation = [
   
   body('electrical_wiring.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Electrical Wiring condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Electrical Wiring condition comment must not exceed 2000 characters'),
   
+  body('electrical_wiring.photos')
+    .optional()
+    .isArray()
+    .withMessage('Electrical Wiring photos must be an array'),
+
   // Sanitary Fittings
   body('sanitary_fittings.rating')
     .isInt({ min: 1, max: 5 })
@@ -575,9 +712,14 @@ const overallNonStructuralValidation = [
   
   body('sanitary_fittings.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Sanitary Fittings condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Sanitary Fittings condition comment must not exceed 2000 characters'),
   
+  body('sanitary_fittings.photos')
+    .optional()
+    .isArray()
+    .withMessage('Sanitary Fittings photos must be an array'),
+
   // Railings
   body('railings.rating')
     .isInt({ min: 1, max: 5 })
@@ -585,9 +727,14 @@ const overallNonStructuralValidation = [
   
   body('railings.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Railings condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Railings condition comment must not exceed 2000 characters'),
   
+  body('railings.photos')
+    .optional()
+    .isArray()
+    .withMessage('Railings photos must be an array'),
+
   // Water Tanks
   body('water_tanks.rating')
     .isInt({ min: 1, max: 5 })
@@ -595,9 +742,14 @@ const overallNonStructuralValidation = [
   
   body('water_tanks.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Water Tanks condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Water Tanks condition comment must not exceed 2000 characters'),
   
+  body('water_tanks.photos')
+    .optional()
+    .isArray()
+    .withMessage('Water Tanks photos must be an array'),
+
   // Plumbing
   body('plumbing.rating')
     .isInt({ min: 1, max: 5 })
@@ -605,9 +757,14 @@ const overallNonStructuralValidation = [
   
   body('plumbing.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Plumbing condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Plumbing condition comment must not exceed 2000 characters'),
   
+  body('plumbing.photos')
+    .optional()
+    .isArray()
+    .withMessage('Plumbing photos must be an array'),
+
   // Sewage System
   body('sewage_system.rating')
     .isInt({ min: 1, max: 5 })
@@ -615,9 +772,14 @@ const overallNonStructuralValidation = [
   
   body('sewage_system.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Sewage System condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Sewage System condition comment must not exceed 2000 characters'),
   
+  body('sewage_system.photos')
+    .optional()
+    .isArray()
+    .withMessage('Sewage System photos must be an array'),
+
   // Panel Board
   body('panel_board.rating')
     .isInt({ min: 1, max: 5 })
@@ -625,9 +787,14 @@ const overallNonStructuralValidation = [
   
   body('panel_board.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Panel Board condition comment must not exceed 500 characters'),
+    .isLength({ max: 2000 })
+    .withMessage('Panel Board condition comment must not exceed 2000 characters'),
   
+  body('panel_board.photos')
+    .optional()
+    .isArray()
+    .withMessage('Panel Board photos must be an array'),
+
   // Lifts
   body('lifts.rating')
     .isInt({ min: 1, max: 5 })
@@ -635,12 +802,16 @@ const overallNonStructuralValidation = [
   
   body('lifts.condition_comment')
     .optional()
-    .isLength({ max: 500 })
-    .withMessage('Lifts condition comment must not exceed 500 characters')
+    .isLength({ max: 2000 })
+    .withMessage('Lifts condition comment must not exceed 2000 characters'),
+  
+  body('lifts.photos')
+    .optional()
+    .isArray()
+    .withMessage('Lifts photos must be an array')
 ];
 
-
-// Structure number validation (for validation API)
+// =================== STRUCTURE NUMBER VALIDATION ===================
 const structureNumberValidation = [
   body('structural_identity_number')
     .notEmpty()
@@ -654,9 +825,12 @@ const structureNumberValidation = [
 module.exports = {
   locationValidation,
   administrativeValidation,
-  geometricValidation,
-  ratingsValidation,
-  structureNumberValidation,
-  overallStructuralValidation,
-  overallNonStructuralValidation
+  geometricDetailsValidation,
+  floorValidation,
+  flatValidation,
+  flatStructuralRatingValidation,
+  flatNonStructuralRatingValidation,
+  overallStructuralRatingValidation,
+  overallNonStructuralRatingValidation,
+  structureNumberValidation
 };

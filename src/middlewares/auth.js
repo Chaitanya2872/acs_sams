@@ -14,17 +14,20 @@ const authenticateToken = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         error: 'Access token required',    
-        code : 'NO_TOKEN'
+        code: 'NO_TOKEN'
       });
     }
 
     // Verify JWT token
-const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET);
+    
+    console.log('🔑 Token decoded for user:', decoded.userId);
     
     // Get user from database
     const user = await User.findById(decoded.userId).select('-password');
     
     if (!user) {
+      console.log('❌ User not found for ID:', decoded.userId);
       return res.status(401).json({
         success: false,
         error: 'User not found',
@@ -32,7 +35,16 @@ const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_ACCE
       });
     }
 
-    if (!user.isActive) {
+    console.log('👤 User found:', {
+      id: user._id,
+      email: user.email,
+      is_active: user.is_active,
+      isEmailVerified: user.isEmailVerified
+    });
+
+    // FIXED: Check if user is active using correct field name
+    if (!user.is_active) {  // ← FIXED: was user.isActive
+      console.log('❌ User is inactive:', user.email);
       return res.status(401).json({
         success: false,
         error: 'User account is deactivated',
@@ -40,36 +52,47 @@ const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_ACCE
       });
     }
 
-    // Add user info to request object
+    // FIXED: Check if email is verified using correct field name
+    if (!user.isEmailVerified) {  // ← This should match your schema
+      console.log('❌ User email not verified:', user.email);
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your email before accessing this resource',
+        code: 'EMAIL_NOT_VERIFIED'
+      });
+    }
+
+    // Add user info to request object with FIXED field names
     req.user = {
       userId: user._id,
       username: user.username,
       email: user.email,
       role: user.role,
-      isEmailVerified: user.isEmailVerified
+      isEmailVerified: user.isEmailVerified,  // ← Should match schema
+      is_active: user.is_active               // ← Should match schema
     };
 
+    console.log('✅ Authentication successful for:', user.email);
     next();
+
   } catch (error) {
-    console.error('Token authentication error:', error);
+    console.error('❌ Token authentication error:', error);
     
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
         success: false,
-        error: 'Invalid token'
+        error: 'Invalid token',
+        code: 'INVALID_TOKEN'
       });
     }
     
-    // After line 37 (TokenExpiredError), add:
-if (error.name === 'TokenExpiredError') {
-  return res.status(401).json({
-    success: false,
-    error: 'Token expired',
-    code: 'TOKEN_EXPIRED'
-  });
-}
-
-
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        error: 'Token expired',
+        code: 'TOKEN_EXPIRED'
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -77,8 +100,6 @@ if (error.name === 'TokenExpiredError') {
     });
   }
 };
-
-
 
 /**
  * Middleware to check if user has required role
@@ -95,12 +116,14 @@ const authorizeRole = (allowedRoles) => {
       }
 
       if (!allowedRoles.includes(req.user.role)) {
+        console.log('❌ Role authorization failed. Required:', allowedRoles, 'User has:', req.user.role);
         return res.status(403).json({
           success: false,
           error: `Access denied. Required role: ${allowedRoles.join(' or ')}`
         });
       }
 
+      console.log('✅ Role authorization passed for:', req.user.role);
       next();
     } catch (error) {
       console.error('Role authorization error:', error);
@@ -124,13 +147,17 @@ const requireEmailVerification = (req, res, next) => {
       });
     }
 
-    if (!req.user.isEmailVerified) {
+    // FIXED: Use correct field name check
+    if (!req.user.isEmailVerified) {  // ← Should match what we set in authenticateToken
+      console.log('❌ Email verification required for:', req.user.email);
       return res.status(403).json({
         success: false,
-        error: 'Email verification required'
+        error: 'Email verification required',
+        code: 'EMAIL_NOT_VERIFIED'
       });
     }
 
+    console.log('✅ Email verification check passed for:', req.user.email);
     next();
   } catch (error) {
     console.error('Email verification check error:', error);
@@ -156,6 +183,7 @@ const authorizeStructureAccess = async (req, res, next) => {
 
     // Admin can access all structures
     if (req.user.role === 'admin') {
+      console.log('✅ Admin access granted for structure access');
       return next();
     }
 
@@ -168,24 +196,25 @@ const authorizeStructureAccess = async (req, res, next) => {
       });
     }
 
-    const { Structure } = require('../models/schemas');
-    const structure = await Structure.findById(structureId);
-    
-    if (!structure) {
+    // Since structures are embedded in User documents, we need to check differently
+    const user = await User.findById(req.user.userId);
+    if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'Structure not found'
+        error: 'User not found'
       });
     }
 
-    // Check if user created this structure or is assigned to it
-    if (structure.creation_info.created_by.toString() !== req.user.userId.toString()) {
-      return res.status(403).json({
+    const structure = user.structures.id(structureId);
+    if (!structure) {
+      console.log('❌ Structure not found or access denied:', structureId);
+      return res.status(404).json({
         success: false,
-        error: 'Access denied to this structure'
+        error: 'Structure not found or access denied'
       });
     }
 
+    console.log('✅ Structure access authorized for:', structureId);
     next();
   } catch (error) {
     console.error('Structure access authorization error:', error);
@@ -209,16 +238,18 @@ const optionalAuth = async (req, res, next) => {
       return next(); // No token provided, continue without user info
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET);
     const user = await User.findById(decoded.userId).select('-password');
     
-    if (user && user.isActive) {
+    // FIXED: Use correct field names
+    if (user && user.is_active && user.isEmailVerified) {  // ← FIXED field names
       req.user = {
         userId: user._id,
         username: user.username,
         email: user.email,
         role: user.role,
-        isEmailVerified: user.isEmailVerified
+        isEmailVerified: user.isEmailVerified,
+        is_active: user.is_active
       };
     }
 
@@ -275,7 +306,7 @@ const auditLog = (action) => {
       };
 
       // Log to console (in production, you'd want to log to a file or database)
-      console.log('Audit Log:', JSON.stringify(logData));
+      console.log('📋 Audit Log:', JSON.stringify(logData));
 
       // You could also save to database here
       // const { AuditLog } = require('../models/schemas');
@@ -299,6 +330,23 @@ const userRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
   };
 };
 
+// NEW: Test middleware to debug authentication issues
+const debugAuth = (req, res, next) => {
+  console.log('🔍 DEBUG AUTH MIDDLEWARE:');
+  console.log('├─ Method:', req.method);
+  console.log('├─ Path:', req.path);
+  console.log('├─ Authorization Header:', req.headers.authorization ? 'Present' : 'Missing');
+  console.log('├─ req.user:', req.user ? {
+    userId: req.user.userId,
+    email: req.user.email,
+    role: req.user.role,
+    isEmailVerified: req.user.isEmailVerified,
+    is_active: req.user.is_active
+  } : 'Not set');
+  console.log('└─ Body:', JSON.stringify(req.body, null, 2));
+  next();
+};
+
 module.exports = {
   authenticateToken,
   authorizeRole,
@@ -307,5 +355,6 @@ module.exports = {
   optionalAuth,
   validateRequest,
   auditLog,
-  userRateLimit
+  userRateLimit,
+  debugAuth  // ← NEW: Add this for debugging
 };
