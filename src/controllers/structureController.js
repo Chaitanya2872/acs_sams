@@ -994,6 +994,16 @@ async getOverallStructuralScreen(req, res) {
   }
 }
 
+
+// Add these methods to your StructureController class
+
+async updateOverallStructuralScreen(req, res) {
+  return this.saveOverallStructuralScreen(req, res);
+}
+
+async updateOverallNonStructuralScreen(req, res) {
+  return this.saveOverallNonStructuralScreen(req, res);
+}
 // =================== SCREEN 6: OVERALL NON-STRUCTURAL RATING ===================
 
 /**
