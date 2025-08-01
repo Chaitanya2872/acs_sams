@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
+const reportsRoutes = require('./src/routes/reports');
 
 const app = express();
 
@@ -100,6 +101,7 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/structures', structuresRoutes);
+app.use('/api/reports', reportsRoutes);
 // app.use('/api/structures', structureRoutes);
 // app.use('/api/admin', adminRoutes);
 

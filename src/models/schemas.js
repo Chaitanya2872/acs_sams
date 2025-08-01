@@ -215,7 +215,7 @@ floors: [{
     max: [10, 'Floor height cannot exceed 10 meters']
   },
   total_area_sq_mts: {
-    type: Number,
+    type: String,
     min: [1, 'Total area must be at least 1 square meter'],
     max: [50000, 'Total area cannot exceed 50,000 square meters']
   },
@@ -624,7 +624,7 @@ const userSchema = new mongoose.Schema({
       maxlength: [500, 'Address cannot exceed 500 characters']
     }
   },
-  /*permissions: {
+  permissions: {
     can_create_structures: {
       type: Boolean,
       default: true
@@ -650,7 +650,7 @@ const userSchema = new mongoose.Schema({
       default: false
     }
   },
-  settings: {
+  /*settings: {
     notifications: {
       type: Boolean,
       default: true
