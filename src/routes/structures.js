@@ -1,6 +1,7 @@
 const express = require('express');
 const structureController = require('../controllers/structureController');
 const { authenticateToken } = require('../middlewares/auth');
+// Import the new validation
 const { 
   locationValidation, 
   administrativeValidation, 
@@ -11,7 +12,8 @@ const {
   flatNonStructuralRatingValidation,
   overallStructuralRatingValidation,
   overallNonStructuralRatingValidation,
-  structureNumberValidation
+  structureNumberValidation,
+  bulkRatingsValidation // Add this import
 } = require('../utils/screenValidators');
 const { handleValidationErrors } = require('../middlewares/validation');
 
@@ -57,6 +59,8 @@ router.put('/:id/location',
   handleValidationErrors, 
   structureController.updateLocationScreen
 );
+
+
 
 // =================== ADMINISTRATIVE DETAILS ===================
 /**
@@ -236,6 +240,36 @@ router.put('/:id/floors/:floorId/flats/:flatId/structural-rating',
   flatStructuralRatingValidation, 
   handleValidationErrors, 
   structureController.updateFlatStructuralRating
+);
+
+// =================== BULK RATINGS MANAGEMENT ===================
+/**
+ * @route   POST /api/structures/:id/ratings
+ * @desc    Save bulk ratings for multiple floors and flats
+ * @access  Private
+ */
+router.post('/:id/ratings', 
+  bulkRatingsValidation, 
+  handleValidationErrors, 
+  structureController.saveBulkRatings
+);
+
+/**
+ * @route   GET /api/structures/:id/ratings
+ * @desc    Get bulk ratings for all floors and flats in structure
+ * @access  Private
+ */
+router.get('/:id/ratings', structureController.getBulkRatings);
+
+/**
+ * @route   PUT /api/structures/:id/ratings
+ * @desc    Update bulk ratings for multiple floors and flats
+ * @access  Private
+ */
+router.put('/:id/ratings', 
+  bulkRatingsValidation, 
+  handleValidationErrors, 
+  structureController.updateBulkRatings
 );
 
 // =================== FLAT NON-STRUCTURAL RATINGS ===================

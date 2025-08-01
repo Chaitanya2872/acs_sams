@@ -21,6 +21,10 @@ class StructureController {
     this.saveAdministrativeScreen = this.saveAdministrativeScreen.bind(this);
     this.getAdministrativeScreen = this.getAdministrativeScreen.bind(this);
     this.updateAdministrativeScreen = this.updateAdministrativeScreen.bind(this);
+
+    this.saveBulkRatings = this.saveBulkRatings.bind(this);
+    this.getBulkRatings = this.getBulkRatings.bind(this);
+    this.updateBulkRatings = this.updateBulkRatings.bind(this)
     
     // NEW GRANULAR METHODS
     this.saveGeometricDetails = this.saveGeometricDetails.bind(this);
@@ -1191,6 +1195,616 @@ async updateFlatNonStructuralRating(req, res) {
       sendErrorResponse(res, 'Failed to get overall structural ratings', 500, error.message);
     }
   }
+
+
+  // Add these methods to your structureController.js
+
+/**
+ * Save bulk ratings for multiple floors and flats in a single request
+ * @route POST /api/structures/:id/ratings
+ * @desc Save ratings for multiple floors/flats at once
+ * @access Private
+ */
+async saveBulkRatings(req, res) {
+  try {
+    const { id } = req.params;
+    const { floors } = req.body;
+    
+    if (!floors || !Array.isArray(floors) || floors.length === 0) {
+      return sendErrorResponse(res, 'Floors data is required and must be an array', 400);
+    }
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    let updatedFloors = 0;
+    let updatedFlats = 0;
+    let errors = [];
+    
+    // Process each floor in the request
+    for (const floorData of floors) {
+      const { floor_number, flats } = floorData;
+      
+      if (!floor_number || !flats || !Array.isArray(flats)) {
+        errors.push(`Invalid data for floor ${floor_number || 'unknown'}`);
+        continue;
+      }
+      
+      // Find the floor in the structure
+      const existingFloor = structure.geometric_details?.floors?.find(
+        f => f.floor_number === floor_number
+      );
+      
+      if (!existingFloor) {
+        errors.push(`Floor ${floor_number} not found in structure`);
+        continue;
+      }
+      
+      // Process each flat in the floor
+      for (const flatData of flats) {
+        const { flat_number, structural_rating, non_structural_rating } = flatData;
+        
+        if (!flat_number) {
+          errors.push(`Flat number missing for floor ${floor_number}`);
+          continue;
+        }
+        
+        // Find the flat in the floor
+        const existingFlat = existingFloor.flats?.find(
+          f => f.flat_number === flat_number
+        );
+        
+        if (!existingFlat) {
+          errors.push(`Flat ${flat_number} not found in floor ${floor_number}`);
+          continue;
+        }
+        
+        // Update structural ratings if provided
+        if (structural_rating) {
+          try {
+            this.updateFlatRatings(existingFlat, 'structural_rating', structural_rating);
+            console.log(`✅ Updated structural ratings for ${flat_number}`);
+          } catch (error) {
+            errors.push(`Error updating structural ratings for ${flat_number}: ${error.message}`);
+          }
+        }
+        
+        // Update non-structural ratings if provided
+        if (non_structural_rating) {
+          try {
+            this.updateFlatRatings(existingFlat, 'non_structural_rating', non_structural_rating);
+            console.log(`✅ Updated non-structural ratings for ${flat_number}`);
+          } catch (error) {
+            errors.push(`Error updating non-structural ratings for ${flat_number}: ${error.message}`);
+          }
+        }
+        
+        updatedFlats++;
+      }
+      
+      updatedFloors++;
+    }
+    
+    // Save the structure
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    // Calculate progress after updates
+    const progress = this.calculateProgress(structure);
+    
+    const response = {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      updated_floors: updatedFloors,
+      updated_flats: updatedFlats,
+      progress: progress,
+      errors: errors.length > 0 ? errors : undefined
+    };
+    
+    if (errors.length > 0) {
+      console.warn(`⚠️ Bulk ratings completed with ${errors.length} errors`);
+      return sendSuccessResponse(res, 
+        `Bulk ratings saved with ${errors.length} errors. Updated ${updatedFlats} flats across ${updatedFloors} floors.`, 
+        response
+      );
+    }
+    
+    sendSuccessResponse(res, 
+      `Bulk ratings saved successfully. Updated ${updatedFlats} flats across ${updatedFloors} floors.`, 
+      response
+    );
+
+  } catch (error) {
+    console.error('❌ Bulk ratings save error:', error);
+    sendErrorResponse(res, 'Failed to save bulk ratings', 500, error.message);
+  }
+}
+
+/**
+ * Get bulk ratings for all floors and flats
+ * @route GET /api/structures/:id/ratings
+ * @desc Get ratings for all floors/flats in the structure
+ * @access Private
+ */
+async getBulkRatings(req, res) {
+  try {
+    const { id } = req.params;
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) {
+      return sendSuccessResponse(res, 'No floors found in structure', {
+        structure_id: id,
+        uid: structure.structural_identity?.uid,
+        floors: []
+      });
+    }
+    
+    const floorsWithRatings = structure.geometric_details.floors.map(floor => ({
+      floor_number: floor.floor_number,
+      floor_type: floor.floor_type,
+      floor_label_name: floor.floor_label_name,
+      total_flats: floor.flats ? floor.flats.length : 0,
+      flats: floor.flats ? floor.flats.map(flat => ({
+        flat_number: flat.flat_number,
+        flat_type: flat.flat_type,
+        area_sq_mts: flat.area_sq_mts,
+        direction_facing: flat.direction_facing,
+        occupancy_status: flat.occupancy_status,
+        structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
+        non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating(),
+        has_structural_ratings: this.hasStructuralRating(flat),
+        has_non_structural_ratings: this.hasNonStructuralRating(flat),
+        flat_notes: flat.flat_notes
+      })) : []
+    }));
+    
+    sendSuccessResponse(res, 'Bulk ratings retrieved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      total_floors: floorsWithRatings.length,
+      total_flats: floorsWithRatings.reduce((sum, floor) => sum + floor.total_flats, 0),
+      floors: floorsWithRatings
+    });
+
+  } catch (error) {
+    console.error('❌ Bulk ratings get error:', error);
+    sendErrorResponse(res, 'Failed to get bulk ratings', 500, error.message);
+  }
+}
+
+/**
+ * Update bulk ratings for multiple floors and flats
+ * @route PUT /api/structures/:id/ratings
+ * @desc Update ratings for multiple floors/flats at once
+ * @access Private
+ */
+async updateBulkRatings(req, res) {
+  return this.saveBulkRatings(req, res);
+}
+
+// =================== HELPER METHODS ===================
+
+/**
+ * Helper method to update flat ratings
+ * @param {Object} flat - The flat object to update
+ * @param {String} ratingType - 'structural_rating' or 'non_structural_rating'
+ * @param {Object} ratingsData - The ratings data to apply
+ */
+updateFlatRatings(flat, ratingType, ratingsData) {
+  if (!flat[ratingType]) {
+    flat[ratingType] = {};
+  }
+  
+  const inspectionDate = new Date();
+  
+  // Update each component rating
+  Object.keys(ratingsData).forEach(component => {
+    const componentData = ratingsData[component];
+    
+    if (componentData && typeof componentData === 'object' && componentData.rating) {
+      flat[ratingType][component] = {
+        rating: parseInt(componentData.rating),
+        condition_comment: componentData.condition_comment || '',
+        inspection_date: inspectionDate,
+        photos: Array.isArray(componentData.photos) ? componentData.photos : [],
+        inspector_notes: componentData.inspector_notes || ''
+      };
+    }
+  });
+}
+
+
+/**
+ * Save bulk ratings for multiple floors and flats in a single request
+ * @route POST /api/structures/:id/ratings
+ * @desc Save ratings for multiple floors/flats at once
+ * @access Private
+ */
+async saveBulkRatings(req, res) {
+  try {
+    console.log('🚀 Starting bulk ratings save...');
+    const { id } = req.params;
+    const { floors } = req.body;
+    
+    console.log(`📊 Processing ${floors?.length || 0} floors for structure ${id}`);
+    
+    if (!floors || !Array.isArray(floors) || floors.length === 0) {
+      return sendErrorResponse(res, 'Floors data is required and must be an array', 400);
+    }
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    console.log(`👤 Found user: ${user.username}, structure: ${structure.structural_identity?.uid}`);
+    
+    let updatedFloors = 0;
+    let updatedFlats = 0;
+    let errors = [];
+    
+    // Process each floor in the request
+    for (const floorData of floors) {
+      const { floor_number, flats } = floorData;
+      console.log(`🏢 Processing floor ${floor_number} with ${flats?.length || 0} flats`);
+      
+      if (!floor_number || !flats || !Array.isArray(flats)) {
+        const error = `Invalid data for floor ${floor_number || 'unknown'}`;
+        console.error(`❌ ${error}`);
+        errors.push(error);
+        continue;
+      }
+      
+      // Find the floor in the structure
+      const existingFloor = structure.geometric_details?.floors?.find(
+        f => f.floor_number === floor_number
+      );
+      
+      if (!existingFloor) {
+        const error = `Floor ${floor_number} not found in structure`;
+        console.error(`❌ ${error}`);
+        errors.push(error);
+        continue;
+      }
+      
+      console.log(`✅ Found floor ${floor_number} with ${existingFloor.flats?.length || 0} existing flats`);
+      
+      // Process each flat in the floor
+      for (const flatData of flats) {
+        const { flat_number, structural_rating, non_structural_rating } = flatData;
+        console.log(`🏠 Processing flat ${flat_number}`);
+        
+        if (!flat_number) {
+          const error = `Flat number missing for floor ${floor_number}`;
+          console.error(`❌ ${error}`);
+          errors.push(error);
+          continue;
+        }
+        
+        // Find the flat in the floor
+        const existingFlat = existingFloor.flats?.find(
+          f => f.flat_number === flat_number
+        );
+        
+        if (!existingFlat) {
+          const error = `Flat ${flat_number} not found in floor ${floor_number}`;
+          console.error(`❌ ${error}`);
+          errors.push(error);
+          continue;
+        }
+        
+        console.log(`✅ Found flat ${flat_number}`);
+        
+        // Update structural ratings if provided
+        if (structural_rating) {
+          try {
+            this.updateFlatRatings(existingFlat, 'structural_rating', structural_rating);
+            console.log(`✅ Updated structural ratings for ${flat_number}`);
+          } catch (error) {
+            const errorMsg = `Error updating structural ratings for ${flat_number}: ${error.message}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        }
+        
+        // Update non-structural ratings if provided
+        if (non_structural_rating) {
+          try {
+            this.updateFlatRatings(existingFlat, 'non_structural_rating', non_structural_rating);
+            console.log(`✅ Updated non-structural ratings for ${flat_number}`);
+          } catch (error) {
+            const errorMsg = `Error updating non-structural ratings for ${flat_number}: ${error.message}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        }
+        
+        updatedFlats++;
+      }
+      
+      updatedFloors++;
+    }
+    
+    // Save the structure
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    console.log('💾 Structure saved successfully');
+    
+    // Calculate progress after updates
+    const progress = this.calculateProgress(structure);
+    
+    const response = {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      updated_floors: updatedFloors,
+      updated_flats: updatedFlats,
+      progress: progress,
+      errors: errors.length > 0 ? errors : undefined
+    };
+    
+    if (errors.length > 0) {
+      console.warn(`⚠️ Bulk ratings completed with ${errors.length} errors`);
+      return sendSuccessResponse(res, 
+        `Bulk ratings saved with ${errors.length} errors. Updated ${updatedFlats} flats across ${updatedFloors} floors.`, 
+        response
+      );
+    }
+    
+    sendSuccessResponse(res, 
+      `Bulk ratings saved successfully. Updated ${updatedFlats} flats across ${updatedFloors} floors.`, 
+      response
+    );
+
+  } catch (error) {
+    console.error('❌ Bulk ratings save error:', error);
+    console.error('❌ Error stack:', error.stack);
+    sendErrorResponse(res, 'Failed to save bulk ratings', 500, error.message);
+  }
+}
+
+/**
+ * Get bulk ratings for all floors and flats
+ * @route GET /api/structures/:id/ratings
+ * @desc Get ratings for all floors/flats in the structure
+ * @access Private
+ */
+async getBulkRatings(req, res) {
+  try {
+    console.log('📊 Getting bulk ratings...');
+    const { id } = req.params;
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) {
+      return sendSuccessResponse(res, 'No floors found in structure', {
+        structure_id: id,
+        uid: structure.structural_identity?.uid,
+        floors: []
+      });
+    }
+    
+    const floorsWithRatings = structure.geometric_details.floors.map(floor => ({
+      floor_number: floor.floor_number,
+      floor_type: floor.floor_type,
+      floor_label_name: floor.floor_label_name,
+      total_flats: floor.flats ? floor.flats.length : 0,
+      flats: floor.flats ? floor.flats.map(flat => ({
+        flat_number: flat.flat_number,
+        flat_type: flat.flat_type,
+        area_sq_mts: flat.area_sq_mts,
+        direction_facing: flat.direction_facing,
+        occupancy_status: flat.occupancy_status,
+        structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
+        non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating(),
+        has_structural_ratings: this.hasStructuralRating(flat),
+        has_non_structural_ratings: this.hasNonStructuralRating(flat),
+        flat_notes: flat.flat_notes
+      })) : []
+    }));
+    
+    sendSuccessResponse(res, 'Bulk ratings retrieved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      total_floors: floorsWithRatings.length,
+      total_flats: floorsWithRatings.reduce((sum, floor) => sum + floor.total_flats, 0),
+      floors: floorsWithRatings
+    });
+
+  } catch (error) {
+    console.error('❌ Bulk ratings get error:', error);
+    sendErrorResponse(res, 'Failed to get bulk ratings', 500, error.message);
+  }
+}
+
+/**
+ * Update bulk ratings for multiple floors and flats
+ * @route PUT /api/structures/:id/ratings
+ * @desc Update ratings for multiple floors/flats at once
+ * @access Private
+ */
+async updateBulkRatings(req, res) {
+  return this.saveBulkRatings(req, res);
+}
+
+// =================== HELPER METHODS ===================
+
+/**
+ * Helper method to update flat ratings
+ * @param {Object} flat - The flat object to update
+ * @param {String} ratingType - 'structural_rating' or 'non_structural_rating'
+ * @param {Object} ratingsData - The ratings data to apply
+ */
+updateFlatRatings(flat, ratingType, ratingsData) {
+  if (!flat[ratingType]) {
+    flat[ratingType] = {};
+  }
+  
+  const inspectionDate = new Date();
+  console.log(`🔧 Updating ${ratingType} with ${Object.keys(ratingsData).length} components`);
+  
+  // Update each component rating
+  Object.keys(ratingsData).forEach(component => {
+    const componentData = ratingsData[component];
+    
+    if (componentData && typeof componentData === 'object' && componentData.rating) {
+      flat[ratingType][component] = {
+        rating: parseInt(componentData.rating),
+        condition_comment: componentData.condition_comment || '',
+        inspection_date: inspectionDate,
+        photos: Array.isArray(componentData.photos) ? componentData.photos : [],
+        inspector_notes: componentData.inspector_notes || ''
+      };
+      console.log(`  ✅ Updated ${component}: rating ${componentData.rating}`);
+    }
+  });
+}
+
+/**
+ * Get default structural rating structure
+ */
+getDefaultStructuralRating() {
+  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
+  return {
+    beams: { ...defaultRating },
+    columns: { ...defaultRating },
+    slab: { ...defaultRating },
+    foundation: { ...defaultRating }
+  };
+}
+
+/**
+ * Get default non-structural rating structure
+ */
+getDefaultNonStructuralRating() {
+  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
+  return {
+    brick_plaster: { ...defaultRating },
+    doors_windows: { ...defaultRating },
+    flooring_tiles: { ...defaultRating },
+    electrical_wiring: { ...defaultRating },
+    sanitary_fittings: { ...defaultRating },
+    railings: { ...defaultRating },
+    water_tanks: { ...defaultRating },
+    plumbing: { ...defaultRating },
+    sewage_system: { ...defaultRating },
+    panel_board: { ...defaultRating },
+    lifts: { ...defaultRating }
+  };
+}
+
+/**
+ * Get default structural rating structure
+ */
+getDefaultStructuralRating() {
+  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
+  return {
+    beams: defaultRating,
+    columns: defaultRating,
+    slab: defaultRating,
+    foundation: defaultRating
+  };
+}
+
+/**
+ * Get default non-structural rating structure
+ */
+getDefaultNonStructuralRating() {
+  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
+  return {
+    brick_plaster: defaultRating,
+    doors_windows: defaultRating,
+    flooring_tiles: defaultRating,
+    electrical_wiring: defaultRating,
+    sanitary_fittings: defaultRating,
+    railings: defaultRating,
+    water_tanks: defaultRating,
+    plumbing: defaultRating,
+    sewage_system: defaultRating,
+    panel_board: defaultRating,
+    lifts: defaultRating
+  };
+}
+
+/**
+ * Validate bulk ratings data structure
+ * @param {Object} requestBody - The request body to validate
+ * @returns {Array} Array of validation errors
+ */
+validateBulkRatingsData(requestBody) {
+  const errors = [];
+  const { floors } = requestBody;
+  
+  if (!floors || !Array.isArray(floors)) {
+    errors.push('Floors must be an array');
+    return errors;
+  }
+  
+  floors.forEach((floor, floorIndex) => {
+    if (!floor.floor_number) {
+      errors.push(`Floor ${floorIndex + 1}: floor_number is required`);
+    }
+    
+    if (!floor.flats || !Array.isArray(floor.flats)) {
+      errors.push(`Floor ${floor.floor_number || floorIndex + 1}: flats must be an array`);
+      return;
+    }
+    
+    floor.flats.forEach((flat, flatIndex) => {
+      if (!flat.flat_number) {
+        errors.push(`Floor ${floor.floor_number}, Flat ${flatIndex + 1}: flat_number is required`);
+      }
+      
+      // Validate structural ratings if provided
+      if (flat.structural_rating) {
+        const structuralErrors = this.validateRatingComponents(
+          flat.structural_rating, 
+          ['beams', 'columns', 'slab', 'foundation'],
+          `Floor ${floor.floor_number}, Flat ${flat.flat_number}, Structural`
+        );
+        errors.push(...structuralErrors);
+      }
+      
+      // Validate non-structural ratings if provided
+      if (flat.non_structural_rating) {
+        const nonStructuralErrors = this.validateRatingComponents(
+          flat.non_structural_rating,
+          ['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+           'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+           'sewage_system', 'panel_board', 'lifts'],
+          `Floor ${floor.floor_number}, Flat ${flat.flat_number}, Non-Structural`
+        );
+        errors.push(...nonStructuralErrors);
+      }
+    });
+  });
+  
+  return errors;
+}
+
+/**
+ * Validate rating components
+ * @param {Object} ratings - Rating object to validate
+ * @param {Array} requiredComponents - Array of required component names
+ * @param {String} context - Context for error messages
+ * @returns {Array} Array of validation errors
+ */
+validateRatingComponents(ratings, requiredComponents, context) {
+  const errors = [];
+  
+  requiredComponents.forEach(component => {
+    const rating = ratings[component];
+    if (rating) {
+      if (!rating.rating || rating.rating < 1 || rating.rating > 5) {
+        errors.push(`${context} - ${component}: rating must be between 1 and 5`);
+      }
+      
+      // Check if photos are required for low ratings
+      if (rating.rating < 3 && (!rating.photos || rating.photos.length === 0)) {
+        errors.push(`${context} - ${component}: photos are required when rating is below 3`);
+      }
+      
+      if (rating.condition_comment && rating.condition_comment.length > 1000) {
+        errors.push(`${context} - ${component}: condition comment cannot exceed 1000 characters`);
+      }
+    }
+  });
+  
+  return errors;
+}
 
   async updateOverallStructuralRating(req, res) {
     return this.saveOverallStructuralRating(req, res);

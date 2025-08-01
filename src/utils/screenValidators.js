@@ -822,6 +822,139 @@ const structureNumberValidation = [
     .withMessage('Invalid structural identity number format')
 ];
 
+const bulkRatingsValidation = [
+  // Validate floors array exists and is not empty
+  body('floors')
+    .isArray({ min: 1 })
+    .withMessage('Floors array is required and must contain at least one floor'),
+
+  // Validate each floor
+  body('floors.*.floor_number')
+    .notEmpty()
+    .withMessage('Floor number is required')
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Floor number must be between 1 and 100'),
+
+  body('floors.*.flats')
+    .isArray({ min: 1 })
+    .withMessage('Each floor must contain at least one flat'),
+
+  // Validate each flat
+  body('floors.*.flats.*.flat_number')
+    .notEmpty()
+    .withMessage('Flat number is required')
+    .isString()
+    .trim()
+    .isLength({ max: 20 })
+    .withMessage('Flat number cannot exceed 20 characters'),
+
+  // Optional structural ratings validation
+  body('floors.*.flats.*.structural_rating.beams.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Beams rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.structural_rating.columns.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Columns rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.structural_rating.slab.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Slab rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.structural_rating.foundation.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Foundation rating must be between 1 and 5'),
+
+  // Optional non-structural ratings validation (basic check)
+  body('floors.*.flats.*.non_structural_rating.brick_plaster.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Brick & Plaster rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.doors_windows.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Doors & Windows rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.flooring_tiles.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Flooring & Tiles rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.electrical_wiring.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Electrical Wiring rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.sanitary_fittings.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Sanitary Fittings rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.railings.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Railings rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.water_tanks.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Water Tanks rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.plumbing.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Plumbing rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.sewage_system.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Sewage System rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.panel_board.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Panel Board rating must be between 1 and 5'),
+
+  body('floors.*.flats.*.non_structural_rating.lifts.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Lifts rating must be between 1 and 5'),
+
+  // Validate condition comments length
+  body('floors.*.flats.*.structural_rating.*.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Condition comment cannot exceed 1000 characters'),
+
+  body('floors.*.flats.*.non_structural_rating.*.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Condition comment cannot exceed 1000 characters'),
+
+  // Validate photos arrays
+  body('floors.*.flats.*.structural_rating.*.photos')
+    .optional()
+    .isArray()
+    .withMessage('Photos must be an array'),
+
+  body('floors.*.flats.*.non_structural_rating.*.photos')
+    .optional()
+    .isArray()
+    .withMessage('Photos must be an array')
+];
+
+
+
+
 module.exports = {
   locationValidation,
   administrativeValidation,
@@ -832,5 +965,6 @@ module.exports = {
   flatNonStructuralRatingValidation,
   overallStructuralRatingValidation,
   overallNonStructuralRatingValidation,
-  structureNumberValidation
+  structureNumberValidation,
+  bulkRatingsValidation
 };
