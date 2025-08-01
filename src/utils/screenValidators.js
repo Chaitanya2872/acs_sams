@@ -208,7 +208,6 @@ const floorValidation = [
     .isLength({ min: 1, max: 50 })
     .withMessage('Floor label name must be 1-50 characters'),
   
-  // FIXED: Allow 0 flats for parking floors
   body('floors.*.number_of_flats')
     .isInt({ min: 0, max: 100 })
     .withMessage('Number of flats must be between 0 and 100'),
@@ -263,7 +262,7 @@ const flatValidation = [
     .withMessage('Flat notes cannot exceed 1000 characters')
 ];
 
-// =================== COMBINED FLAT RATINGS VALIDATION (Enhanced) ===================
+// =================== FLAT COMBINED RATINGS VALIDATION (Main Rating System) ===================
 const flatCombinedRatingsValidation = [
   // =================== STRUCTURAL RATINGS ===================
   // Beams
@@ -715,193 +714,6 @@ const flatCombinedRatingsValidation = [
   })
 ];
 
-// =================== INDIVIDUAL STRUCTURAL RATING VALIDATION (Legacy) ===================
-const flatStructuralRatingValidation = [
-  // Beams rating
-  body('beams.rating')
-    .notEmpty()
-    .withMessage('Beams rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Beams rating must be between 1 and 5'),
-  
-  body('beams.condition_comment')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Beams condition comment cannot exceed 1000 characters'),
-  
-  body('beams.photos')
-    .optional()
-    .isArray()
-    .withMessage('Beams photos must be an array'),
-
-  body('beams.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Beams inspector notes cannot exceed 2000 characters'),
-
-  // Columns rating
-  body('columns.rating')
-    .notEmpty()
-    .withMessage('Columns rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Columns rating must be between 1 and 5'),
-  
-  body('columns.condition_comment')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Columns condition comment cannot exceed 1000 characters'),
-  
-  body('columns.photos')
-    .optional()
-    .isArray()
-    .withMessage('Columns photos must be an array'),
-
-  body('columns.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Columns inspector notes cannot exceed 2000 characters'),
-
-  // Slab rating
-  body('slab.rating')
-    .notEmpty()
-    .withMessage('Slab rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Slab rating must be between 1 and 5'),
-  
-  body('slab.condition_comment')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Slab condition comment cannot exceed 1000 characters'),
-  
-  body('slab.photos')
-    .optional()
-    .isArray()
-    .withMessage('Slab photos must be an array'),
-
-  body('slab.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Slab inspector notes cannot exceed 2000 characters'),
-
-  // Foundation rating
-  body('foundation.rating')
-    .notEmpty()
-    .withMessage('Foundation rating is required')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Foundation rating must be between 1 and 5'),
-  
-  body('foundation.condition_comment')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Foundation condition comment cannot exceed 1000 characters'),
-  
-  body('foundation.photos')
-    .optional()
-    .isArray()
-    .withMessage('Foundation photos must be an array'),
-
-  body('foundation.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Foundation inspector notes cannot exceed 2000 characters'),
-
-  // Custom validation for photos when rating < 3
-  body().custom((requestBody) => {
-    const errors = [];
-    const components = ['beams', 'columns', 'slab', 'foundation'];
-    
-    components.forEach(component => {
-      const rating = requestBody[component]?.rating;
-      const photos = requestBody[component]?.photos;
-      
-      if (rating && rating < 3 && (!photos || photos.length === 0)) {
-        errors.push(`Photos are mandatory for ${component} when rating is below 3`);
-      }
-    });
-    
-    if (errors.length > 0) {
-      throw new Error(errors.join(', '));
-    }
-    
-    return true;
-  })
-];
-
-// =================== INDIVIDUAL NON-STRUCTURAL RATING VALIDATION (Legacy) ===================
-const flatNonStructuralRatingValidation = [
-  // All 11 non-structural components with consistent validation
-  ...['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'].flatMap(component => [
-    body(`${component}.rating`)
-      .notEmpty()
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} rating is required`)
-      .isInt({ min: 1, max: 5 })
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} rating must be between 1 and 5`),
-    
-    body(`${component}.condition_comment`)
-      .optional()
-      .isString()
-      .trim()
-      .isLength({ max: 1000 })
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} condition comment cannot exceed 1000 characters`),
-    
-    body(`${component}.photos`)
-      .optional()
-      .isArray()
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} photos must be an array`),
-
-    body(`${component}.inspector_notes`)
-      .optional()
-      .isString()
-      .trim()
-      .isLength({ max: 2000 })
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} inspector notes cannot exceed 2000 characters`)
-  ]),
-
-  // Custom validation for photos when rating < 3
-  body().custom((requestBody) => {
-    const errors = [];
-    const components = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
-    
-    components.forEach(component => {
-      const rating = requestBody[component]?.rating;
-      const photos = requestBody[component]?.photos;
-      
-      if (rating && rating < 3 && (!photos || photos.length === 0)) {
-        const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        errors.push(`Photos are mandatory for ${componentName} when rating is below 3`);
-      }
-    });
-    
-    if (errors.length > 0) {
-      throw new Error(errors.join(', '));
-    }
-    
-    return true;
-  })
-];
-
 // =================== BULK RATINGS VALIDATION ===================
 const bulkRatingsValidation = [
   // Validate floors array exists and is not empty
@@ -1037,125 +849,6 @@ const bulkRatingsValidation = [
   })
 ];
 
-// =================== OVERALL STRUCTURE RATINGS VALIDATION (Legacy) ===================
-const overallStructuralRatingValidation = [
-  // Beams
-  body('beams.rating')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Beams rating must be between 1 and 5'),
-  
-  body('beams.condition_comment')
-    .optional()
-    .isLength({ max: 2000 })
-    .withMessage('Beams condition comment must not exceed 2000 characters'),
-  
-  body('beams.photos')
-    .optional()
-    .isArray()
-    .withMessage('Beams photos must be an array'),
-
-  body('beams.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Beams inspector notes cannot exceed 2000 characters'),
-
-  // Columns
-  body('columns.rating')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Columns rating must be between 1 and 5'),
-  
-  body('columns.condition_comment')
-    .optional()
-    .isLength({ max: 2000 })
-    .withMessage('Columns condition comment must not exceed 2000 characters'),
-  
-  body('columns.photos')
-    .optional()
-    .isArray()
-    .withMessage('Columns photos must be an array'),
-
-  body('columns.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Columns inspector notes cannot exceed 2000 characters'),
-
-  // Slab
-  body('slab.rating')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Slab rating must be between 1 and 5'),
-  
-  body('slab.condition_comment')
-    .optional()
-    .isLength({ max: 2000 })
-    .withMessage('Slab condition comment must not exceed 2000 characters'),
-  
-  body('slab.photos')
-    .optional()
-    .isArray()
-    .withMessage('Slab photos must be an array'),
-
-  body('slab.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Slab inspector notes cannot exceed 2000 characters'),
-
-  // Foundation
-  body('foundation.rating')
-    .isInt({ min: 1, max: 5 })
-    .withMessage('Foundation rating must be between 1 and 5'),
-  
-  body('foundation.condition_comment')
-    .optional()
-    .isLength({ max: 2000 })
-    .withMessage('Foundation condition comment must not exceed 2000 characters'),
-  
-  body('foundation.photos')
-    .optional()
-    .isArray()
-    .withMessage('Foundation photos must be an array'),
-
-  body('foundation.inspector_notes')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 2000 })
-    .withMessage('Foundation inspector notes cannot exceed 2000 characters')
-];
-
-const overallNonStructuralRatingValidation = [
-  // All 11 non-structural components for overall structure rating
-  ...['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'].flatMap(component => [
-    body(`${component}.rating`)
-      .isInt({ min: 1, max: 5 })
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} rating must be between 1 and 5`),
-    
-    body(`${component}.condition_comment`)
-      .optional()
-      .isLength({ max: 2000 })
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} condition comment must not exceed 2000 characters`),
-    
-    body(`${component}.photos`)
-      .optional()
-      .isArray()
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} photos must be an array`),
-
-    body(`${component}.inspector_notes`)
-      .optional()
-      .isString()
-      .trim()
-      .isLength({ max: 2000 })
-      .withMessage(`${component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} inspector notes cannot exceed 2000 characters`)
-  ])
-];
-
 // =================== STRUCTURE NUMBER VALIDATION ===================
 const structureNumberValidation = [
   body('structural_identity_number')
@@ -1215,30 +908,22 @@ const queryValidations = {
 
 // =================== EXPORTS ===================
 module.exports = {
-
+  // Basic Screen Validations
   locationValidation,
   administrativeValidation,
   geometricDetailsValidation,
   
-  // =================== FLOORS & FLATS ===================
+  // Floors & Flats
   floorValidation,
   flatValidation,
   
-  // =================== ENHANCED RATINGS ===================
-  flatCombinedRatingsValidation,        // NEW: Combined structural + non-structural
+  // ONLY Flat-Level Ratings (NO overall ratings)
+  flatCombinedRatingsValidation,        // Main rating system
   
-  // =================== LEGACY INDIVIDUAL RATINGS ===================
-  flatStructuralRatingValidation,       // Legacy: Individual structural only
-  flatNonStructuralRatingValidation,    // Legacy: Individual non-structural only
+  // Bulk Operations
+  bulkRatingsValidation,
   
-  // =================== OVERALL STRUCTURE RATINGS ===================
-  overallStructuralRatingValidation,    // Legacy: Overall structure structural
-  overallNonStructuralRatingValidation, // Legacy: Overall structure non-structural
-  
-  // =================== BULK OPERATIONS ===================
-  bulkRatingsValidation,                // Enhanced bulk ratings
-  
-  // =================== UTILITIES ===================
+  // Utilities
   structureNumberValidation,
   parameterValidations,
   queryValidations
