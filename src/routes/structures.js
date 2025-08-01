@@ -1,19 +1,15 @@
 const express = require('express');
-const structureController = require('../controllers/structureController');
+const enhancedStructureController = require('../controllers/structureController');
 const { authenticateToken } = require('../middlewares/auth');
-// Import the new validation
 const { 
   locationValidation, 
   administrativeValidation, 
   geometricDetailsValidation,
   floorValidation,
   flatValidation,
-  flatStructuralRatingValidation,
-  flatNonStructuralRatingValidation,
-  overallStructuralRatingValidation,
-  overallNonStructuralRatingValidation,
+  flatCombinedRatingsValidation, // New validator
   structureNumberValidation,
-  bulkRatingsValidation // Add this import
+  bulkRatingsValidation
 } = require('../utils/screenValidators');
 const { handleValidationErrors } = require('../middlewares/validation');
 
@@ -23,386 +19,323 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // =================== STRUCTURE INITIALIZATION ===================
-/**
- * @route   POST /api/structures/initialize
- * @desc    Initialize a new structure (creates draft)
- * @access  Private
- */
-router.post('/initialize', structureController.initializeStructure);
+router.post('/initialize', enhancedStructureController.initializeStructure);
 
 // =================== LOCATION DETAILS ===================
-/**
- * @route   POST /api/structures/:id/location
- * @desc    Save location details (Structure Identification + GPS + Zip Code)
- * @access  Private
- */
 router.post('/:id/location', 
   locationValidation, 
   handleValidationErrors, 
-  structureController.saveLocationScreen
+  enhancedStructureController.saveLocationScreen
 );
-
-/**
- * @route   GET /api/structures/:id/location
- * @desc    Get location details
- * @access  Private
- */
-router.get('/:id/location', structureController.getLocationScreen);
-
-/**
- * @route   PUT /api/structures/:id/location
- * @desc    Update location details
- * @access  Private
- */
+router.get('/:id/location', enhancedStructureController.getLocationScreen);
 router.put('/:id/location', 
   locationValidation, 
   handleValidationErrors, 
-  structureController.updateLocationScreen
+  enhancedStructureController.updateLocationScreen
 );
 
-
-
 // =================== ADMINISTRATIVE DETAILS ===================
-/**
- * @route   POST /api/structures/:id/administrative
- * @desc    Save administrative details
- * @access  Private
- */
 router.post('/:id/administrative', 
   administrativeValidation, 
   handleValidationErrors, 
-  structureController.saveAdministrativeScreen
+  enhancedStructureController.saveAdministrativeScreen
 );
-
-/**
- * @route   GET /api/structures/:id/administrative
- * @desc    Get administrative details
- * @access  Private
- */
-router.get('/:id/administrative', structureController.getAdministrativeScreen);
-
-/**
- * @route   PUT /api/structures/:id/administrative
- * @desc    Update administrative details
- * @access  Private
- */
+router.get('/:id/administrative', enhancedStructureController.getAdministrativeScreen);
 router.put('/:id/administrative', 
   administrativeValidation, 
   handleValidationErrors, 
-  structureController.updateAdministrativeScreen
+  enhancedStructureController.updateAdministrativeScreen
 );
 
-// =================== GEOMETRIC DETAILS (Building Dimensions Only) ===================
-/**
- * @route   POST /api/structures/:id/geometric-details
- * @desc    Save geometric details (building dimensions only)
- * @access  Private
- */
+// =================== GEOMETRIC DETAILS ===================
 router.post('/:id/geometric-details', 
   geometricDetailsValidation, 
   handleValidationErrors, 
-  structureController.saveGeometricDetails
+  enhancedStructureController.saveGeometricDetails
 );
-
-/**
- * @route   GET /api/structures/:id/geometric-details
- * @desc    Get geometric details
- * @access  Private
- */
-router.get('/:id/geometric-details', structureController.getGeometricDetails);
-
-/**
- * @route   PUT /api/structures/:id/geometric-details
- * @desc    Update geometric details
- * @access  Private
- */
+router.get('/:id/geometric-details', enhancedStructureController.getGeometricDetails);
 router.put('/:id/geometric-details', 
   geometricDetailsValidation, 
   handleValidationErrors, 
-  structureController.updateGeometricDetails
+  enhancedStructureController.updateGeometricDetails
 );
 
 // =================== FLOORS MANAGEMENT ===================
-/**
- * @route   POST /api/structures/:id/floors
- * @desc    Add floors to structure (generates floor IDs)
- * @access  Private
- */
 router.post('/:id/floors', 
   floorValidation, 
   handleValidationErrors, 
-  structureController.addFloors
+  enhancedStructureController.addFloors
 );
-
-/**
- * @route   GET /api/structures/:id/floors
- * @desc    Get all floors in structure
- * @access  Private
- */
-router.get('/:id/floors', structureController.getFloors);
-
-/**
- * @route   GET /api/structures/:id/floors/:floorId
- * @desc    Get specific floor details
- * @access  Private
- */
-router.get('/:id/floors/:floorId', structureController.getFloorById);
-
-/**
- * @route   PUT /api/structures/:id/floors/:floorId
- * @desc    Update floor details
- * @access  Private
- */
+router.get('/:id/floors', enhancedStructureController.getFloors);
+router.get('/:id/floors/:floorId', enhancedStructureController.getFloorById);
 router.put('/:id/floors/:floorId', 
   floorValidation, 
   handleValidationErrors, 
-  structureController.updateFloor
+  enhancedStructureController.updateFloor
 );
-
-/**
- * @route   DELETE /api/structures/:id/floors/:floorId
- * @desc    Delete a floor
- * @access  Private
- */
-router.delete('/:id/floors/:floorId', structureController.deleteFloor);
+router.delete('/:id/floors/:floorId', enhancedStructureController.deleteFloor);
 
 // =================== FLATS MANAGEMENT ===================
-/**
- * @route   POST /api/structures/:id/floors/:floorId/flats
- * @desc    Add flats to floor (generates flat IDs)
- * @access  Private
- */
 router.post('/:id/floors/:floorId/flats', 
   flatValidation, 
   handleValidationErrors, 
-  structureController.addFlatsToFloor
+  enhancedStructureController.addFlatsToFloor
 );
-
-/**
- * @route   GET /api/structures/:id/floors/:floorId/flats
- * @desc    Get all flats in floor
- * @access  Private
- */
-router.get('/:id/floors/:floorId/flats', structureController.getFlatsInFloor);
-
-/**
- * @route   GET /api/structures/:id/floors/:floorId/flats/:flatId
- * @desc    Get specific flat details
- * @access  Private
- */
-router.get('/:id/floors/:floorId/flats/:flatId', structureController.getFlatById);
-
-/**
- * @route   PUT /api/structures/:id/floors/:floorId/flats/:flatId
- * @desc    Update flat details
- * @access  Private
- */
+router.get('/:id/floors/:floorId/flats', enhancedStructureController.getFlatsInFloor);
+router.get('/:id/floors/:floorId/flats/:flatId', enhancedStructureController.getFlatById);
 router.put('/:id/floors/:floorId/flats/:flatId', 
   flatValidation, 
   handleValidationErrors, 
-  structureController.updateFlat
+  enhancedStructureController.updateFlat
 );
+router.delete('/:id/floors/:floorId/flats/:flatId', enhancedStructureController.deleteFlat);
 
+// =================== FLAT-LEVEL RATINGS (ENHANCED) ===================
 /**
- * @route   DELETE /api/structures/:id/floors/:floorId/flats/:flatId
- * @desc    Delete a flat
+ * @route   POST /api/structures/:id/floors/:floorId/flats/:flatId/ratings
+ * @desc    Save combined flat ratings (structural + non-structural in one request)
  * @access  Private
  */
-router.delete('/:id/floors/:floorId/flats/:flatId', structureController.deleteFlat);
-
-// =================== FLAT STRUCTURAL RATINGS ===================
-/**
- * @route   POST /api/structures/:id/floors/:floorId/flats/:flatId/structural-rating
- * @desc    Save flat structural ratings
- * @access  Private
- */
-router.post('/:id/floors/:floorId/flats/:flatId/structural-rating', 
-  flatStructuralRatingValidation, 
+router.post('/:id/floors/:floorId/flats/:flatId/ratings', 
+  flatCombinedRatingsValidation, 
   handleValidationErrors, 
-  structureController.saveFlatStructuralRating
+  enhancedStructureController.saveFlatCombinedRatings
 );
 
 /**
- * @route   GET /api/structures/:id/floors/:floorId/flats/:flatId/structural-rating
- * @desc    Get flat structural ratings
+ * @route   GET /api/structures/:id/floors/:floorId/flats/:flatId/ratings
+ * @desc    Get combined flat ratings with overall scores
  * @access  Private
  */
-router.get('/:id/floors/:floorId/flats/:flatId/structural-rating', 
-  structureController.getFlatStructuralRating
+router.get('/:id/floors/:floorId/flats/:flatId/ratings', 
+  enhancedStructureController.getFlatCombinedRatings
 );
 
 /**
- * @route   PUT /api/structures/:id/floors/:floorId/flats/:flatId/structural-rating
- * @desc    Update flat structural ratings
+ * @route   PUT /api/structures/:id/floors/:floorId/flats/:flatId/ratings
+ * @desc    Update combined flat ratings
  * @access  Private
  */
-router.put('/:id/floors/:floorId/flats/:flatId/structural-rating', 
-  flatStructuralRatingValidation, 
+router.put('/:id/floors/:floorId/flats/:flatId/ratings', 
+  flatCombinedRatingsValidation, 
   handleValidationErrors, 
-  structureController.updateFlatStructuralRating
+  enhancedStructureController.saveFlatCombinedRatings
 );
 
-// =================== BULK RATINGS MANAGEMENT ===================
+// =================== FLOOR-LEVEL RATINGS (NEW) ===================
 /**
- * @route   POST /api/structures/:id/ratings
- * @desc    Save bulk ratings for multiple floors and flats
+ * @route   GET /api/structures/:id/floors/:floorId/ratings
+ * @desc    Get floor-level overall ratings (aggregated from all flats)
  * @access  Private
  */
-router.post('/:id/ratings', 
+router.get('/:id/floors/:floorId/ratings', 
+  enhancedStructureController.getFloorLevelRatings
+);
+
+/**
+ * @route   POST /api/structures/:id/floors/:floorId/recalculate-ratings
+ * @desc    Recalculate floor-level ratings manually
+ * @access  Private
+ */
+router.post('/:id/floors/:floorId/recalculate-ratings', 
+  enhancedStructureController.recalculateFloorLevelRatings
+);
+
+// =================== STRUCTURE-LEVEL RATINGS (ENHANCED) ===================
+/**
+ * @route   GET /api/structures/:id/overall-ratings
+ * @desc    Get structure-level overall ratings (aggregated from all floors)
+ * @access  Private
+ */
+router.get('/:id/overall-ratings', 
+  enhancedStructureController.getStructureLevelRatings
+);
+
+/**
+ * @route   POST /api/structures/:id/recalculate-all-ratings
+ * @desc    Recalculate all ratings (flat -> floor -> structure)
+ * @access  Private
+ */
+router.post('/:id/recalculate-all-ratings', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user, structure } = await enhancedStructureController.findUserStructure(req.user.userId, id);
+    
+    // Recalculate floor-level ratings for all floors
+    if (structure.geometric_details?.floors) {
+      for (const floor of structure.geometric_details.floors) {
+        await enhancedStructureController.updateFloorLevelRatings(floor);
+      }
+    }
+    
+    // Recalculate structure-level ratings
+    await enhancedStructureController.updateStructureLevelRatings(structure);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'All ratings recalculated successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      total_floors_processed: structure.geometric_details?.floors?.length || 0,
+      final_health_assessment: structure.final_health_assessment
+    });
+
+  } catch (error) {
+    console.error('❌ Recalculate all ratings error:', error);
+    sendErrorResponse(res, 'Failed to recalculate all ratings', 500, error.message);
+  }
+});
+
+// =================== BULK OPERATIONS (ENHANCED) ===================
+/**
+ * @route   POST /api/structures/:id/bulk-ratings
+ * @desc    Save bulk ratings for multiple floors and flats with auto-calculation
+ * @access  Private
+ */
+router.post('/:id/bulk-ratings', 
   bulkRatingsValidation, 
   handleValidationErrors, 
-  structureController.saveBulkRatings
+  async (req, res) => {
+    try {
+      // Use the existing bulk ratings method but with enhanced calculations
+      await enhancedStructureController.saveBulkRatings(req, res);
+    } catch (error) {
+      console.error('❌ Enhanced bulk ratings error:', error);
+      sendErrorResponse(res, 'Failed to save bulk ratings', 500, error.message);
+    }
+  }
 );
 
 /**
- * @route   GET /api/structures/:id/ratings
- * @desc    Get bulk ratings for all floors and flats in structure
+ * @route   GET /api/structures/:id/bulk-ratings
+ * @desc    Get bulk ratings with floor-level and structure-level summaries
  * @access  Private
  */
-router.get('/:id/ratings', structureController.getBulkRatings);
-
-/**
- * @route   PUT /api/structures/:id/ratings
- * @desc    Update bulk ratings for multiple floors and flats
- * @access  Private
- */
-router.put('/:id/ratings', 
-  bulkRatingsValidation, 
-  handleValidationErrors, 
-  structureController.updateBulkRatings
+router.get('/:id/bulk-ratings', 
+  enhancedStructureController.getBulkRatings
 );
 
-// =================== FLAT NON-STRUCTURAL RATINGS ===================
+// =================== REPORTING & ANALYTICS ===================
 /**
- * @route   POST /api/structures/:id/floors/:floorId/flats/:flatId/non-structural-rating
- * @desc    Save flat non-structural ratings
+ * @route   GET /api/structures/:id/ratings-summary
+ * @desc    Get comprehensive ratings summary (flat -> floor -> structure)
  * @access  Private
  */
-router.post('/:id/floors/:floorId/flats/:flatId/non-structural-rating', 
-  flatNonStructuralRatingValidation, 
-  handleValidationErrors, 
-  structureController.saveFlatNonStructuralRating
-);
+router.get('/:id/ratings-summary', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user, structure } = await enhancedStructureController.findUserStructure(req.user.userId, id);
+    
+    const summary = {
+      structure_info: {
+        structure_id: id,
+        uid: structure.structural_identity?.uid,
+        structural_identity_number: structure.structural_identity?.structural_identity_number,
+        total_floors: structure.geometric_details?.floors?.length || 0,
+        total_flats: 0,
+        status: structure.status
+      },
+      ratings_breakdown: {
+        flat_level: [],
+        floor_level: [],
+        structure_level: {
+          overall_structural: structure.overall_structural_rating || null,
+          overall_non_structural: structure.overall_non_structural_rating || null,
+          final_health_assessment: structure.final_health_assessment || null
+        }
+      },
+      health_distribution: {
+        good: 0,
+        fair: 0,
+        poor: 0,
+        critical: 0
+      },
+      priority_distribution: {
+        low: 0,
+        medium: 0,
+        high: 0,
+        critical: 0
+      }
+    };
+    
+    // Process each floor and flat
+    if (structure.geometric_details?.floors) {
+      structure.geometric_details.floors.forEach(floor => {
+        const floorSummary = {
+          floor_id: floor.floor_id,
+          floor_number: floor.floor_number,
+          floor_label_name: floor.floor_label_name,
+          total_flats: floor.flats ? floor.flats.length : 0,
+          floor_ratings: {
+            structural: floor.floor_overall_structural_rating || null,
+            non_structural: floor.floor_overall_non_structural_rating || null,
+            combined_health: floor.floor_combined_health || null
+          },
+          flats: []
+        };
+        
+        summary.structure_info.total_flats += floorSummary.total_flats;
+        
+        if (floor.flats) {
+          floor.flats.forEach(flat => {
+            const flatSummary = {
+              flat_id: flat.flat_id,
+              flat_number: flat.flat_number,
+              flat_type: flat.flat_type,
+              structural_rating: flat.structural_rating || null,
+              non_structural_rating: flat.non_structural_rating || null,
+              flat_overall_rating: flat.flat_overall_rating || null
+            };
+            
+            floorSummary.flats.push(flatSummary);
+            
+            // Count health and priority distributions
+            if (flat.flat_overall_rating?.health_status) {
+              const health = flat.flat_overall_rating.health_status.toLowerCase();
+              if (summary.health_distribution[health] !== undefined) {
+                summary.health_distribution[health]++;
+              }
+            }
+            
+            if (flat.flat_overall_rating?.priority) {
+              const priority = flat.flat_overall_rating.priority.toLowerCase();
+              if (summary.priority_distribution[priority] !== undefined) {
+                summary.priority_distribution[priority]++;
+              }
+            }
+          });
+        }
+        
+        summary.ratings_breakdown.floor_level.push(floorSummary);
+      });
+    }
+    
+    sendSuccessResponse(res, 'Comprehensive ratings summary retrieved successfully', summary);
 
-/**
- * @route   GET /api/structures/:id/floors/:floorId/flats/:flatId/non-structural-rating
- * @desc    Get flat non-structural ratings
- * @access  Private
- */
-router.get('/:id/floors/:floorId/flats/:flatId/non-structural-rating', 
-  structureController.getFlatNonStructuralRating
-);
-
-/**
- * @route   PUT /api/structures/:id/floors/:floorId/flats/:flatId/non-structural-rating
- * @desc    Update flat non-structural ratings
- * @access  Private
- */
-router.put('/:id/floors/:floorId/flats/:flatId/non-structural-rating', 
-  flatNonStructuralRatingValidation, 
-  handleValidationErrors, 
-  structureController.updateFlatNonStructuralRating
-);
-
-// =================== OVERALL STRUCTURE RATINGS ===================
-/**
- * @route   POST /api/structures/:id/structural-rating
- * @desc    Save overall structural ratings for entire structure
- * @access  Private
- */
-router.post('/:id/structural-rating', 
-  overallStructuralRatingValidation, 
-  handleValidationErrors, 
-  structureController.saveOverallStructuralRating
-);
-
-/**
- * @route   GET /api/structures/:id/structural-rating
- * @desc    Get overall structural ratings
- * @access  Private
- */
-router.get('/:id/structural-rating', structureController.getOverallStructuralRating);
-
-/**
- * @route   PUT /api/structures/:id/structural-rating
- * @desc    Update overall structural ratings
- * @access  Private
- */
-router.put('/:id/structural-rating', 
-  overallStructuralRatingValidation, 
-  handleValidationErrors, 
-  structureController.updateOverallStructuralRating
-);
-
-/**
- * @route   POST /api/structures/:id/non-structural-rating
- * @desc    Save overall non-structural ratings for entire structure
- * @access  Private
- */
-router.post('/:id/non-structural-rating', 
-  overallNonStructuralRatingValidation, 
-  handleValidationErrors, 
-  structureController.saveOverallNonStructuralRating
-);
-
-/**
- * @route   GET /api/structures/:id/non-structural-rating
- * @desc    Get overall non-structural ratings
- * @access  Private
- */
-router.get('/:id/non-structural-rating', structureController.getOverallNonStructuralRating);
-
-/**
- * @route   PUT /api/structures/:id/non-structural-rating
- * @desc    Update overall non-structural ratings
- * @access  Private
- */
-router.put('/:id/non-structural-rating', 
-  overallNonStructuralRatingValidation, 
-  handleValidationErrors, 
-  structureController.updateOverallNonStructuralRating
-);
+  } catch (error) {
+    console.error('❌ Ratings summary error:', error);
+    sendErrorResponse(res, 'Failed to get ratings summary', 500, error.message);
+  }
+});
 
 // =================== STRUCTURE MANAGEMENT ===================
-/**
- * @route   GET /api/structures/:id/progress
- * @desc    Get structure completion progress
- * @access  Private
- */
-router.get('/:id/progress', structureController.getStructureProgress);
-
-/**
- * @route   POST /api/structures/:id/submit
- * @desc    Submit structure for approval
- * @access  Private
- */
-router.post('/:id/submit', structureController.submitStructure);
+router.get('/:id/progress', enhancedStructureController.getStructureProgress);
+router.post('/:id/submit', enhancedStructureController.submitStructure);
 
 // =================== UTILITIES ===================
-/**
- * @route   POST /api/structures/validate-structure-number
- * @desc    Validate structure number format
- * @access  Private
- */
 router.post('/validate-structure-number', 
   structureNumberValidation,
   handleValidationErrors,
-  structureController.validateStructureNumber
+  enhancedStructureController.validateStructureNumber
 );
-
-/**
- * @route   GET /api/structures/location-stats
- * @desc    Get location-based structure statistics
- * @access  Private
- */
-router.get('/location-stats', structureController.getLocationStructureStats);
+router.get('/location-stats', enhancedStructureController.getLocationStructureStats);
 
 // =================== ERROR HANDLING ===================
-// Handle 404 for structure routes
 router.use('*', (req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Structure API endpoint not found',
+    message: 'Enhanced Structure API endpoint not found',
     statusCode: 404
   });
 });
