@@ -114,7 +114,11 @@ const flatSchema = {
     },
     health_status: {
       type: String,
-      enum: ['Good', 'Fair', 'Poor', 'Critical']
+      enum: {
+        values: ['Good', 'Fair', 'Poor', 'Critical'],
+        message: 'Health status must be one of: Good, Fair, Poor, Critical'
+      },
+      default: null
     },
     assessment_date: {
       type: Date,
@@ -157,11 +161,19 @@ const flatSchema = {
     },
     health_status: {
       type: String,
-      enum: ['Good', 'Fair', 'Poor', 'Critical']
+      enum: {
+        values: ['Good', 'Fair', 'Poor', 'Critical'],
+        message: 'Health status must be one of: Good, Fair, Poor, Critical'
+      },
+      default: null
     },
     priority: {
       type: String,
-      enum: ['Low', 'Medium', 'High', 'Critical']
+      enum: {
+        values: ['Low', 'Medium', 'High', 'Critical'],
+        message: 'Priority must be one of: Low, Medium, High, Critical'
+      },
+      default: null
     },
     last_assessment_date: {
       type: Date,
@@ -178,7 +190,7 @@ const flatSchema = {
   }
 };
 
-// Enhanced Floor Schema with Floor-Level Ratings
+// FIXED: Enhanced Floor Schema with Floor-Level Ratings - allowing null values
 const floorSchema = {
   // Don't manually set _id, let MongoDB handle it
   floor_id: {
@@ -227,7 +239,7 @@ const floorSchema = {
   // FLATS ARRAY with enhanced ratings
   flats: [flatSchema],
   
-  // =================== FLOOR-LEVEL OVERALL RATINGS (NEW) ===================
+  // =================== FIXED: FLOOR-LEVEL OVERALL RATINGS - ALLOWING NULL VALUES ===================
   // Floor-level aggregated ratings from all flats in the floor
   floor_overall_structural_rating: {
     beams_average: {
@@ -255,13 +267,34 @@ const floorSchema = {
       min: 1,
       max: 5
     },
+    // FIXED: Allow null values for enum fields
     health_status: {
       type: String,
-      enum: ['Good', 'Fair', 'Poor', 'Critical']
+      enum: {
+        values: ['Good', 'Fair', 'Poor', 'Critical'],
+        message: 'Health status must be one of: Good, Fair, Poor, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Good', 'Fair', 'Poor', 'Critical'].includes(v);
+        },
+        message: 'Health status must be null or one of: Good, Fair, Poor, Critical'
+      }
     },
     priority: {
       type: String,
-      enum: ['Low', 'Medium', 'High', 'Critical']
+      enum: {
+        values: ['Low', 'Medium', 'High', 'Critical'],
+        message: 'Priority must be one of: Low, Medium, High, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Low', 'Medium', 'High', 'Critical'].includes(v);
+        },
+        message: 'Priority must be null or one of: Low, Medium, High, Critical'
+      }
     },
     assessment_date: {
       type: Date,
@@ -300,7 +333,7 @@ const floorSchema = {
     }
   },
   
-  // FLOOR COMBINED HEALTH (structural + non-structural)
+  // FIXED: FLOOR COMBINED HEALTH - ALLOWING NULL VALUES
   floor_combined_health: {
     combined_score: {
       type: Number,
@@ -309,11 +342,31 @@ const floorSchema = {
     },
     health_status: {
       type: String,
-      enum: ['Good', 'Fair', 'Poor', 'Critical']
+      enum: {
+        values: ['Good', 'Fair', 'Poor', 'Critical'],
+        message: 'Health status must be one of: Good, Fair, Poor, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Good', 'Fair', 'Poor', 'Critical'].includes(v);
+        },
+        message: 'Health status must be null or one of: Good, Fair, Poor, Critical'
+      }
     },
     priority: {
       type: String,
-      enum: ['Low', 'Medium', 'High', 'Critical']
+      enum: {
+        values: ['Low', 'Medium', 'High', 'Critical'],
+        message: 'Priority must be one of: Low, Medium, High, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Low', 'Medium', 'High', 'Critical'].includes(v);
+        },
+        message: 'Priority must be null or one of: Low, Medium, High, Critical'
+      }
     },
     last_assessment_date: {
       type: Date,
@@ -500,7 +553,7 @@ const structureSchema = new mongoose.Schema({
     }
   },
   
-  // =================== ENHANCED STRUCTURE-LEVEL RATINGS ===================
+  // =================== FIXED: STRUCTURE-LEVEL RATINGS - ALLOWING NULL VALUES ===================
   
   // STRUCTURE-LEVEL OVERALL STRUCTURAL RATING (aggregated from floors)
   overall_structural_rating: {
@@ -542,6 +595,13 @@ const structureSchema = new mongoose.Schema({
       enum: {
         values: ['Good', 'Fair', 'Poor', 'Critical'],
         message: 'Health status must be one of: Good, Fair, Poor, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Good', 'Fair', 'Poor', 'Critical'].includes(v);
+        },
+        message: 'Health status must be null or one of: Good, Fair, Poor, Critical'
       }
     },
     priority: {
@@ -549,6 +609,13 @@ const structureSchema = new mongoose.Schema({
       enum: {
         values: ['Low', 'Medium', 'High', 'Critical'],
         message: 'Priority must be one of: Low, Medium, High, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Low', 'Medium', 'High', 'Critical'].includes(v);
+        },
+        message: 'Priority must be null or one of: Low, Medium, High, Critical'
       }
     },
     assessment_date: {
@@ -623,7 +690,7 @@ const structureSchema = new mongoose.Schema({
     }
   },
   
-  // FINAL COMBINED HEALTH ASSESSMENT (structural + non-structural)
+  // FIXED: FINAL COMBINED HEALTH ASSESSMENT - ALLOWING NULL VALUES
   final_health_assessment: {
     overall_score: {
       type: Number,
@@ -635,6 +702,13 @@ const structureSchema = new mongoose.Schema({
       enum: {
         values: ['Good', 'Fair', 'Poor', 'Critical'],
         message: 'Health status must be one of: Good, Fair, Poor, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Good', 'Fair', 'Poor', 'Critical'].includes(v);
+        },
+        message: 'Health status must be null or one of: Good, Fair, Poor, Critical'
       }
     },
     priority: {
@@ -642,6 +716,13 @@ const structureSchema = new mongoose.Schema({
       enum: {
         values: ['Low', 'Medium', 'High', 'Critical'],
         message: 'Priority must be one of: Low, Medium, High, Critical'
+      },
+      default: null,
+      validate: {
+        validator: function(v) {
+          return v === null || ['Low', 'Medium', 'High', 'Critical'].includes(v);
+        },
+        message: 'Priority must be null or one of: Low, Medium, High, Critical'
       }
     },
     assessment_date: {
@@ -1025,15 +1106,15 @@ userSchema.pre('save', function(next) {
   next();
 });
 
-// Enhanced pre-save middleware to calculate ratings hierarchically
+// FIXED: Enhanced pre-save middleware with better null handling
 structureSchema.pre('save', function(next) {
-  // Calculate flat-level ratings first
-  if (this.geometric_details?.floors) {
+  // Only calculate ratings if floors exist and are modified
+  if (this.geometric_details?.floors && this.isModified('geometric_details.floors')) {
     this.geometric_details.floors.forEach(floor => {
       if (floor.flats && floor.flats.length > 0) {
         floor.flats.forEach(flat => {
           // Calculate flat structural rating average
-          if (flat.structural_rating && this.isModified('geometric_details.floors')) {
+          if (flat.structural_rating) {
             const structuralRatings = [];
             if (flat.structural_rating.beams?.rating) structuralRatings.push(flat.structural_rating.beams.rating);
             if (flat.structural_rating.columns?.rating) structuralRatings.push(flat.structural_rating.columns.rating);
@@ -1049,7 +1130,7 @@ structureSchema.pre('save', function(next) {
           }
           
           // Calculate flat non-structural rating average
-          if (flat.non_structural_rating && this.isModified('geometric_details.floors')) {
+          if (flat.non_structural_rating) {
             const nonStructuralRatings = [];
             const components = ['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
                                'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
@@ -1084,12 +1165,12 @@ structureSchema.pre('save', function(next) {
           }
         });
         
-        // Calculate floor-level ratings from flats
+        // Calculate floor-level ratings from flats - ONLY if we have flat ratings
         this.calculateFloorLevelRatings(floor);
       }
     });
     
-    // Calculate structure-level ratings from floors
+    // Calculate structure-level ratings from floors - ONLY if we have floor ratings
     this.calculateStructureLevelRatings();
   }
   
@@ -1120,9 +1201,9 @@ userSchema.methods.updateStats = function() {
   this.stats.last_activity_date = new Date();
 };
 
-// Enhanced structure methods
+// FIXED: Enhanced structure methods with better null handling
 structureSchema.methods.getHealthStatus = function(average) {
-  if (!average) return null;
+  if (!average || isNaN(average)) return null;
   if (average >= 4) return 'Good';
   if (average >= 3) return 'Fair';
   if (average >= 2) return 'Poor';
@@ -1130,7 +1211,7 @@ structureSchema.methods.getHealthStatus = function(average) {
 };
 
 structureSchema.methods.getPriority = function(average) {
-  if (!average) return null;
+  if (!average || isNaN(average)) return null;
   if (average >= 4) return 'Low';
   if (average >= 3) return 'Medium';
   if (average >= 2) return 'High';
@@ -1145,6 +1226,7 @@ structureSchema.methods.calculateAverage = function(ratings) {
   return Math.round(average * 10) / 10;
 };
 
+// FIXED: Better floor-level ratings calculation with null safety
 structureSchema.methods.calculateFloorLevelRatings = function(floor) {
   if (!floor.flats || floor.flats.length === 0) return;
   
@@ -1192,42 +1274,58 @@ structureSchema.methods.calculateFloorLevelRatings = function(floor) {
     }
   });
   
-  // Calculate floor structural ratings
-  floor.floor_overall_structural_rating = floor.floor_overall_structural_rating || {};
-  floor.floor_overall_structural_rating.beams_average = this.calculateAverage(structuralRatings.beams);
-  floor.floor_overall_structural_rating.columns_average = this.calculateAverage(structuralRatings.columns);
-  floor.floor_overall_structural_rating.slab_average = this.calculateAverage(structuralRatings.slab);
-  floor.floor_overall_structural_rating.foundation_average = this.calculateAverage(structuralRatings.foundation);
+  // FIXED: Only calculate if we have actual ratings
+  if (structuralRatings.beams.length > 0 || structuralRatings.columns.length > 0 || 
+      structuralRatings.slab.length > 0 || structuralRatings.foundation.length > 0) {
+    
+    // Calculate floor structural ratings
+    floor.floor_overall_structural_rating = floor.floor_overall_structural_rating || {};
+    floor.floor_overall_structural_rating.beams_average = this.calculateAverage(structuralRatings.beams);
+    floor.floor_overall_structural_rating.columns_average = this.calculateAverage(structuralRatings.columns);
+    floor.floor_overall_structural_rating.slab_average = this.calculateAverage(structuralRatings.slab);
+    floor.floor_overall_structural_rating.foundation_average = this.calculateAverage(structuralRatings.foundation);
+    
+    const structuralOverallRatings = [
+      floor.floor_overall_structural_rating.beams_average,
+      floor.floor_overall_structural_rating.columns_average,
+      floor.floor_overall_structural_rating.slab_average,
+      floor.floor_overall_structural_rating.foundation_average
+    ].filter(r => r !== null && !isNaN(r));
+    
+    if (structuralOverallRatings.length > 0) {
+      floor.floor_overall_structural_rating.overall_average = this.calculateAverage(structuralOverallRatings);
+      floor.floor_overall_structural_rating.health_status = this.getHealthStatus(floor.floor_overall_structural_rating.overall_average);
+      floor.floor_overall_structural_rating.priority = this.getPriority(floor.floor_overall_structural_rating.overall_average);
+    } else {
+      // FIXED: Set to null when no ratings available
+      floor.floor_overall_structural_rating.health_status = null;
+      floor.floor_overall_structural_rating.priority = null;
+    }
+    
+    floor.floor_overall_structural_rating.assessment_date = new Date();
+    floor.floor_overall_structural_rating.total_flats_assessed = flatsAssessed;
+  }
   
-  const structuralOverallRatings = [
-    floor.floor_overall_structural_rating.beams_average,
-    floor.floor_overall_structural_rating.columns_average,
-    floor.floor_overall_structural_rating.slab_average,
-    floor.floor_overall_structural_rating.foundation_average
-  ];
+  // Calculate floor non-structural ratings - FIXED with null safety
+  const hasNonStructuralRatings = Object.values(nonStructuralRatings).some(ratings => ratings.length > 0);
   
-  floor.floor_overall_structural_rating.overall_average = this.calculateAverage(structuralOverallRatings);
-  floor.floor_overall_structural_rating.health_status = this.getHealthStatus(floor.floor_overall_structural_rating.overall_average);
-  floor.floor_overall_structural_rating.priority = this.getPriority(floor.floor_overall_structural_rating.overall_average);
-  floor.floor_overall_structural_rating.assessment_date = new Date();
-  floor.floor_overall_structural_rating.total_flats_assessed = flatsAssessed;
+  if (hasNonStructuralRatings) {
+    floor.floor_overall_non_structural_rating = floor.floor_overall_non_structural_rating || {};
+    const nonStructuralOverallRatings = [];
+    
+    Object.keys(nonStructuralRatings).forEach(component => {
+      const average = this.calculateAverage(nonStructuralRatings[component]);
+      floor.floor_overall_non_structural_rating[`${component}_average`] = average;
+      if (average !== null && !isNaN(average)) nonStructuralOverallRatings.push(average);
+    });
+    
+    floor.floor_overall_non_structural_rating.overall_average = this.calculateAverage(nonStructuralOverallRatings);
+    floor.floor_overall_non_structural_rating.assessment_date = new Date();
+    floor.floor_overall_non_structural_rating.total_flats_assessed = flatsAssessed;
+  }
   
-  // Calculate floor non-structural ratings
-  floor.floor_overall_non_structural_rating = floor.floor_overall_non_structural_rating || {};
-  const nonStructuralOverallRatings = [];
-  
-  Object.keys(nonStructuralRatings).forEach(component => {
-    const average = this.calculateAverage(nonStructuralRatings[component]);
-    floor.floor_overall_non_structural_rating[`${component}_average`] = average;
-    if (average) nonStructuralOverallRatings.push(average);
-  });
-  
-  floor.floor_overall_non_structural_rating.overall_average = this.calculateAverage(nonStructuralOverallRatings);
-  floor.floor_overall_non_structural_rating.assessment_date = new Date();
-  floor.floor_overall_non_structural_rating.total_flats_assessed = flatsAssessed;
-  
-  // Calculate floor combined health
-  if (floor.floor_overall_structural_rating.overall_average && floor.floor_overall_non_structural_rating.overall_average) {
+  // Calculate floor combined health - FIXED with null safety
+  if (floor.floor_overall_structural_rating?.overall_average && floor.floor_overall_non_structural_rating?.overall_average) {
     const structuralWeight = 0.7;
     const nonStructuralWeight = 0.3;
     
@@ -1242,9 +1340,16 @@ structureSchema.methods.calculateFloorLevelRatings = function(floor) {
       total_flats: floor.flats.length,
       flats_needing_attention: flatsNeedingAttention
     };
+  } else {
+    // FIXED: Set to null when calculations not possible
+    if (floor.floor_combined_health) {
+      floor.floor_combined_health.health_status = null;
+      floor.floor_combined_health.priority = null;
+    }
   }
 };
 
+// FIXED: Better structure-level ratings calculation
 structureSchema.methods.calculateStructureLevelRatings = function() {
   if (!this.geometric_details?.floors || this.geometric_details.floors.length === 0) return;
   
@@ -1266,7 +1371,7 @@ structureSchema.methods.calculateStructureLevelRatings = function() {
     totalFlatsAssessed += floor.flats ? floor.flats.length : 0;
   });
   
-  // Update structure overall structural rating
+  // Update structure overall structural rating - FIXED with null safety
   if (structuralRatings.length > 0) {
     const structuralAverage = this.calculateAverage(structuralRatings);
     
@@ -1277,6 +1382,12 @@ structureSchema.methods.calculateStructureLevelRatings = function() {
     this.overall_structural_rating.assessment_date = new Date();
     this.overall_structural_rating.total_floors_assessed = totalFloorsAssessed;
     this.overall_structural_rating.total_flats_assessed = totalFlatsAssessed;
+  } else {
+    // FIXED: Set to null when no ratings available
+    if (this.overall_structural_rating) {
+      this.overall_structural_rating.health_status = null;
+      this.overall_structural_rating.priority = null;
+    }
   }
   
   // Update structure overall non-structural rating
@@ -1290,7 +1401,7 @@ structureSchema.methods.calculateStructureLevelRatings = function() {
     this.overall_non_structural_rating.total_flats_assessed = totalFlatsAssessed;
   }
   
-  // Update final health assessment
+  // Update final health assessment - FIXED with null safety
   if (this.overall_structural_rating?.overall_average && this.overall_non_structural_rating?.overall_average) {
     const structuralWeight = this.final_health_assessment?.structural_weight || 0.7;
     const nonStructuralWeight = this.final_health_assessment?.non_structural_weight || 0.3;
@@ -1305,6 +1416,12 @@ structureSchema.methods.calculateStructureLevelRatings = function() {
     this.final_health_assessment.assessment_date = new Date();
     this.final_health_assessment.structural_weight = structuralWeight;
     this.final_health_assessment.non_structural_weight = nonStructuralWeight;
+  } else {
+    // FIXED: Set to null when calculations not possible
+    if (this.final_health_assessment) {
+      this.final_health_assessment.health_status = null;
+      this.final_health_assessment.priority = null;
+    }
   }
 };
 

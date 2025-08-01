@@ -1866,7 +1866,7 @@ class StructureController {
     return this.saveBulkRatings(req, res);
   }
 
-  // =================== HELPER METHODS ===================
+  // =================== FIXED: HELPER METHODS ===================
 
   createRatingComponent(ratingData, inspectionDate) {
     if (!ratingData || !ratingData.rating) return null;
@@ -1888,8 +1888,9 @@ class StructureController {
     return Math.round(average * 10) / 10;
   }
   
+  // FIXED: Better null handling in helper methods
   getHealthStatus(average) {
-    if (!average) return null;
+    if (!average || isNaN(average)) return null;
     if (average >= 4) return 'Good';
     if (average >= 3) return 'Fair';
     if (average >= 2) return 'Poor';
@@ -1897,7 +1898,7 @@ class StructureController {
   }
   
   getPriority(average) {
-    if (!average) return null;
+    if (!average || isNaN(average)) return null;
     if (average >= 4) return 'Low';
     if (average >= 3) return 'Medium';
     if (average >= 2) return 'High';
@@ -1971,6 +1972,7 @@ class StructureController {
     }
   }
 
+  // FIXED: Better floor-level ratings calculation with null safety
   async updateFloorLevelRatings(floor) {
     if (!floor.flats || floor.flats.length === 0) return;
     
@@ -2018,44 +2020,57 @@ class StructureController {
       }
     });
     
-    // Calculate floor structural ratings
-    floor.floor_overall_structural_rating = {
-      beams_average: this.calculateAverage(structuralRatings.beams),
-      columns_average: this.calculateAverage(structuralRatings.columns),
-      slab_average: this.calculateAverage(structuralRatings.slab),
-      foundation_average: this.calculateAverage(structuralRatings.foundation),
-      assessment_date: new Date(),
-      total_flats_assessed: flatsAssessed
-    };
+    // FIXED: Only calculate structural ratings if we have data
+    const hasStructuralData = Object.values(structuralRatings).some(ratings => ratings.length > 0);
     
-    const structuralOverallRatings = [
-      floor.floor_overall_structural_rating.beams_average,
-      floor.floor_overall_structural_rating.columns_average,
-      floor.floor_overall_structural_rating.slab_average,
-      floor.floor_overall_structural_rating.foundation_average
-    ].filter(r => r);
+    if (hasStructuralData) {
+      floor.floor_overall_structural_rating = floor.floor_overall_structural_rating || {};
+      floor.floor_overall_structural_rating.beams_average = this.calculateAverage(structuralRatings.beams);
+      floor.floor_overall_structural_rating.columns_average = this.calculateAverage(structuralRatings.columns);
+      floor.floor_overall_structural_rating.slab_average = this.calculateAverage(structuralRatings.slab);
+      floor.floor_overall_structural_rating.foundation_average = this.calculateAverage(structuralRatings.foundation);
+      
+      const structuralOverallRatings = [
+        floor.floor_overall_structural_rating.beams_average,
+        floor.floor_overall_structural_rating.columns_average,
+        floor.floor_overall_structural_rating.slab_average,
+        floor.floor_overall_structural_rating.foundation_average
+      ].filter(r => r !== null && !isNaN(r));
+      
+      if (structuralOverallRatings.length > 0) {
+        floor.floor_overall_structural_rating.overall_average = this.calculateAverage(structuralOverallRatings);
+        floor.floor_overall_structural_rating.health_status = this.getHealthStatus(floor.floor_overall_structural_rating.overall_average);
+        floor.floor_overall_structural_rating.priority = this.getPriority(floor.floor_overall_structural_rating.overall_average);
+      } else {
+        // FIXED: Properly handle null values
+        floor.floor_overall_structural_rating.health_status = null;
+        floor.floor_overall_structural_rating.priority = null;
+      }
+      
+      floor.floor_overall_structural_rating.assessment_date = new Date();
+      floor.floor_overall_structural_rating.total_flats_assessed = flatsAssessed;
+    }
     
-    floor.floor_overall_structural_rating.overall_average = this.calculateAverage(structuralOverallRatings);
-    floor.floor_overall_structural_rating.health_status = this.getHealthStatus(floor.floor_overall_structural_rating.overall_average);
-    floor.floor_overall_structural_rating.priority = this.getPriority(floor.floor_overall_structural_rating.overall_average);
+    // Calculate floor non-structural ratings - FIXED with null safety
+    const hasNonStructuralData = Object.values(nonStructuralRatings).some(ratings => ratings.length > 0);
     
-    // Calculate floor non-structural ratings
-    floor.floor_overall_non_structural_rating = {
-      assessment_date: new Date(),
-      total_flats_assessed: flatsAssessed
-    };
+    if (hasNonStructuralData) {
+      floor.floor_overall_non_structural_rating = floor.floor_overall_non_structural_rating || {};
+      const nonStructuralOverallRatings = [];
+      
+      Object.keys(nonStructuralRatings).forEach(component => {
+        const average = this.calculateAverage(nonStructuralRatings[component]);
+        floor.floor_overall_non_structural_rating[`${component}_average`] = average;
+        if (average !== null && !isNaN(average)) nonStructuralOverallRatings.push(average);
+      });
+      
+      floor.floor_overall_non_structural_rating.overall_average = this.calculateAverage(nonStructuralOverallRatings);
+      floor.floor_overall_non_structural_rating.assessment_date = new Date();
+      floor.floor_overall_non_structural_rating.total_flats_assessed = flatsAssessed;
+    }
     
-    const nonStructuralOverallRatings = [];
-    Object.keys(nonStructuralRatings).forEach(component => {
-      const average = this.calculateAverage(nonStructuralRatings[component]);
-      floor.floor_overall_non_structural_rating[`${component}_average`] = average;
-      if (average) nonStructuralOverallRatings.push(average);
-    });
-    
-    floor.floor_overall_non_structural_rating.overall_average = this.calculateAverage(nonStructuralOverallRatings);
-    
-    // Calculate floor combined health
-    if (floor.floor_overall_structural_rating.overall_average && floor.floor_overall_non_structural_rating.overall_average) {
+    // Calculate floor combined health - FIXED with null safety
+    if (floor.floor_overall_structural_rating?.overall_average && floor.floor_overall_non_structural_rating?.overall_average) {
       const structuralWeight = 0.7;
       const nonStructuralWeight = 0.3;
       
@@ -2070,9 +2085,16 @@ class StructureController {
         total_flats: floor.flats.length,
         flats_needing_attention: flatsNeedingAttention
       };
+    } else {
+      // FIXED: Set to null when calculations not possible
+      if (floor.floor_combined_health) {
+        floor.floor_combined_health.health_status = null;
+        floor.floor_combined_health.priority = null;
+      }
     }
   }
   
+  // FIXED: Better structure-level ratings calculation with null safety
   async updateStructureLevelRatings(structure) {
     if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) return;
     
@@ -2094,7 +2116,7 @@ class StructureController {
       totalFlatsAssessed += floor.flats ? floor.flats.length : 0;
     });
     
-    // Update structure overall structural rating
+    // Update structure overall structural rating - FIXED with null safety
     if (structuralRatings.length > 0) {
       const structuralAverage = this.calculateAverage(structuralRatings);
       
@@ -2105,6 +2127,12 @@ class StructureController {
       structure.overall_structural_rating.assessment_date = new Date();
       structure.overall_structural_rating.total_floors_assessed = totalFloorsAssessed;
       structure.overall_structural_rating.total_flats_assessed = totalFlatsAssessed;
+    } else {
+      // FIXED: Properly handle when no ratings are available
+      if (structure.overall_structural_rating) {
+        structure.overall_structural_rating.health_status = null;
+        structure.overall_structural_rating.priority = null;
+      }
     }
     
     // Update structure overall non-structural rating
@@ -2118,10 +2146,11 @@ class StructureController {
       structure.overall_non_structural_rating.total_flats_assessed = totalFlatsAssessed;
     }
     
-    // Update final health assessment
+    // Update final health assessment - FIXED with null safety
     this.updateFinalHealthAssessment(structure);
   }
 
+  // FIXED: Better final health assessment with null safety
   updateFinalHealthAssessment(structure) {
     if (structure.overall_structural_rating?.overall_average && structure.overall_non_structural_rating?.overall_average) {
       const structuralWeight = 0.7;
@@ -2130,14 +2159,19 @@ class StructureController {
       const finalScore = (structure.overall_structural_rating.overall_average * structuralWeight) + 
                         (structure.overall_non_structural_rating.overall_average * nonStructuralWeight);
       
-      structure.final_health_assessment = {
-        overall_score: Math.round(finalScore * 10) / 10,
-        health_status: structure.overall_structural_rating.health_status,
-        priority: structure.overall_structural_rating.priority,
-        assessment_date: new Date(),
-        structural_weight: structuralWeight,
-        non_structural_weight: nonStructuralWeight
-      };
+      structure.final_health_assessment = structure.final_health_assessment || {};
+      structure.final_health_assessment.overall_score = Math.round(finalScore * 10) / 10;
+      structure.final_health_assessment.health_status = structure.overall_structural_rating.health_status;
+      structure.final_health_assessment.priority = structure.overall_structural_rating.priority;
+      structure.final_health_assessment.assessment_date = new Date();
+      structure.final_health_assessment.structural_weight = structuralWeight;
+      structure.final_health_assessment.non_structural_weight = nonStructuralWeight;
+    } else {
+      // FIXED: Set to null when calculations not possible
+      if (structure.final_health_assessment) {
+        structure.final_health_assessment.health_status = null;
+        structure.final_health_assessment.priority = null;
+      }
     }
   }
 
