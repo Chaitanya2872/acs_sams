@@ -1,399 +1,794 @@
-const { Structure, Inspection } = require('../models/schemas');
+const { User } = require('../models/schemas');
 
+/**
+ * Enhanced Structure Service
+ * Contains business logic for structure operations, analytics, and reporting
+ */
 class StructureService {
+  
+  // =================== STRUCTURE ANALYTICS ===================
+  
   /**
-   * Calculate overall structural rating for a structure
-   * @param {Object} structure - Structure document
-   * @returns {Object} Overall rating summary
+   * Calculate comprehensive structure analytics
+   * @param {Array} structures - Array of structure documents
+   * @returns {Object} Analytics data
    */
-  async calculateOverallStructuralRating(structure) {
-    if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) {
-      return null;
-    }
-
-    const allRatings = {
-      beams: [],
-      columns: [],
-      slab: [],
-      foundation: []
-    };
-
-    // Collect all structural ratings from all flats
-    structure.geometric_details.floors.forEach(floor => {
-      if (floor.flats && floor.flats.length > 0) {
-        floor.flats.forEach(flat => {
-          if (flat.structural_rating) {
-            if (flat.structural_rating.beams?.rating) {
-              allRatings.beams.push(flat.structural_rating.beams.rating);
-            }
-            if (flat.structural_rating.columns?.rating) {
-              allRatings.columns.push(flat.structural_rating.columns.rating);
-            }
-            if (flat.structural_rating.slab?.rating) {
-              allRatings.slab.push(flat.structural_rating.slab.rating);
-            }
-            if (flat.structural_rating.foundation?.rating) {
-              allRatings.foundation.push(flat.structural_rating.foundation.rating);
-            }
-          }
-        });
-      }
-    });
-
-    const overallRating = {};
-    let totalRating = 0;
-    let componentCount = 0;
-
-    // Calculate average rating for each structural component
-    for (const [component, ratings] of Object.entries(allRatings)) {
-      if (ratings.length > 0) {
-        const average = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
-        overallRating[component] = Math.round(average * 10) / 10; // Round to 1 decimal place
-        totalRating += average;
-        componentCount++;
-      }
-    }
-
-    // Calculate overall average
-    overallRating.overall = componentCount > 0 ? Math.round((totalRating / componentCount) * 10) / 10 : 0;
-
-    // Determine health status
-    const overallAvg = overallRating.overall;
-    if (overallAvg >= 4) {
-      overallRating.healthStatus = 'Good';
-      overallRating.priority = 'Low';
-    } else if (overallAvg >= 3) {
-      overallRating.healthStatus = 'Fair';
-      overallRating.priority = 'Medium';
-    } else if (overallAvg >= 2) {
-      overallRating.healthStatus = 'Poor';
-      overallRating.priority = 'High';
-    } else {
-      overallRating.healthStatus = 'Critical';
-      overallRating.priority = 'Critical';
-    }
-
-    return overallRating;
-  }
-
-  /**
-   * Calculate overall non-structural rating for a structure
-   * @param {Object} structure - Structure document
-   * @returns {Object} Non-structural rating summary
-   */
-  async calculateOverallNonStructuralRating(structure) {
-    if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) {
-      return null;
-    }
-
-    const nonStructuralComponents = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
-
-    const allRatings = {};
-    nonStructuralComponents.forEach(component => {
-      allRatings[component] = [];
-    });
-
-    // Collect all non-structural ratings from all flats
-    structure.geometric_details.floors.forEach(floor => {
-      if (floor.flats && floor.flats.length > 0) {
-        floor.flats.forEach(flat => {
-          if (flat.non_structural_rating) {
-            nonStructuralComponents.forEach(component => {
-              if (flat.non_structural_rating[component]?.rating) {
-                allRatings[component].push(flat.non_structural_rating[component].rating);
-              }
-            });
-          }
-        });
-      }
-    });
-
-    const overallNonStructuralRating = {};
-    let totalRating = 0;
-    let componentCount = 0;
-
-    // Calculate average rating for each non-structural component
-    for (const [component, ratings] of Object.entries(allRatings)) {
-      if (ratings.length > 0) {
-        const average = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
-        overallNonStructuralRating[component] = Math.round(average * 10) / 10;
-        totalRating += average;
-        componentCount++;
-      }
-    }
-
-    // Calculate overall average for non-structural components
-    overallNonStructuralRating.overall = componentCount > 0 ? Math.round((totalRating / componentCount) * 10) / 10 : 0;
-
-    return overallNonStructuralRating;
-  }
-
-  /**
-   * Generate inspection schedule based on structure condition
-   * @param {Object} structure - Structure document
-   * @returns {Date} Next inspection date
-   */
-  async generateInspectionSchedule(structure) {
-    const currentDate = new Date();
-    let nextInspectionDate = new Date(currentDate);
-
-    // Calculate overall rating to determine inspection frequency
-    const overallRating = await this.calculateOverallStructuralRating(structure);
-    
-    if (!overallRating) {
-      // If no ratings available, schedule in 6 months
-      nextInspectionDate.setMonth(currentDate.getMonth() + 6);
-      return nextInspectionDate;
-    }
-
-    const averageRating = overallRating.overall;
-
-    // Schedule based on rating (lower rating = more frequent inspections)
-    if (averageRating >= 4.5) {
-      nextInspectionDate.setFullYear(currentDate.getFullYear() + 3); // 3 years for excellent condition
-    } else if (averageRating >= 4) {
-      nextInspectionDate.setFullYear(currentDate.getFullYear() + 2); // 2 years for good condition
-    } else if (averageRating >= 3) {
-      nextInspectionDate.setFullYear(currentDate.getFullYear() + 1); // 1 year for fair condition
-    } else if (averageRating >= 2) {
-      nextInspectionDate.setMonth(currentDate.getMonth() + 6); // 6 months for poor condition
-    } else {
-      nextInspectionDate.setMonth(currentDate.getMonth() + 3); // 3 months for critical condition
-    }
-
-    return nextInspectionDate;
-  }
-
-  /**
-   * Get structures requiring inspection
-   * @returns {Array} Structures needing inspection
-   */
-  async getStructuresRequiringInspection() {
-    const currentDate = new Date();
-    const oneMonthFromNow = new Date();
-    oneMonthFromNow.setMonth(currentDate.getMonth() + 1);
-
-    // Find structures that need inspection soon or are overdue
-    const structures = await Structure.find({
-      $or: [
-        { status: 'requires_inspection' },
-        { 
-          'geometric_details.floors.flats.inspection_schedule.next_inspection_date': { 
-            $lte: oneMonthFromNow 
-          } 
+  calculateStructureAnalytics(structures) {
+    const analytics = {
+      overview: {
+        total_structures: structures.length,
+        total_floors: 0,
+        total_flats: 0,
+        total_images: 0,
+        completion_rate: 0
+      },
+      
+      status_distribution: {},
+      type_distribution: {},
+      health_distribution: { good: 0, fair: 0, poor: 0, critical: 0, unrated: 0 },
+      
+      rating_analytics: {
+        structural: {
+          average: null,
+          distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+          total_assessments: 0
+        },
+        non_structural: {
+          average: null,
+          distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+          total_assessments: 0
         }
-      ]
-    })
-    .populate('creation_info.created_by', 'username email role')
-    .select('structural_identity administration geometric_details.floors.flats.inspection_schedule status');
-
-    return structures.map(structure => {
-      const overallRating = this.calculateOverallStructuralRating(structure);
-      return {
-        ...structure.toObject(),
-        overallRating
-      };
-    });
-  }
-
-  /**
-   * Get structures by priority level
-   * @param {string} priority - Priority level (Critical, High, Medium, Low)
-   * @returns {Array} Structures matching priority
-   */
-  async getStructuresByPriority(priority) {
-    const structures = await Structure.find({})
-      .populate('creation_info.created_by', 'username email role');
-
-    const structuresWithRatings = [];
-
-    for (const structure of structures) {
-      const overallRating = await this.calculateOverallStructuralRating(structure);
-      if (overallRating && overallRating.priority === priority) {
-        structuresWithRatings.push({
-          ...structure.toObject(),
-          overallRating
-        });
-      }
-    }
-
-    return structuresWithRatings;
-  }
-
-  /**
-   * Generate maintenance recommendations based on ratings
-   * @param {Object} structure - Structure document
-   * @returns {Array} Maintenance recommendations
-   */
-  async generateMaintenanceRecommendations(structure) {
-    const recommendations = [];
-
-    if (!structure.geometric_details?.floors) {
-      return recommendations;
-    }
-
-    structure.geometric_details.floors.forEach((floor, floorIndex) => {
-      if (floor.flats && floor.flats.length > 0) {
-        floor.flats.forEach((flat, flatIndex) => {
-          // Check structural components
-          if (flat.structural_rating) {
-            const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
+      },
+      
+      maintenance_insights: {
+        critical_issues: 0,
+        high_priority_issues: 0,
+        structures_needing_attention: 0,
+        estimated_total_cost: 0
+      },
+      
+      progress_tracking: {
+        fully_completed: 0,
+        ratings_completed: 0,
+        partially_completed: 0,
+        just_initialized: 0
+      },
+      
+      geographic_distribution: {},
+      monthly_trends: {}
+    };
+    
+    const allStructuralRatings = [];
+    const allNonStructuralRatings = [];
+    
+    structures.forEach(structure => {
+      // Count floors and flats
+      if (structure.geometric_details?.floors) {
+        analytics.overview.total_floors += structure.geometric_details.floors.length;
+        
+        structure.geometric_details.floors.forEach(floor => {
+          if (floor.flats) {
+            analytics.overview.total_flats += floor.flats.length;
             
-            structuralComponents.forEach(component => {
-              const rating = flat.structural_rating[component];
-              if (rating && rating.rating <= 2) {
-                recommendations.push({
-                  type: 'Structural',
-                  priority: rating.rating === 1 ? 'Critical' : 'High',
-                  component: component.charAt(0).toUpperCase() + component.slice(1),
-                  location: `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`,
-                  issue: rating.condition_comment || `${component} needs attention`,
-                  recommendedAction: this.getStructuralRecommendation(component, rating.rating),
-                  urgency: rating.rating === 1 ? 'Immediate' : 'Within 30 days'
+            floor.flats.forEach(flat => {
+              // Count images
+              if (flat.structural_rating) {
+                Object.values(flat.structural_rating).forEach(rating => {
+                  if (rating.photos) {
+                    analytics.overview.total_images += rating.photos.length;
+                  }
+                });
+              }
+              
+              if (flat.non_structural_rating) {
+                Object.values(flat.non_structural_rating).forEach(rating => {
+                  if (rating.photos) {
+                    analytics.overview.total_images += rating.photos.length;
+                  }
+                });
+              }
+              
+              // Process ratings
+              if (flat.flat_overall_rating?.combined_score) {
+                const score = flat.flat_overall_rating.combined_score;
+                const health = this.getHealthStatus(score).toLowerCase();
+                
+                if (analytics.health_distribution[health] !== undefined) {
+                  analytics.health_distribution[health]++;
+                }
+                
+                // Count priority issues
+                if (flat.flat_overall_rating.priority === 'Critical') {
+                  analytics.maintenance_insights.critical_issues++;
+                } else if (flat.flat_overall_rating.priority === 'High') {
+                  analytics.maintenance_insights.high_priority_issues++;
+                }
+              } else {
+                analytics.health_distribution.unrated++;
+              }
+              
+              // Collect structural ratings
+              if (flat.structural_rating) {
+                ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
+                  if (flat.structural_rating[component]?.rating) {
+                    const rating = flat.structural_rating[component].rating;
+                    allStructuralRatings.push(rating);
+                    analytics.rating_analytics.structural.distribution[rating]++;
+                    analytics.rating_analytics.structural.total_assessments++;
+                  }
+                });
+              }
+              
+              // Collect non-structural ratings
+              if (flat.non_structural_rating) {
+                const nonStructuralComponents = [
+                  'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+                  'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+                  'sewage_system', 'panel_board', 'lifts'
+                ];
+                
+                nonStructuralComponents.forEach(component => {
+                  if (flat.non_structural_rating[component]?.rating) {
+                    const rating = flat.non_structural_rating[component].rating;
+                    allNonStructuralRatings.push(rating);
+                    analytics.rating_analytics.non_structural.distribution[rating]++;
+                    analytics.rating_analytics.non_structural.total_assessments++;
+                  }
                 });
               }
             });
           }
-
-          // Check non-structural components
+        });
+      }
+      
+      // Status distribution
+      const status = structure.status || 'draft';
+      analytics.status_distribution[status] = (analytics.status_distribution[status] || 0) + 1;
+      
+      // Type distribution
+      const type = structure.structural_identity?.type_of_structure || 'unknown';
+      analytics.type_distribution[type] = (analytics.type_distribution[type] || 0) + 1;
+      
+      // Geographic distribution
+      const location = `${structure.structural_identity?.city_name || 'Unknown'}, ${structure.structural_identity?.state_code || 'Unknown'}`;
+      analytics.geographic_distribution[location] = (analytics.geographic_distribution[location] || 0) + 1;
+      
+      // Progress tracking
+      const progress = this.calculateProgress(structure);
+      if (progress.overall_percentage >= 100) {
+        analytics.progress_tracking.fully_completed++;
+      } else if (progress.flat_ratings_completed) {
+        analytics.progress_tracking.ratings_completed++;
+      } else if (progress.overall_percentage > 30) {
+        analytics.progress_tracking.partially_completed++;
+      } else {
+        analytics.progress_tracking.just_initialized++;
+      }
+      
+      // Monthly trends (last 12 months)
+      const createdDate = new Date(structure.creation_info?.created_date);
+      if (createdDate) {
+        const monthKey = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
+        analytics.monthly_trends[monthKey] = (analytics.monthly_trends[monthKey] || 0) + 1;
+      }
+    });
+    
+    // Calculate averages
+    if (allStructuralRatings.length > 0) {
+      analytics.rating_analytics.structural.average = 
+        Math.round((allStructuralRatings.reduce((sum, r) => sum + r, 0) / allStructuralRatings.length) * 10) / 10;
+    }
+    
+    if (allNonStructuralRatings.length > 0) {
+      analytics.rating_analytics.non_structural.average = 
+        Math.round((allNonStructuralRatings.reduce((sum, r) => sum + r, 0) / allNonStructuralRatings.length) * 10) / 10;
+    }
+    
+    // Calculate completion rate
+    const ratedFlats = Object.values(analytics.health_distribution).reduce((sum, count) => sum + count, 0) - analytics.health_distribution.unrated;
+    analytics.overview.completion_rate = analytics.overview.total_flats > 0 ? 
+      Math.round((ratedFlats / analytics.overview.total_flats) * 100) : 0;
+    
+    // Count structures needing attention
+    analytics.maintenance_insights.structures_needing_attention = structures.filter(structure => {
+      if (!structure.geometric_details?.floors) return false;
+      
+      return structure.geometric_details.floors.some(floor => 
+        floor.flats && floor.flats.some(flat => 
+          flat.flat_overall_rating?.priority === 'Critical' || flat.flat_overall_rating?.priority === 'High'
+        )
+      );
+    }).length;
+    
+    return analytics;
+  }
+  
+  // =================== HEALTH & MAINTENANCE CALCULATIONS ===================
+  
+  /**
+   * Calculate structure health metrics
+   * @param {Object} structure - Structure document
+   * @returns {Object} Health metrics
+   */
+  calculateStructureHealth(structure) {
+    const health = {
+      overall_score: null,
+      structural_health: null,
+      non_structural_health: null,
+      health_status: 'Unknown',
+      priority_level: 'Medium',
+      critical_components: [],
+      recommendations: [],
+      last_assessment: null,
+      next_inspection_due: null
+    };
+    
+    if (!structure.geometric_details?.floors) {
+      return health;
+    }
+    
+    const structuralRatings = [];
+    const nonStructuralRatings = [];
+    const criticalIssues = [];
+    let lastAssessment = null;
+    
+    structure.geometric_details.floors.forEach(floor => {
+      if (floor.flats) {
+        floor.flats.forEach(flat => {
+          // Collect structural ratings
+          if (flat.structural_rating) {
+            ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
+              if (flat.structural_rating[component]?.rating) {
+                structuralRatings.push(flat.structural_rating[component].rating);
+                
+                if (flat.structural_rating[component].rating <= 2) {
+                  criticalIssues.push({
+                    type: 'structural',
+                    component,
+                    rating: flat.structural_rating[component].rating,
+                    location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
+                    condition: flat.structural_rating[component].condition_comment
+                  });
+                }
+                
+                // Track latest assessment
+                if (flat.structural_rating[component].inspection_date && 
+                    (!lastAssessment || flat.structural_rating[component].inspection_date > lastAssessment)) {
+                  lastAssessment = flat.structural_rating[component].inspection_date;
+                }
+              }
+            });
+          }
+          
+          // Collect non-structural ratings
           if (flat.non_structural_rating) {
-            const nonStructuralComponents = [
+            const components = [
               'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
               'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
               'sewage_system', 'panel_board', 'lifts'
             ];
-
-            nonStructuralComponents.forEach(component => {
-              const rating = flat.non_structural_rating[component];
-              if (rating && rating.rating <= 2) {
-                recommendations.push({
-                  type: 'Non-Structural',
-                  priority: rating.rating === 1 ? 'High' : 'Medium',
-                  component: component.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                  location: `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`,
-                  issue: rating.condition_comment || `${component.replace('_', ' ')} needs attention`,
-                  recommendedAction: this.getNonStructuralRecommendation(component, rating.rating),
-                  urgency: rating.rating === 1 ? 'Within 15 days' : 'Within 60 days'
-                });
+            
+            components.forEach(component => {
+              if (flat.non_structural_rating[component]?.rating) {
+                nonStructuralRatings.push(flat.non_structural_rating[component].rating);
+                
+                if (flat.non_structural_rating[component].rating <= 2) {
+                  criticalIssues.push({
+                    type: 'non_structural',
+                    component: component.replace('_', ' '),
+                    rating: flat.non_structural_rating[component].rating,
+                    location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
+                    condition: flat.non_structural_rating[component].condition_comment
+                  });
+                }
+                
+                // Track latest assessment
+                if (flat.non_structural_rating[component].inspection_date && 
+                    (!lastAssessment || flat.non_structural_rating[component].inspection_date > lastAssessment)) {
+                  lastAssessment = flat.non_structural_rating[component].inspection_date;
+                }
               }
             });
           }
         });
       }
     });
-
-    // Sort by priority and urgency
-    const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
-    recommendations.sort((a, b) => {
-      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-        return priorityOrder[a.priority] - priorityOrder[b.priority];
-      }
-      return a.urgency.localeCompare(b.urgency);
+    
+    // Calculate health scores
+    if (structuralRatings.length > 0) {
+      health.structural_health = Math.round(
+        (structuralRatings.reduce((sum, r) => sum + r, 0) / structuralRatings.length) * 10
+      ) / 10;
+    }
+    
+    if (nonStructuralRatings.length > 0) {
+      health.non_structural_health = Math.round(
+        (nonStructuralRatings.reduce((sum, r) => sum + r, 0) / nonStructuralRatings.length) * 10
+      ) / 10;
+    }
+    
+    // Calculate overall score (70% structural, 30% non-structural)
+    if (health.structural_health && health.non_structural_health) {
+      health.overall_score = Math.round(
+        ((health.structural_health * 0.7) + (health.non_structural_health * 0.3)) * 10
+      ) / 10;
+      
+      health.health_status = this.getHealthStatus(health.overall_score);
+      health.priority_level = this.getPriority(health.overall_score);
+    }
+    
+    health.critical_components = criticalIssues.sort((a, b) => a.rating - b.rating);
+    health.last_assessment = lastAssessment;
+    
+    // Calculate next inspection due date
+    if (lastAssessment) {
+      const nextInspection = new Date(lastAssessment);
+      const monthsToAdd = health.overall_score >= 4 ? 12 : health.overall_score >= 3 ? 6 : 3;
+      nextInspection.setMonth(nextInspection.getMonth() + monthsToAdd);
+      health.next_inspection_due = nextInspection;
+    }
+    
+    // Generate recommendations
+    health.recommendations = this.generateHealthRecommendations(criticalIssues, health.overall_score);
+    
+    return health;
+  }
+  
+  /**
+   * Generate maintenance recommendations based on health analysis
+   * @param {Array} criticalIssues - Array of critical issues
+   * @param {number} overallScore - Overall health score
+   * @returns {Array} Recommendations
+   */
+  generateHealthRecommendations(criticalIssues, overallScore) {
+    const recommendations = [];
+    
+    // Critical issues recommendations
+    criticalIssues.forEach(issue => {
+      recommendations.push({
+        priority: issue.rating === 1 ? 'Critical' : 'High',
+        category: issue.type === 'structural' ? 'Structural Safety' : 'Maintenance',
+        description: `Address ${issue.component} issues at ${issue.location}`,
+        action: this.getRecommendedAction(issue.component, issue.rating),
+        timeline: issue.rating === 1 ? 'Immediate' : 'Within 30 days',
+        estimated_cost: this.getEstimatedCost(issue.component, issue.rating, issue.type)
+      });
     });
-
-    return recommendations;
+    
+    // General recommendations based on overall score
+    if (overallScore && overallScore < 3) {
+      recommendations.push({
+        priority: 'High',
+        category: 'General Maintenance',
+        description: 'Structure requires comprehensive maintenance plan',
+        action: 'Develop and implement systematic maintenance schedule',
+        timeline: 'Within 60 days',
+        estimated_cost: { estimated_amount: 100000, currency: 'INR' }
+      });
+    } else if (overallScore && overallScore < 4) {
+      recommendations.push({
+        priority: 'Medium',
+        category: 'Preventive Maintenance',
+        description: 'Implement preventive maintenance measures',
+        action: 'Schedule regular inspections and minor repairs',
+        timeline: 'Within 90 days',
+        estimated_cost: { estimated_amount: 50000, currency: 'INR' }
+      });
+    }
+    
+    return recommendations.sort((a, b) => {
+      const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
   }
-
+  
+  // =================== IMAGE ANALYTICS ===================
+  
   /**
-   * Get structural component recommendation based on rating
-   * @param {string} component - Component name
-   * @param {number} rating - Rating value
-   * @returns {string} Recommendation text
+   * Calculate image analytics for structures
+   * @param {Array} structures - Array of structure documents
+   * @returns {Object} Image analytics
    */
-  getStructuralRecommendation(component, rating) {
-    const recommendations = {
-      beams: {
-        1: 'Immediate structural assessment required. Consider beam replacement or strengthening.',
-        2: 'Detailed inspection and repair of cracks/deflection needed within 30 days.'
+  calculateImageAnalytics(structures) {
+    const analytics = {
+      total_images: 0,
+      images_by_type: { structural: 0, non_structural: 0 },
+      images_by_component: {},
+      images_by_rating: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+      documentation_completeness: {
+        fully_documented: 0,
+        partially_documented: 0,
+        not_documented: 0
       },
-      columns: {
-        1: 'Critical - Immediate structural engineer assessment. Potential load-bearing compromise.',
-        2: 'Repair cracks and assess load-bearing capacity. Monitor closely.'
-      },
-      slab: {
-        1: 'Major slab repair or replacement required. Safety risk present.',
-        2: 'Repair cracks and address deflection issues. Check for water damage.'
-      },
-      foundation: {
-        1: 'Critical foundation issues. Immediate professional assessment required.',
-        2: 'Foundation repair needed. Address settlement and drainage issues.'
+      upload_trends: {},
+      quality_metrics: {
+        high_quality_images: 0,
+        low_quality_images: 0,
+        images_with_comments: 0
       }
     };
-
-    return recommendations[component]?.[rating] || `${component} requires professional assessment.`;
-  }
-
-  /**
-   * Get non-structural component recommendation based on rating
-   * @param {string} component - Component name
-   * @param {number} rating - Rating value
-   * @returns {string} Recommendation text
-   */
-  getNonStructuralRecommendation(component, rating) {
-    const recommendations = {
-      brick_plaster: {
-        1: 'Complete replastering required. Address underlying moisture issues.',
-        2: 'Repair cracks and repaint. Check for seepage.'
-      },
-      doors_windows: {
-        1: 'Replace doors/windows. Check for security and weather sealing.',
-        2: 'Repair hardware and improve sealing. Paint/stain as needed.'
-      },
-      electrical_wiring: {
-        1: 'Complete electrical system overhaul required. Safety hazard present.',
-        2: 'Upgrade wiring and replace faulty components. Check circuit capacity.'
-      },
-      plumbing: {
-        1: 'Major plumbing renovation needed. Replace old pipes.',
-        2: 'Repair leaks and replace worn fixtures. Check water pressure.'
+    
+    structures.forEach(structure => {
+      if (structure.geometric_details?.floors) {
+        structure.geometric_details.floors.forEach(floor => {
+          if (floor.flats) {
+            floor.flats.forEach(flat => {
+              let flatImages = 0;
+              
+              // Process structural images
+              if (flat.structural_rating) {
+                ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
+                  if (flat.structural_rating[component]?.photos) {
+                    const photos = flat.structural_rating[component].photos;
+                    flatImages += photos.length;
+                    analytics.total_images += photos.length;
+                    analytics.images_by_type.structural += photos.length;
+                    
+                    if (!analytics.images_by_component[component]) {
+                      analytics.images_by_component[component] = 0;
+                    }
+                    analytics.images_by_component[component] += photos.length;
+                    
+                    // Count by rating
+                    const rating = flat.structural_rating[component].rating;
+                    if (rating >= 1 && rating <= 5) {
+                      analytics.images_by_rating[rating] += photos.length;
+                    }
+                    
+                    // Quality metrics
+                    if (rating <= 2) {
+                      analytics.quality_metrics.low_quality_images += photos.length;
+                    } else if (rating >= 4) {
+                      analytics.quality_metrics.high_quality_images += photos.length;
+                    }
+                    
+                    if (flat.structural_rating[component].condition_comment) {
+                      analytics.quality_metrics.images_with_comments += photos.length;
+                    }
+                    
+                    // Upload trends
+                    if (flat.structural_rating[component].inspection_date) {
+                      const uploadDate = new Date(flat.structural_rating[component].inspection_date);
+                      const monthKey = `${uploadDate.getFullYear()}-${String(uploadDate.getMonth() + 1).padStart(2, '0')}`;
+                      analytics.upload_trends[monthKey] = (analytics.upload_trends[monthKey] || 0) + photos.length;
+                    }
+                  }
+                });
+              }
+              
+              // Process non-structural images
+              if (flat.non_structural_rating) {
+                const components = [
+                  'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+                  'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+                  'sewage_system', 'panel_board', 'lifts'
+                ];
+                
+                components.forEach(component => {
+                  if (flat.non_structural_rating[component]?.photos) {
+                    const photos = flat.non_structural_rating[component].photos;
+                    flatImages += photos.length;
+                    analytics.total_images += photos.length;
+                    analytics.images_by_type.non_structural += photos.length;
+                    
+                    const componentKey = component.replace('_', ' ');
+                    if (!analytics.images_by_component[componentKey]) {
+                      analytics.images_by_component[componentKey] = 0;
+                    }
+                    analytics.images_by_component[componentKey] += photos.length;
+                    
+                    // Count by rating
+                    const rating = flat.non_structural_rating[component].rating;
+                    if (rating >= 1 && rating <= 5) {
+                      analytics.images_by_rating[rating] += photos.length;
+                    }
+                    
+                    // Quality metrics
+                    if (rating <= 2) {
+                      analytics.quality_metrics.low_quality_images += photos.length;
+                    } else if (rating >= 4) {
+                      analytics.quality_metrics.high_quality_images += photos.length;
+                    }
+                    
+                    if (flat.non_structural_rating[component].condition_comment) {
+                      analytics.quality_metrics.images_with_comments += photos.length;
+                    }
+                    
+                    // Upload trends
+                    if (flat.non_structural_rating[component].inspection_date) {
+                      const uploadDate = new Date(flat.non_structural_rating[component].inspection_date);
+                      const monthKey = `${uploadDate.getFullYear()}-${String(uploadDate.getMonth() + 1).padStart(2, '0')}`;
+                      analytics.upload_trends[monthKey] = (analytics.upload_trends[monthKey] || 0) + photos.length;
+                    }
+                  }
+                });
+              }
+              
+              // Documentation completeness
+              const expectedImages = 15; // 4 structural + 11 non-structural components
+              if (flatImages >= expectedImages * 0.8) {
+                analytics.documentation_completeness.fully_documented++;
+              } else if (flatImages > 0) {
+                analytics.documentation_completeness.partially_documented++;
+              } else {
+                analytics.documentation_completeness.not_documented++;
+              }
+            });
+          }
+        });
       }
+    });
+    
+    return analytics;
+  }
+  
+  // =================== UTILITY METHODS ===================
+  
+  /**
+   * Get health status based on rating
+   * @param {number} rating - Rating value
+   * @returns {string} Health status
+   */
+  getHealthStatus(rating) {
+    if (!rating || isNaN(rating)) return 'Unknown';
+    if (rating >= 4) return 'Good';
+    if (rating >= 3) return 'Fair';
+    if (rating >= 2) return 'Poor';
+    return 'Critical';
+  }
+  
+  /**
+   * Get priority level based on rating
+   * @param {number} rating - Rating value
+   * @returns {string} Priority level
+   */
+  getPriority(rating) {
+    if (!rating || isNaN(rating)) return 'Medium';
+    if (rating >= 4) return 'Low';
+    if (rating >= 3) return 'Medium';
+    if (rating >= 2) return 'High';
+    return 'Critical';
+  }
+  
+  /**
+   * Calculate structure progress
+   * @param {Object} structure - Structure document
+   * @returns {Object} Progress data
+   */
+  calculateProgress(structure) {
+    let progress = {
+      location: false,
+      administrative: false,
+      geometric_details: false,
+      floors_added: false,
+      flats_added: false,
+      flat_ratings_completed: false,
+      overall_percentage: 0
     };
 
-    return recommendations[component]?.[rating] || `${component.replace('_', ' ')} needs maintenance attention.`;
-  }
-
-  /**
-   * Calculate structure health metrics
-   * @param {string} structureId - Structure ID
-   * @returns {Object} Health metrics
-   */
-  async calculateStructureHealthMetrics(structureId) {
-    const structure = await Structure.findById(structureId);
-    if (!structure) {
-      throw new Error('Structure not found');
+    // Check location
+    if (structure.structural_identity?.structural_identity_number && structure.location?.coordinates?.latitude) {
+      progress.location = true;
     }
 
-    const structuralRating = await this.calculateOverallStructuralRating(structure);
-    const nonStructuralRating = await this.calculateOverallNonStructuralRating(structure);
-    const recommendations = await this.generateMaintenanceRecommendations(structure);
-    const nextInspectionDate = await this.generateInspectionSchedule(structure);
+    // Check administrative
+    if (structure.administration?.client_name && structure.administration?.email_id) {
+      progress.administrative = true;
+    }
 
-    // Count critical issues
-    const criticalIssues = recommendations.filter(r => r.priority === 'Critical').length;
-    const highPriorityIssues = recommendations.filter(r => r.priority === 'High').length;
+    // Check geometric details
+    if (structure.geometric_details?.structure_width && structure.geometric_details?.structure_height) {
+      progress.geometric_details = true;
+    }
 
-    // Calculate overall health score
-    const structuralScore = structuralRating?.overall || 0;
-    const nonStructuralScore = nonStructuralRating?.overall || 0;
-    const overallHealthScore = Math.round(((structuralScore * 0.7) + (nonStructuralScore * 0.3)) * 10) / 10;
+    // Check floors
+    if (structure.geometric_details?.floors?.length > 0) {
+      progress.floors_added = true;
+      
+      // Check flats
+      const hasFlats = structure.geometric_details.floors.some(floor => floor.flats?.length > 0);
+      if (hasFlats) {
+        progress.flats_added = true;
+        
+        // Check if all flats have ratings
+        let allFlatsRated = true;
+        for (const floor of structure.geometric_details.floors) {
+          if (floor.flats?.length > 0) {
+            for (const flat of floor.flats) {
+              if (!flat.flat_overall_rating?.combined_score) {
+                allFlatsRated = false;
+                break;
+              }
+            }
+          }
+          if (!allFlatsRated) break;
+        }
+        progress.flat_ratings_completed = allFlatsRated;
+      }
+    }
 
-    return {
-      structuralRating,
-      nonStructuralRating,
-      overallHealthScore,
-      healthStatus: structuralRating?.healthStatus || 'Unknown',
-      priority: structuralRating?.priority || 'Medium',
-      criticalIssues,
-      highPriorityIssues,
-      totalRecommendations: recommendations.length,
-      recommendations: recommendations.slice(0, 10), // Top 10 recommendations
-      nextInspectionDate,
-      lastUpdated: new Date()
+    // Calculate percentage
+    const completedSteps = Object.values(progress).filter(val => val === true).length;
+    progress.overall_percentage = Math.round((completedSteps / 6) * 100);
+
+    return progress;
+  }
+  
+  /**
+   * Get estimated cost for maintenance
+   * @param {string} component - Component name
+   * @param {number} rating - Current rating
+   * @param {string} type - Component type
+   * @returns {Object} Cost estimate
+   */
+  getEstimatedCost(component, rating, type = 'structural') {
+    // Base cost estimates in rupees
+    const baseCosts = {
+      structural: {
+        beams: { 1: 50000, 2: 25000 },
+        columns: { 1: 75000, 2: 35000 },
+        slab: { 1: 60000, 2: 30000 },
+        foundation: { 1: 100000, 2: 50000 }
+      },
+      non_structural: {
+        'brick plaster': { 1: 15000, 2: 8000 },
+        'doors windows': { 1: 25000, 2: 12000 },
+        'flooring tiles': { 1: 20000, 2: 10000 },
+        'electrical wiring': { 1: 30000, 2: 15000 },
+        'sanitary fittings': { 1: 18000, 2: 9000 },
+        railings: { 1: 12000, 2: 6000 },
+        'water tanks': { 1: 40000, 2: 20000 },
+        plumbing: { 1: 25000, 2: 12000 },
+        'sewage system': { 1: 35000, 2: 18000 },
+        'panel board': { 1: 15000, 2: 8000 },
+        lifts: { 1: 200000, 2: 100000 }
+      }
     };
+    
+    const componentKey = component.replace('_', ' ');
+    const cost = baseCosts[type]?.[componentKey]?.[rating] || baseCosts[type]?.[component]?.[rating] || 10000;
+    
+    return {
+      estimated_amount: cost,
+      currency: 'INR',
+      range: {
+        min: Math.round(cost * 0.8),
+        max: Math.round(cost * 1.2)
+      }
+    };
+  }
+  
+  /**
+   * Get recommended action for maintenance
+   * @param {string} component - Component name
+   * @param {number} rating - Current rating
+   * @returns {string} Recommended action
+   */
+  getRecommendedAction(component, rating) {
+    const actions = {
+      // Structural components
+      beams: {
+        1: 'Immediate structural assessment and beam replacement/strengthening required',
+        2: 'Detailed inspection and repair of cracks/deflection within 30 days'
+      },
+      columns: {
+        1: 'Critical - Immediate structural engineer assessment required',
+        2: 'Repair cracks and assess load-bearing capacity'
+      },
+      slab: {
+        1: 'Major slab repair or replacement required immediately',
+        2: 'Repair cracks and address deflection issues'
+      },
+      foundation: {
+        1: 'Critical foundation repair required immediately',
+        2: 'Foundation repair needed - address settlement issues'
+      },
+      
+      // Non-structural components
+      'brick plaster': {
+        1: 'Complete replastering required',
+        2: 'Repair cracks and repaint'
+      },
+      'doors windows': {
+        1: 'Replace doors/windows completely',
+        2: 'Repair hardware and improve sealing'
+      },
+      'electrical wiring': {
+        1: 'Complete electrical system overhaul required',
+        2: 'Upgrade wiring and replace faulty components'
+      },
+      plumbing: {
+        1: 'Major plumbing renovation needed',
+        2: 'Repair leaks and replace worn fixtures'
+      }
+    };
+    
+    const componentKey = component.replace('_', ' ');
+    return actions[componentKey]?.[rating] || actions[component]?.[rating] || 
+           `${componentKey || component} requires professional assessment`;
+  }
+  
+  // =================== SEARCH & FILTERING ===================
+  
+  /**
+   * Filter structures based on multiple criteria
+   * @param {Array} structures - Array of structures
+   * @param {Object} filters - Filter criteria
+   * @returns {Array} Filtered structures
+   */
+  filterStructures(structures, filters) {
+    const {
+      search,
+      status,
+      type,
+      health,
+      location,
+      dateFrom,
+      dateTo,
+      minRating,
+      maxRating,
+      hasIssues
+    } = filters;
+    
+    return structures.filter(structure => {
+      // Text search
+      if (search) {
+        const searchLower = search.toLowerCase();
+        const searchableText = [
+          structure.structural_identity?.structural_identity_number,
+          structure.structural_identity?.uid,
+          structure.administration?.client_name,
+          structure.administration?.custodian,
+          structure.structural_identity?.city_name,
+          structure.location?.address
+        ].join(' ').toLowerCase();
+        
+        if (!searchableText.includes(searchLower)) return false;
+      }
+      
+      // Status filter
+      if (status && structure.status !== status) return false;
+      
+      // Type filter
+      if (type && structure.structural_identity?.type_of_structure !== type) return false;
+      
+      // Location filter
+      if (location) {
+        const locationLower = location.toLowerCase();
+        const structureLocation = [
+          structure.structural_identity?.city_name,
+          structure.structural_identity?.state_code
+        ].join(' ').toLowerCase();
+        
+        if (!structureLocation.includes(locationLower)) return false;
+      }
+      
+      // Date range filter
+      if (dateFrom || dateTo) {
+        const createdDate = new Date(structure.creation_info?.created_date || 0);
+        const fromDate = dateFrom ? new Date(dateFrom) : new Date(0);
+        const toDate = dateTo ? new Date(dateTo) : new Date();
+        
+        if (createdDate < fromDate || createdDate > toDate) return false;
+      }
+      
+      // Health and rating filters
+      if (health || minRating || maxRating || hasIssues !== undefined) {
+        const healthMetrics = this.calculateStructureHealth(structure);
+        
+        if (health && healthMetrics.health_status?.toLowerCase() !== health.toLowerCase()) return false;
+        if (minRating && (!healthMetrics.overall_score || healthMetrics.overall_score < parseFloat(minRating))) return false;
+        if (maxRating && (!healthMetrics.overall_score || healthMetrics.overall_score > parseFloat(maxRating))) return false;
+        
+        if (hasIssues !== undefined) {
+          const hasIssuesFound = healthMetrics.critical_components.length > 0;
+          if (hasIssues && !hasIssuesFound) return false;
+          if (!hasIssues && hasIssuesFound) return false;
+        }
+      }
+      
+      return true;
+    });
   }
 }
 

@@ -57,6 +57,12 @@ class StructureController {
     this.saveFlatNonStructuralRating = this.saveFlatNonStructuralRating.bind(this);
     this.getFlatNonStructuralRating = this.getFlatNonStructuralRating.bind(this);
     this.updateFlatNonStructuralRating = this.updateFlatNonStructuralRating.bind(this);
+
+  this.getAllStructures = this.getAllStructures.bind(this);
+  this.getStructureDetails = this.getStructureDetails.bind(this);
+  this.getAllImages = this.getAllImages.bind(this);
+  this.getStructureImages = this.getStructureImages.bind(this);
+  this.getUserImageStats = this.getUserImageStats.bind(this);
     
     // Bulk Operations
     this.saveBulkRatings = this.saveBulkRatings.bind(this);
@@ -1535,6 +1541,299 @@ class StructureController {
            flat.non_structural_rating.lifts?.rating;
   }
 
+  /**
+ * Extract images from a flat's ratings with metadata
+ * @param {Object} flat - Flat document
+ * @param {Object} options - Extraction options
+ * @returns {Array} Array of image objects with metadata
+ */
+extractFlatImages(flat, options = {}) {
+  const images = [];
+  const {
+    includeStructureInfo = false,
+    includeLocationInfo = false,
+    structureId = null,
+    structureNumber = null,
+    floorNumber = null,
+    floorLabel = null,
+    flatNumber = null,
+    flatType = null,
+    imageType = null,
+    component = null
+  } = options;
+  
+  // Process structural rating images
+  if (flat.structural_rating && (!imageType || imageType === 'structural')) {
+    const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
+    
+    structuralComponents.forEach(comp => {
+      if (flat.structural_rating[comp]?.photos?.length > 0 && 
+          (!component || component === comp)) {
+        
+        flat.structural_rating[comp].photos.forEach((photoUrl, index) => {
+          const imageData = {
+            image_id: `structural_${comp}_${index}_${Date.now()}`,
+            image_url: photoUrl,
+            rating_type: 'structural',
+            component: comp,
+            rating: flat.structural_rating[comp].rating,
+            condition_comment: flat.structural_rating[comp].condition_comment,
+            inspector_notes: flat.structural_rating[comp].inspector_notes,
+            uploaded_date: flat.structural_rating[comp].inspection_date || new Date(),
+            flat_id: flat.flat_id,
+            flat_number: flatNumber || flat.flat_number,
+            flat_type: flatType || flat.flat_type
+          };
+          
+          if (includeLocationInfo) {
+            imageData.floor_number = floorNumber;
+            imageData.floor_label = floorLabel;
+          }
+          
+          if (includeStructureInfo) {
+            imageData.structure_id = structureId;
+            imageData.structure_number = structureNumber;
+          }
+          
+          images.push(imageData);
+        });
+      }
+    });
+  }
+  
+  // Process non-structural rating images
+  if (flat.non_structural_rating && (!imageType || imageType === 'non_structural')) {
+    const nonStructuralComponents = [
+      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+      'sewage_system', 'panel_board', 'lifts'
+    ];
+    
+    nonStructuralComponents.forEach(comp => {
+      if (flat.non_structural_rating[comp]?.photos?.length > 0 && 
+          (!component || component === comp)) {
+        
+        flat.non_structural_rating[comp].photos.forEach((photoUrl, index) => {
+          const imageData = {
+            image_id: `non_structural_${comp}_${index}_${Date.now()}`,
+            image_url: photoUrl,
+            rating_type: 'non_structural',
+            component: comp,
+            rating: flat.non_structural_rating[comp].rating,
+            condition_comment: flat.non_structural_rating[comp].condition_comment,
+            inspector_notes: flat.non_structural_rating[comp].inspector_notes,
+            uploaded_date: flat.non_structural_rating[comp].inspection_date || new Date(),
+            flat_id: flat.flat_id,
+            flat_number: flatNumber || flat.flat_number,
+            flat_type: flatType || flat.flat_type
+          };
+          
+          if (includeLocationInfo) {
+            imageData.floor_number = floorNumber;
+            imageData.floor_label = floorLabel;
+          }
+          
+          if (includeStructureInfo) {
+            imageData.structure_id = structureId;
+            imageData.structure_number = structureNumber;
+          }
+          
+          images.push(imageData);
+        });
+      }
+    });
+  }
+  
+  return images;
+}
+
+/**
+ * Generate maintenance recommendations for a structure
+ * @param {Object} structure - Structure document
+ * @returns {Array} Array of maintenance recommendations
+ */
+async generateMaintenanceRecommendations(structure) {
+  const recommendations = [];
+  
+  if (!structure.geometric_details?.floors) {
+    return recommendations;
+  }
+  
+  structure.geometric_details.floors.forEach(floor => {
+    if (floor.flats) {
+      floor.flats.forEach(flat => {
+        // Check structural components
+        if (flat.structural_rating) {
+          const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
+          
+          structuralComponents.forEach(component => {
+            const rating = flat.structural_rating[component];
+            if (rating && rating.rating <= 2) {
+              recommendations.push({
+                type: 'Structural',
+                priority: rating.rating === 1 ? 'Critical' : 'High',
+                component: component.charAt(0).toUpperCase() + component.slice(1),
+                location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
+                issue: rating.condition_comment || `${component} needs attention`,
+                rating: rating.rating,
+                urgency: rating.rating === 1 ? 'Immediate' : 'Within 30 days',
+                estimated_cost: this.getEstimatedCost(component, rating.rating, 'structural'),
+                recommended_action: this.getRecommendedAction(component, rating.rating, 'structural')
+              });
+            }
+          });
+        }
+        
+        // Check non-structural components
+        if (flat.non_structural_rating) {
+          const nonStructuralComponents = [
+            'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+            'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+            'sewage_system', 'panel_board', 'lifts'
+          ];
+          
+          nonStructuralComponents.forEach(component => {
+            const rating = flat.non_structural_rating[component];
+            if (rating && rating.rating <= 2) {
+              recommendations.push({
+                type: 'Non-Structural',
+                priority: rating.rating === 1 ? 'High' : 'Medium',
+                component: component.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
+                issue: rating.condition_comment || `${component.replace('_', ' ')} needs attention`,
+                rating: rating.rating,
+                urgency: rating.rating === 1 ? 'Within 15 days' : 'Within 60 days',
+                estimated_cost: this.getEstimatedCost(component, rating.rating, 'non_structural'),
+                recommended_action: this.getRecommendedAction(component, rating.rating, 'non_structural')
+              });
+            }
+          });
+        }
+      });
+    }
+  });
+  
+  // Sort by priority and rating
+  const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+  recommendations.sort((a, b) => {
+    if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    }
+    return a.rating - b.rating; // Lower rating = higher urgency
+  });
+  
+  return recommendations;
+}
+
+/**
+ * Get estimated cost for maintenance work
+ * @param {string} component - Component name
+ * @param {number} rating - Current rating
+ * @param {string} type - 'structural' or 'non_structural'
+ * @returns {Object} Cost estimate
+ */
+getEstimatedCost(component, rating, type) {
+  // Base cost estimates in rupees (these should be configurable)
+  const baseCosts = {
+    structural: {
+      beams: { 1: 50000, 2: 25000 },
+      columns: { 1: 75000, 2: 35000 },
+      slab: { 1: 60000, 2: 30000 },
+      foundation: { 1: 100000, 2: 50000 }
+    },
+    non_structural: {
+      brick_plaster: { 1: 15000, 2: 8000 },
+      doors_windows: { 1: 25000, 2: 12000 },
+      flooring_tiles: { 1: 20000, 2: 10000 },
+      electrical_wiring: { 1: 30000, 2: 15000 },
+      sanitary_fittings: { 1: 18000, 2: 9000 },
+      railings: { 1: 12000, 2: 6000 },
+      water_tanks: { 1: 40000, 2: 20000 },
+      plumbing: { 1: 25000, 2: 12000 },
+      sewage_system: { 1: 35000, 2: 18000 },
+      panel_board: { 1: 15000, 2: 8000 },
+      lifts: { 1: 200000, 2: 100000 }
+    }
+  };
+  
+  const cost = baseCosts[type]?.[component]?.[rating] || 10000;
+  
+  return {
+    estimated_amount: cost,
+    currency: 'INR',
+    range: {
+      min: Math.round(cost * 0.8),
+      max: Math.round(cost * 1.2)
+    }
+  };
+}
+
+/**
+ * Get recommended action for component maintenance
+ * @param {string} component - Component name
+ * @param {number} rating - Current rating
+ * @param {string} type - 'structural' or 'non_structural'
+ * @returns {string} Recommended action
+ */
+getRecommendedAction(component, rating, type) {
+  const actions = {
+    structural: {
+      beams: {
+        1: 'Immediate structural assessment and beam replacement/strengthening required',
+        2: 'Detailed inspection and repair of cracks/deflection within 30 days'
+      },
+      columns: {
+        1: 'Critical - Immediate structural engineer assessment required',
+        2: 'Repair cracks and assess load-bearing capacity'
+      },
+      slab: {
+        1: 'Major slab repair or replacement required immediately',
+        2: 'Repair cracks and address deflection issues'
+      },
+      foundation: {
+        1: 'Critical foundation repair required immediately',
+        2: 'Foundation repair needed - address settlement issues'
+      }
+    },
+    non_structural: {
+      brick_plaster: {
+        1: 'Complete replastering required',
+        2: 'Repair cracks and repaint'
+      },
+      doors_windows: {
+        1: 'Replace doors/windows completely',
+        2: 'Repair hardware and improve sealing'
+      },
+      electrical_wiring: {
+        1: 'Complete electrical system overhaul required',
+        2: 'Upgrade wiring and replace faulty components'
+      },
+      plumbing: {
+        1: 'Major plumbing renovation needed',
+        2: 'Repair leaks and replace worn fixtures'
+      }
+    }
+  };
+  
+  return actions[type]?.[component]?.[rating] || `${component.replace('_', ' ')} requires professional assessment`;
+}
+
+/**
+ * Group structures by status for summary
+ * @param {Array} structures - Array of structures
+ * @returns {Object} Status counts
+ */
+getStructuresByStatus(structures) {
+  const statusCounts = {};
+  
+  structures.forEach(structure => {
+    const status = structure.status || 'draft';
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+  });
+  
+  return statusCounts;
+}
+
   // =================== STRUCTURE MANAGEMENT ===================
   async getStructureProgress(req, res) {
     try {
@@ -1643,6 +1942,725 @@ class StructureController {
       sendErrorResponse(res, 'Failed to submit structure', 500, error.message);
     }
   }
+
+  /**
+ * Get all structures for the authenticated user
+ * @route GET /api/structures
+ */
+async getAllStructures(req, res) {
+  try {
+    console.log('📋 Getting all structures for user:', req.user.userId);
+    
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const status = req.query.status;
+    const search = req.query.search;
+    const sortBy = req.query.sortBy || 'creation_date';
+    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+
+    let structures = user.structures || [];
+    
+    // Apply filters
+    if (status) {
+      structures = structures.filter(structure => structure.status === status);
+    }
+    
+    if (search) {
+      const searchLower = search.toLowerCase();
+      structures = structures.filter(structure => 
+        structure.structural_identity?.structural_identity_number?.toLowerCase().includes(searchLower) ||
+        structure.structural_identity?.uid?.toLowerCase().includes(searchLower) ||
+        structure.administration?.client_name?.toLowerCase().includes(searchLower) ||
+        structure.structural_identity?.city_name?.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    // Sort structures
+    structures.sort((a, b) => {
+      let aValue, bValue;
+      
+      switch (sortBy) {
+        case 'creation_date':
+          aValue = a.creation_info?.created_date || new Date(0);
+          bValue = b.creation_info?.created_date || new Date(0);
+          break;
+        case 'last_updated':
+          aValue = a.creation_info?.last_updated_date || new Date(0);
+          bValue = b.creation_info?.last_updated_date || new Date(0);
+          break;
+        case 'structure_number':
+          aValue = a.structural_identity?.structural_identity_number || '';
+          bValue = b.structural_identity?.structural_identity_number || '';
+          break;
+        case 'client_name':
+          aValue = a.administration?.client_name || '';
+          bValue = b.administration?.client_name || '';
+          break;
+        default:
+          aValue = a.creation_info?.created_date || new Date(0);
+          bValue = b.creation_info?.created_date || new Date(0);
+      }
+      
+      if (aValue < bValue) return -1 * sortOrder;
+      if (aValue > bValue) return 1 * sortOrder;
+      return 0;
+    });
+    
+    // Pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedStructures = structures.slice(startIndex, endIndex);
+    
+    // Format response data
+    const structuresData = paginatedStructures.map(structure => {
+      const progress = this.calculateProgress(structure);
+      const totalFlats = structure.geometric_details?.floors?.reduce(
+        (sum, floor) => sum + (floor.flats?.length || 0), 0
+      ) || 0;
+      
+      // Calculate ratings summary
+      let ratedFlats = 0;
+      let avgStructuralRating = null;
+      let avgNonStructuralRating = null;
+      
+      if (structure.geometric_details?.floors) {
+        const allStructuralRatings = [];
+        const allNonStructuralRatings = [];
+        
+        structure.geometric_details.floors.forEach(floor => {
+          if (floor.flats) {
+            floor.flats.forEach(flat => {
+              if (flat.flat_overall_rating?.combined_score) {
+                ratedFlats++;
+              }
+              if (flat.structural_rating?.overall_average) {
+                allStructuralRatings.push(flat.structural_rating.overall_average);
+              }
+              if (flat.non_structural_rating?.overall_average) {
+                allNonStructuralRatings.push(flat.non_structural_rating.overall_average);
+              }
+            });
+          }
+        });
+        
+        if (allStructuralRatings.length > 0) {
+          avgStructuralRating = this.calculateAverage(allStructuralRatings);
+        }
+        if (allNonStructuralRatings.length > 0) {
+          avgNonStructuralRating = this.calculateAverage(allNonStructuralRatings);
+        }
+      }
+      
+      return {
+        structure_id: structure._id,
+        uid: structure.structural_identity?.uid,
+        structural_identity_number: structure.structural_identity?.structural_identity_number,
+        client_name: structure.administration?.client_name,
+        location: {
+          city_name: structure.structural_identity?.city_name,
+          state_code: structure.structural_identity?.state_code,
+          coordinates: structure.location?.coordinates
+        },
+        type_of_structure: structure.structural_identity?.type_of_structure,
+        dimensions: {
+          width: structure.geometric_details?.structure_width,
+          length: structure.geometric_details?.structure_length,
+          height: structure.geometric_details?.structure_height,
+          floors: structure.geometric_details?.number_of_floors
+        },
+        status: structure.status,
+        progress: progress,
+        ratings_summary: {
+          total_flats: totalFlats,
+          rated_flats: ratedFlats,
+          completion_percentage: totalFlats > 0 ? Math.round((ratedFlats / totalFlats) * 100) : 0,
+          avg_structural_rating: avgStructuralRating,
+          avg_non_structural_rating: avgNonStructuralRating,
+          overall_health: avgStructuralRating ? this.getHealthStatus(avgStructuralRating) : null
+        },
+        timestamps: {
+          created_date: structure.creation_info?.created_date,
+          last_updated_date: structure.creation_info?.last_updated_date
+        }
+      };
+    });
+    
+    sendPaginatedResponse(res, 'Structures retrieved successfully', {
+      structures: structuresData,
+      pagination: {
+        current_page: page,
+        per_page: limit,
+        total_items: structures.length,
+        total_pages: Math.ceil(structures.length / limit),
+        has_next_page: endIndex < structures.length,
+        has_prev_page: page > 1
+      },
+      filters: {
+        status: status || 'all',
+        search: search || '',
+        sort_by: sortBy,
+        sort_order: sortOrder === 1 ? 'asc' : 'desc'
+      },
+      summary: {
+        total_structures: user.structures?.length || 0,
+        by_status: this.getStructuresByStatus(user.structures || [])
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get all structures error:', error);
+    sendErrorResponse(res, 'Failed to retrieve structures', 500, error.message);
+  }
+}
+
+/**
+ * Get complete structure details by ID
+ * @route GET /api/structures/:id
+ */
+async getStructureDetails(req, res) {
+  try {
+    console.log('🏢 Getting structure details for ID:', req.params.id);
+    
+    const { id } = req.params;
+    const includeImages = req.query.include_images === 'true';
+    const includeRatings = req.query.include_ratings !== 'false'; // Default true
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    // Calculate comprehensive metrics
+    const progress = this.calculateProgress(structure);
+    const recommendations = await this.generateMaintenanceRecommendations(structure);
+    
+    // Structure basic info
+    const structureDetails = {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      structural_identity: structure.structural_identity || {},
+      location: structure.location || {},
+      administration: structure.administration || {},
+      geometric_details: {
+        number_of_floors: structure.geometric_details?.number_of_floors,
+        structure_width: structure.geometric_details?.structure_width,
+        structure_length: structure.geometric_details?.structure_length,
+        structure_height: structure.geometric_details?.structure_height,
+        total_area: structure.geometric_details?.structure_width && structure.geometric_details?.structure_length ? 
+          structure.geometric_details.structure_width * structure.geometric_details.structure_length : null
+      },
+      status: structure.status,
+      progress: progress,
+      creation_info: structure.creation_info,
+      
+      // Statistics
+      statistics: {
+        total_floors: structure.geometric_details?.floors?.length || 0,
+        total_flats: 0,
+        rated_flats: 0,
+        pending_ratings: 0,
+        critical_issues: 0,
+        high_priority_issues: 0
+      },
+      
+      // Health summary
+      health_summary: {
+        overall_health_score: null,
+        structural_health: null,
+        non_structural_health: null,
+        priority_level: null,
+        last_assessment_date: null
+      },
+      
+      // Floors and flats data
+      floors: []
+    };
+    
+    // Process floors and flats
+    if (structure.geometric_details?.floors) {
+      const allStructuralRatings = [];
+      const allNonStructuralRatings = [];
+      let lastAssessmentDate = null;
+      
+      structure.geometric_details.floors.forEach(floor => {
+        const floorData = {
+          floor_id: floor.floor_id,
+          mongodb_id: floor._id,
+          floor_number: floor.floor_number,
+          floor_type: floor.floor_type,
+          floor_height: floor.floor_height,
+          total_area_sq_mts: floor.total_area_sq_mts,
+          floor_label_name: floor.floor_label_name,
+          floor_notes: floor.floor_notes,
+          flats: []
+        };
+        
+        if (floor.flats) {
+          structureDetails.statistics.total_flats += floor.flats.length;
+          
+          floor.flats.forEach(flat => {
+            const flatData = {
+              flat_id: flat.flat_id,
+              mongodb_id: flat._id,
+              flat_number: flat.flat_number,
+              flat_type: flat.flat_type,
+              area_sq_mts: flat.area_sq_mts,
+              direction_facing: flat.direction_facing,
+              occupancy_status: flat.occupancy_status,
+              flat_notes: flat.flat_notes,
+              has_structural_ratings: this.hasStructuralRating(flat),
+              has_non_structural_ratings: this.hasNonStructuralRating(flat)
+            };
+            
+            // Include ratings if requested
+            if (includeRatings) {
+              flatData.structural_rating = flat.structural_rating || this.getDefaultStructuralRating();
+              flatData.non_structural_rating = flat.non_structural_rating || this.getDefaultNonStructuralRating();
+              flatData.flat_overall_rating = flat.flat_overall_rating || null;
+              
+              // Track ratings for statistics
+              if (flat.flat_overall_rating?.combined_score) {
+                structureDetails.statistics.rated_flats++;
+                
+                if (flat.flat_overall_rating.priority === 'Critical') {
+                  structureDetails.statistics.critical_issues++;
+                } else if (flat.flat_overall_rating.priority === 'High') {
+                  structureDetails.statistics.high_priority_issues++;
+                }
+              }
+              
+              // Collect ratings for overall calculation
+              if (flat.structural_rating?.overall_average) {
+                allStructuralRatings.push(flat.structural_rating.overall_average);
+                if (flat.structural_rating.assessment_date && 
+                    (!lastAssessmentDate || flat.structural_rating.assessment_date > lastAssessmentDate)) {
+                  lastAssessmentDate = flat.structural_rating.assessment_date;
+                }
+              }
+              if (flat.non_structural_rating?.overall_average) {
+                allNonStructuralRatings.push(flat.non_structural_rating.overall_average);
+                if (flat.non_structural_rating.assessment_date && 
+                    (!lastAssessmentDate || flat.non_structural_rating.assessment_date > lastAssessmentDate)) {
+                  lastAssessmentDate = flat.non_structural_rating.assessment_date;
+                }
+              }
+            }
+            
+            // Include images if requested
+            if (includeImages) {
+              flatData.images = this.extractFlatImages(flat);
+            }
+            
+            floorData.flats.push(flatData);
+          });
+        }
+        
+        structureDetails.floors.push(floorData);
+      });
+      
+      // Calculate overall health metrics
+      if (allStructuralRatings.length > 0) {
+        structureDetails.health_summary.structural_health = this.calculateAverage(allStructuralRatings);
+      }
+      if (allNonStructuralRatings.length > 0) {
+        structureDetails.health_summary.non_structural_health = this.calculateAverage(allNonStructuralRatings);
+      }
+      
+      // Calculate overall health score (70% structural, 30% non-structural)
+      if (structureDetails.health_summary.structural_health && structureDetails.health_summary.non_structural_health) {
+        const overallScore = (structureDetails.health_summary.structural_health * 0.7) + 
+                           (structureDetails.health_summary.non_structural_health * 0.3);
+        structureDetails.health_summary.overall_health_score = Math.round(overallScore * 10) / 10;
+        structureDetails.health_summary.priority_level = this.getPriority(overallScore);
+      }
+      
+      structureDetails.health_summary.last_assessment_date = lastAssessmentDate;
+      structureDetails.statistics.pending_ratings = structureDetails.statistics.total_flats - structureDetails.statistics.rated_flats;
+    }
+    
+    // Add maintenance recommendations summary
+    structureDetails.maintenance_recommendations = {
+      total_recommendations: recommendations.length,
+      critical: recommendations.filter(r => r.priority === 'Critical').length,
+      high: recommendations.filter(r => r.priority === 'High').length,
+      medium: recommendations.filter(r => r.priority === 'Medium').length,
+      recent_recommendations: recommendations.slice(0, 5) // Top 5 most critical
+    };
+    
+    sendSuccessResponse(res, 'Structure details retrieved successfully', structureDetails);
+
+  } catch (error) {
+    console.error('❌ Get structure details error:', error);
+    sendErrorResponse(res, 'Failed to retrieve structure details', 500, error.message);
+  }
+}
+
+// =================== IMAGE MANAGEMENT APIs ===================
+
+/**
+ * Get all images for the authenticated user across all structures
+ * @route GET /api/structures/images/all
+ */
+async getAllImages(req, res) {
+  try {
+    console.log('🖼️ Getting all images for user:', req.user.userId);
+    
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const imageType = req.query.type; // 'structural' or 'non_structural'
+    const component = req.query.component; // specific component filter
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+
+    const allImages = [];
+    
+    // Extract images from all structures
+    if (user.structures) {
+      user.structures.forEach(structure => {
+        if (structure.geometric_details?.floors) {
+          structure.geometric_details.floors.forEach(floor => {
+            if (floor.flats) {
+              floor.flats.forEach(flat => {
+                const images = this.extractFlatImages(flat, {
+                  includeStructureInfo: true,
+                  structureId: structure._id,
+                  structureNumber: structure.structural_identity?.structural_identity_number,
+                  floorNumber: floor.floor_number,
+                  flatNumber: flat.flat_number,
+                  imageType,
+                  component
+                });
+                allImages.push(...images);
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    // Sort by upload date (newest first)
+    allImages.sort((a, b) => new Date(b.uploaded_date) - new Date(a.uploaded_date));
+    
+    // Apply pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedImages = allImages.slice(startIndex, endIndex);
+    
+    // Group by structure for summary
+    const imagesByStructure = {};
+    allImages.forEach(image => {
+      if (!imagesByStructure[image.structure_id]) {
+        imagesByStructure[image.structure_id] = {
+          structure_number: image.structure_number,
+          total_images: 0,
+          structural_images: 0,
+          non_structural_images: 0
+        };
+      }
+      imagesByStructure[image.structure_id].total_images++;
+      if (image.rating_type === 'structural') {
+        imagesByStructure[image.structure_id].structural_images++;
+      } else {
+        imagesByStructure[image.structure_id].non_structural_images++;
+      }
+    });
+    
+    sendPaginatedResponse(res, 'All images retrieved successfully', {
+      images: paginatedImages,
+      pagination: {
+        current_page: page,
+        per_page: limit,
+        total_items: allImages.length,
+        total_pages: Math.ceil(allImages.length / limit),
+        has_next_page: endIndex < allImages.length,
+        has_prev_page: page > 1
+      },
+      summary: {
+        total_images: allImages.length,
+        structural_images: allImages.filter(img => img.rating_type === 'structural').length,
+        non_structural_images: allImages.filter(img => img.rating_type === 'non_structural').length,
+        images_by_structure: imagesByStructure
+      },
+      filters: {
+        type: imageType || 'all',
+        component: component || 'all'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get all images error:', error);
+    sendErrorResponse(res, 'Failed to retrieve images', 500, error.message);
+  }
+}
+
+/**
+ * Get images for a specific structure
+ * @route GET /api/structures/:id/images
+ */
+async getStructureImages(req, res) {
+  try {
+    console.log('🖼️ Getting images for structure:', req.params.id);
+    
+    const { id } = req.params;
+    const imageType = req.query.type; // 'structural' or 'non_structural'
+    const component = req.query.component; // specific component filter
+    const floorNumber = req.query.floor; // specific floor filter
+    const groupBy = req.query.group_by || 'component'; // 'component', 'floor', 'flat', 'date'
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    const structureImages = [];
+    
+    // Extract images from the structure
+    if (structure.geometric_details?.floors) {
+      structure.geometric_details.floors.forEach(floor => {
+        // Apply floor filter if specified
+        if (floorNumber && floor.floor_number !== parseInt(floorNumber)) {
+          return;
+        }
+        
+        if (floor.flats) {
+          floor.flats.forEach(flat => {
+            const images = this.extractFlatImages(flat, {
+              includeLocationInfo: true,
+              floorNumber: floor.floor_number,
+              floorLabel: floor.floor_label_name,
+              flatNumber: flat.flat_number,
+              flatType: flat.flat_type,
+              imageType,
+              component
+            });
+            structureImages.push(...images);
+          });
+        }
+      });
+    }
+    
+    // Group images based on groupBy parameter
+    let groupedImages = {};
+    
+    switch (groupBy) {
+      case 'floor':
+        structureImages.forEach(image => {
+          const key = `Floor ${image.floor_number}`;
+          if (!groupedImages[key]) {
+            groupedImages[key] = [];
+          }
+          groupedImages[key].push(image);
+        });
+        break;
+        
+      case 'flat':
+        structureImages.forEach(image => {
+          const key = `Floor ${image.floor_number} - Flat ${image.flat_number}`;
+          if (!groupedImages[key]) {
+            groupedImages[key] = [];
+          }
+          groupedImages[key].push(image);
+        });
+        break;
+        
+      case 'date':
+        structureImages.forEach(image => {
+          const date = new Date(image.uploaded_date).toISOString().split('T')[0];
+          if (!groupedImages[date]) {
+            groupedImages[date] = [];
+          }
+          groupedImages[date].push(image);
+        });
+        break;
+        
+      case 'component':
+      default:
+        structureImages.forEach(image => {
+          const key = `${image.rating_type} - ${image.component}`;
+          if (!groupedImages[key]) {
+            groupedImages[key] = [];
+          }
+          groupedImages[key].push(image);
+        });
+        break;
+    }
+    
+    // Convert to array format with metadata
+    const groupedResult = Object.keys(groupedImages).map(groupKey => ({
+      group_name: groupKey,
+      total_images: groupedImages[groupKey].length,
+      images: groupedImages[groupKey].sort((a, b) => new Date(b.uploaded_date) - new Date(a.uploaded_date))
+    }));
+    
+    // Calculate summary statistics
+    const summary = {
+      total_images: structureImages.length,
+      structural_images: structureImages.filter(img => img.rating_type === 'structural').length,
+      non_structural_images: structureImages.filter(img => img.rating_type === 'non_structural').length,
+      images_by_rating: {},
+      latest_upload: structureImages.length > 0 ? Math.max(...structureImages.map(img => new Date(img.uploaded_date))) : null
+    };
+    
+    // Group by rating levels
+    [1, 2, 3, 4, 5].forEach(rating => {
+      summary.images_by_rating[`rating_${rating}`] = structureImages.filter(img => img.rating === rating).length;
+    });
+    
+    sendSuccessResponse(res, 'Structure images retrieved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      structure_number: structure.structural_identity?.structural_identity_number,
+      grouped_images: groupedResult,
+      summary: summary,
+      filters: {
+        type: imageType || 'all',
+        component: component || 'all',
+        floor: floorNumber || 'all',
+        grouped_by: groupBy
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get structure images error:', error);
+    sendErrorResponse(res, 'Failed to retrieve structure images', 500, error.message);
+  }
+}
+
+/**
+ * Get user-level image statistics and recent uploads
+ * @route GET /api/structures/images/user-stats
+ */
+async getUserImageStats(req, res) {
+  try {
+    console.log('📊 Getting user image statistics:', req.user.userId);
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+
+    const stats = {
+      total_images: 0,
+      structural_images: 0,
+      non_structural_images: 0,
+      images_by_component: {},
+      images_by_rating: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+      images_by_structure: {},
+      recent_uploads: [],
+      upload_timeline: {}
+    };
+    
+    const allImages = [];
+    
+    // Process all structures
+    if (user.structures) {
+      user.structures.forEach(structure => {
+        const structureKey = structure.structural_identity?.structural_identity_number || structure._id;
+        stats.images_by_structure[structureKey] = {
+          structure_id: structure._id,
+          total: 0,
+          structural: 0,
+          non_structural: 0
+        };
+        
+        if (structure.geometric_details?.floors) {
+          structure.geometric_details.floors.forEach(floor => {
+            if (floor.flats) {
+              floor.flats.forEach(flat => {
+                const images = this.extractFlatImages(flat, {
+                  includeStructureInfo: true,
+                  structureId: structure._id,
+                  structureNumber: structureKey
+                });
+                
+                images.forEach(image => {
+                  stats.total_images++;
+                  allImages.push(image);
+                  
+                  // Count by type
+                  if (image.rating_type === 'structural') {
+                    stats.structural_images++;
+                    stats.images_by_structure[structureKey].structural++;
+                  } else {
+                    stats.non_structural_images++;
+                    stats.images_by_structure[structureKey].non_structural++;
+                  }
+                  
+                  stats.images_by_structure[structureKey].total++;
+                  
+                  // Count by component
+                  if (!stats.images_by_component[image.component]) {
+                    stats.images_by_component[image.component] = 0;
+                  }
+                  stats.images_by_component[image.component]++;
+                  
+                  // Count by rating
+                  if (image.rating >= 1 && image.rating <= 5) {
+                    stats.images_by_rating[image.rating]++;
+                  }
+                  
+                  // Group by upload date for timeline
+                  const uploadDate = new Date(image.uploaded_date).toISOString().split('T')[0];
+                  if (!stats.upload_timeline[uploadDate]) {
+                    stats.upload_timeline[uploadDate] = 0;
+                  }
+                  stats.upload_timeline[uploadDate]++;
+                });
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    // Get recent uploads (last 10)
+    stats.recent_uploads = allImages
+      .sort((a, b) => new Date(b.uploaded_date) - new Date(a.uploaded_date))
+      .slice(0, 10)
+      .map(image => ({
+        image_url: image.image_url,
+        component: image.component,
+        rating_type: image.rating_type,
+        rating: image.rating,
+        structure_number: image.structure_number,
+        location: `Floor ${image.floor_number}, Flat ${image.flat_number}`,
+        uploaded_date: image.uploaded_date
+      }));
+    
+    // Calculate percentages
+    const imagePercentages = {
+      structural_percentage: stats.total_images > 0 ? Math.round((stats.structural_images / stats.total_images) * 100) : 0,
+      non_structural_percentage: stats.total_images > 0 ? Math.round((stats.non_structural_images / stats.total_images) * 100) : 0,
+      critical_images_percentage: stats.total_images > 0 ? Math.round(((stats.images_by_rating[1] + stats.images_by_rating[2]) / stats.total_images) * 100) : 0
+    };
+    
+    sendSuccessResponse(res, 'User image statistics retrieved successfully', {
+      user_id: req.user.userId,
+      username: user.username,
+      total_structures: user.structures?.length || 0,
+      image_statistics: stats,
+      percentages: imagePercentages,
+      summary: {
+        most_documented_component: Object.keys(stats.images_by_component).reduce((a, b) => 
+          stats.images_by_component[a] > stats.images_by_component[b] ? a : b, ''
+        ),
+        most_active_structure: Object.keys(stats.images_by_structure).reduce((a, b) => 
+          stats.images_by_structure[a].total > stats.images_by_structure[b].total ? a : b, ''
+        ),
+        documentation_quality: stats.total_images > 0 ? 
+          (stats.images_by_rating[4] + stats.images_by_rating[5]) / stats.total_images > 0.7 ? 'Good' :
+          (stats.images_by_rating[4] + stats.images_by_rating[5]) / stats.total_images > 0.4 ? 'Fair' : 'Needs Improvement'
+          : 'No Data'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get user image stats error:', error);
+    sendErrorResponse(res, 'Failed to retrieve user image statistics', 500, error.message);
+  }
+}
 
   // =================== UTILITY METHODS FOR LEGACY SUPPORT ===================
   async getNextSequenceForLocation(stateCode, districtCode, cityName, locationCode) {

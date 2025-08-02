@@ -490,7 +490,7 @@ const userSchema = new mongoose.Schema({
     },
     can_export_reports: {
       type: Boolean,
-      default: false
+      default: true
     },
     can_manage_users: {
       type: Boolean,
