@@ -121,7 +121,7 @@ const administrativeValidation = [
     .matches(/^[6-9]\d{9}$/)
     .withMessage('Contact details must be a valid 10-digit Indian mobile number'),
   
-  body('email_id')
+ /* body('email_id')
     .optional()
     .notEmpty()
     .withMessage('Email is required')
@@ -130,6 +130,7 @@ const administrativeValidation = [
     .normalizeEmail()
     .isLength({ max: 100 })
     .withMessage('Email cannot exceed 100 characters'),
+ */
 
   body('organization')
     .optional()
