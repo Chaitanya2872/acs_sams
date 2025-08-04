@@ -3,6 +3,7 @@ const ExcelJS = require('exceljs');
 const { User } = require('../models/schemas'); // Adjust path to your schemas
 const { authenticateToken, authorizeRole } = require('../middlewares/auth'); // Use your existing auth
 const router = express.Router();
+const mongoose = require('mongoose');
 
 // =================== MIDDLEWARE FOR REPORTS ===================
 
@@ -303,6 +304,355 @@ router.get('/structures/download',
     });
   }
 });
+
+router.get('/structures/complete-download',
+  authenticateToken,
+  checkExportPermissions,
+  async (req, res) => {
+    try {
+      const results = await User.aggregate([
+        { $match: { _id: req.user.userId, is_active: true } },
+        { $unwind: '$structures' },
+        {
+          $project: {
+            structure: '$structures',
+            user_email: '$email',
+            username: '$username'
+          }
+        }
+      ]);
+
+      if (!results || results.length === 0) {
+        return res.status(404).json({ success: false, message: 'No structures found' });
+      }
+
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Full Report');
+
+      // --------------------- COLUMNS ---------------------
+      sheet.columns = [
+        { header: 'Structure ID', key: 'structure_id', width: 20 },
+        { header: 'UID', key: 'uid', width: 15 },
+        { header: 'Structure Type', key: 'type', width: 15 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'State Code', key: 'state_code', width: 10 },
+        { header: 'District Code', key: 'district_code', width: 10 },
+        { header: 'City', key: 'city_name', width: 15 },
+        { header: 'Location Code', key: 'location_code', width: 10 },
+        { header: 'Client Name', key: 'client_name', width: 20 },
+        { header: 'Custodian', key: 'custodian', width: 15 },
+        { header: 'Engineer Designation', key: 'engineer', width: 15 },
+        { header: 'Email ID', key: 'email', width: 20 },
+        { header: 'Floors', key: 'total_floors', width: 10 },
+        { header: 'Width', key: 'width', width: 10 },
+        { header: 'Length', key: 'length', width: 10 },
+        { header: 'Height', key: 'height', width: 10 },
+        { header: 'Floor No', key: 'floor_number', width: 10 },
+        { header: 'Floor Label', key: 'floor_label_name', width: 15 },
+        { header: 'Floor Height', key: 'floor_height', width: 10 },
+        { header: 'Floor Area', key: 'floor_area', width: 12 },
+        { header: 'Floor Notes', key: 'floor_notes', width: 20 },
+        { header: 'Flat No', key: 'flat_number', width: 12 },
+        { header: 'Flat Type', key: 'flat_type', width: 10 },
+        { header: 'Area (sq mt)', key: 'flat_area', width: 10 },
+        { header: 'Facing', key: 'facing', width: 10 },
+        { header: 'Occupancy', key: 'occupancy', width: 12 },
+        { header: 'Flat Notes', key: 'flat_notes', width: 20 },
+        { header: 'Beams', key: 'beams', width: 8 },
+        { header: 'Columns', key: 'columns', width: 8 },
+        { header: 'Slab', key: 'slab', width: 8 },
+        { header: 'Foundation', key: 'foundation', width: 10 },
+        { header: 'Wiring', key: 'wiring', width: 8 },
+        { header: 'Tiles', key: 'tiles', width: 8 },
+        { header: 'Sanitary', key: 'sanitary', width: 8 },
+        { header: 'Doors/Windows', key: 'doors', width: 10 },
+        { header: 'Sewage', key: 'sewage', width: 8 },
+        { header: 'Panel Board', key: 'panel', width: 10 },
+        { header: 'Water Tank', key: 'tank', width: 10 },
+        { header: 'Lift', key: 'lift', width: 8 },
+        { header: 'Health Status', key: 'health_status', width: 15 },
+        { header: 'Priority', key: 'priority', width: 10 },
+        { header: 'Combined Score', key: 'combined_score', width: 15 }
+      ];
+
+      // --------------------- ROW DATA ---------------------
+      results.forEach(({ structure }) => {
+        const floors = structure?.geometric_details?.floors || [];
+
+        if (floors.length === 0) {
+          sheet.addRow({
+            structure_id: structure.structural_identity?.structural_identity_number,
+            uid: structure.structural_identity?.uid,
+            type: structure.structural_identity?.type_of_structure,
+            status: structure.status
+          });
+          return;
+        }
+
+        floors.forEach(floor => {
+          const flats = floor.flats || [];
+
+          if (flats.length === 0) {
+            sheet.addRow({
+              structure_id: structure.structural_identity?.structural_identity_number,
+              uid: structure.structural_identity?.uid,
+              type: structure.structural_identity?.type_of_structure,
+              status: structure.status,
+              floor_number: floor.floor_number,
+              floor_label_name: floor.floor_label_name,
+              floor_height: floor.floor_height,
+              floor_area: floor.total_area_sq_mts,
+              floor_notes: floor.floor_notes
+            });
+            return;
+          }
+
+          flats.forEach(flat => {
+            sheet.addRow({
+              structure_id: structure.structural_identity?.structural_identity_number,
+              uid: structure.structural_identity?.uid,
+              type: structure.structural_identity?.type_of_structure,
+              status: structure.status,
+              state_code: structure.structural_identity?.state_code,
+              district_code: structure.structural_identity?.district_code,
+              city_name: structure.structural_identity?.city_name,
+              location_code: structure.structural_identity?.location_code,
+              client_name: structure.administration?.client_name,
+              custodian: structure.administration?.custodian,
+              engineer: structure.administration?.engineer_designation,
+              email: structure.administration?.email_id,
+              total_floors: structure.geometric_details?.number_of_floors,
+              width: structure.geometric_details?.structure_width,
+              length: structure.geometric_details?.structure_length,
+              height: structure.geometric_details?.structure_height,
+              floor_number: floor.floor_number,
+              floor_label_name: floor.floor_label_name,
+              floor_height: floor.floor_height,
+              floor_area: floor.total_area_sq_mts,
+              floor_notes: floor.floor_notes,
+              flat_number: flat.flat_number,
+              flat_type: flat.flat_type,
+              flat_area: flat.area_sq_mts,
+              facing: flat.direction_facing,
+              occupancy: flat.occupancy_status,
+              flat_notes: flat.flat_notes,
+              beams: flat.structural_rating?.beams?.rating,
+              columns: flat.structural_rating?.columns?.rating,
+              slab: flat.structural_rating?.slab?.rating,
+              foundation: flat.structural_rating?.foundation?.rating,
+              wiring: flat.non_structural_rating?.electrical_wiring?.rating,
+              tiles: flat.non_structural_rating?.flooring_tiles?.rating,
+              sanitary: flat.non_structural_rating?.sanitary_fittings?.rating,
+              doors: flat.non_structural_rating?.doors_windows?.rating,
+              sewage: flat.non_structural_rating?.sewage_system?.rating,
+              panel: flat.non_structural_rating?.panel_board?.rating,
+              tank: flat.non_structural_rating?.water_tanks?.rating,
+              lift: flat.non_structural_rating?.lifts?.rating,
+              health_status: flat.flat_overall_rating?.health_status,
+              priority: flat.flat_overall_rating?.priority,
+              combined_score: flat.flat_overall_rating?.combined_score
+            });
+          });
+        });
+      });
+
+      // --------------------- FINALIZE & SEND FILE ---------------------
+      const fileName = `SAMS_Full_Structure_Report_${Date.now()}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      await workbook.xlsx.write(res);
+      res.end();
+
+    } catch (err) {
+      console.error('❌ Complete report generation failed:', err);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  }
+);
+
+router.get('/structures/:id/download',
+  authenticateToken,
+  checkExportPermissions,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const matchStage = mongoose.Types.ObjectId.isValid(id)
+        ? { 'structures._id': new mongoose.Types.ObjectId(id) }
+        : { 'structures.structural_identity.structural_identity_number': id };
+
+      const results = await User.aggregate([
+        { $match: { is_active: true, ...(req.user.role !== 'admin' && { _id: req.user.userId }) } },
+        { $unwind: '$structures' },
+        { $match: matchStage },
+        { $project: { structure: '$structures' } }
+      ]);
+
+      if (!results || results.length === 0) {
+        return res.status(404).json({ success: false, message: 'Structure not found' });
+      }
+
+      const structure = results[0].structure;
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Structure Report');
+
+      // Set columns
+      sheet.columns = [
+        // Structure level
+        { header: 'Structure ID', key: 'structure_id', width: 20 },
+        { header: 'UID', key: 'uid', width: 20 },
+        { header: 'Type', key: 'type', width: 15 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'City', key: 'city', width: 15 },
+        { header: 'District', key: 'district', width: 15 },
+        { header: 'State', key: 'state', width: 15 },
+        { header: 'Location Code', key: 'location', width: 15 },
+        { header: 'Client', key: 'client', width: 20 },
+        { header: 'Custodian', key: 'custodian', width: 20 },
+        { header: 'Engineer', key: 'engineer', width: 20 },
+        { header: 'Email', key: 'email', width: 25 },
+        { header: 'Structure Width', key: 'width', width: 15 },
+        { header: 'Length', key: 'length', width: 15 },
+        { header: 'Height', key: 'height', width: 15 },
+        { header: 'Total Floors', key: 'floors_count', width: 12 },
+
+        // Floor + Flat level
+        { header: 'Floor No', key: 'floor_no', width: 10 },
+        { header: 'Flat No', key: 'flat_no', width: 10 },
+        { header: 'Flat Area', key: 'flat_area', width: 12 },
+        { header: 'Facing', key: 'facing', width: 12 },
+        { header: 'Occupancy', key: 'occupancy', width: 12 },
+        { header: 'Flat Notes', key: 'flat_notes', width: 20 },
+
+        // Structural Ratings
+        { header: 'Beams', key: 'beams', width: 10 },
+        { header: 'Columns', key: 'columns', width: 10 },
+        { header: 'Slab', key: 'slab', width: 10 },
+        { header: 'Foundation', key: 'foundation', width: 12 },
+
+        // Non-structural Ratings
+        { header: 'Wiring', key: 'wiring', width: 10 },
+        { header: 'Tiles', key: 'tiles', width: 10 },
+        { header: 'Sanitary', key: 'sanitary', width: 10 },
+        { header: 'Doors/Windows', key: 'doors', width: 15 },
+        { header: 'Sewage', key: 'sewage', width: 10 },
+        { header: 'Panel Board', key: 'panel', width: 15 },
+        { header: 'Water Tank', key: 'tank', width: 12 },
+        { header: 'Lift', key: 'lift', width: 10 },
+
+        // Image URLs
+        { header: 'Beam Images', key: 'beam_imgs', width: 30 },
+        { header: 'Column Images', key: 'column_imgs', width: 30 },
+        { header: 'Slab Images', key: 'slab_imgs', width: 30 },
+        { header: 'Foundation Images', key: 'foundation_imgs', width: 30 },
+        { header: 'Wiring Images', key: 'wiring_imgs', width: 30 },
+        { header: 'Tiles Images', key: 'tiles_imgs', width: 30 },
+        { header: 'Sanitary Images', key: 'sanitary_imgs', width: 30 },
+        { header: 'Doors/Windows Images', key: 'doors_imgs', width: 30 },
+        { header: 'Panel Board Images', key: 'panel_imgs', width: 30 },
+        { header: 'Tank Images', key: 'tank_imgs', width: 30 },
+        { header: 'Lift Images', key: 'lift_imgs', width: 30 },
+
+        // Overall Rating
+        { header: 'Health Status', key: 'health', width: 15 },
+        { header: 'Priority', key: 'priority', width: 12 },
+        { header: 'Combined Score', key: 'score', width: 15 }
+      ];
+
+      const floors = structure.geometric_details?.floors || [];
+
+      for (const floor of floors) {
+        const flats = floor.flats || [];
+        for (const flat of flats) {
+          sheet.addRow({
+            structure_id: structure.structural_identity?.structural_identity_number,
+            uid: structure.structural_identity?.uid,
+            type: structure.structural_identity?.type_of_structure,
+            status: structure.status,
+            city: structure.structural_identity?.city_name,
+            district: structure.structural_identity?.district_code,
+            state: structure.structural_identity?.state_code,
+            location: structure.structural_identity?.location_code,
+
+            client: structure.administration?.client_name,
+            custodian: structure.administration?.custodian,
+            engineer: structure.administration?.engineer_designation,
+            email: structure.administration?.email_id,
+            width: structure.geometric_details?.structure_width,
+            length: structure.geometric_details?.structure_length,
+            height: structure.geometric_details?.structure_height,
+            floors_count: structure.geometric_details?.number_of_floors,
+
+            floor_no: floor.floor_number,
+            flat_no: flat.flat_number,
+            flat_area: flat.area_sq_mts,
+            facing: flat.direction_facing,
+            occupancy: flat.occupancy_status,
+            flat_notes: flat.flat_notes,
+
+            beams: flat.structural_rating?.beams?.rating,
+            columns: flat.structural_rating?.columns?.rating,
+            slab: flat.structural_rating?.slab?.rating,
+            foundation: flat.structural_rating?.foundation?.rating,
+
+            wiring: flat.non_structural_rating?.electrical_wiring?.rating,
+            tiles: flat.non_structural_rating?.flooring_tiles?.rating,
+            sanitary: flat.non_structural_rating?.sanitary_fittings?.rating,
+            doors: flat.non_structural_rating?.doors_windows?.rating,
+            sewage: flat.non_structural_rating?.sewage_system?.rating,
+            panel: flat.non_structural_rating?.panel_board?.rating,
+            tank: flat.non_structural_rating?.water_tanks?.rating,
+            lift: flat.non_structural_rating?.lifts?.rating,
+
+            beam_imgs: flat.structural_rating?.beams?.photos?.map(p => p.url).join(', ') || '',
+            column_imgs: flat.structural_rating?.columns?.photos?.map(p => p.url).join(', ') || '',
+            slab_imgs: flat.structural_rating?.slab?.photos?.map(p => p.url).join(', ') || '',
+            foundation_imgs: flat.structural_rating?.foundation?.photos?.map(p => p.url).join(', ') || '',
+            wiring_imgs: flat.non_structural_rating?.electrical_wiring?.photos?.map(p => p.url).join(', ') || '',
+            tiles_imgs: flat.non_structural_rating?.flooring_tiles?.photos?.map(p => p.url).join(', ') || '',
+            sanitary_imgs: flat.non_structural_rating?.sanitary_fittings?.photos?.map(p => p.url).join(', ') || '',
+            doors_imgs: flat.non_structural_rating?.doors_windows?.photos?.map(p => p.url).join(', ') || '',
+            panel_imgs: flat.non_structural_rating?.panel_board?.photos?.map(p => p.url).join(', ') || '',
+            tank_imgs: flat.non_structural_rating?.water_tanks?.photos?.map(p => p.url).join(', ') || '',
+            lift_imgs: flat.non_structural_rating?.lifts?.photos?.map(p => p.url).join(', ') || '',
+
+            health: flat.flat_overall_rating?.health_status,
+            priority: flat.flat_overall_rating?.priority,
+            score: flat.flat_overall_rating?.combined_score
+          });
+        }
+      }
+
+      // Format
+      sheet.getRow(1).font = { bold: true };
+      sheet.eachRow(row => {
+        row.alignment = { vertical: 'middle', wrapText: true };
+        row.eachCell(cell => {
+          cell.border = {
+            top: { style: 'thin' },
+            bottom: { style: 'thin' },
+            left: { style: 'thin' },
+            right: { style: 'thin' }
+          };
+        });
+      });
+
+      const fileName = `SAMS_Full_Report_${structure.structural_identity?.structural_identity_number || structure._id}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      await workbook.xlsx.write(res);
+      res.end();
+
+    } catch (err) {
+      console.error('❌ Full Structure Export Failed:', err);
+      res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+  }
+);
+
+
+
 
 /**
  * @route GET /api/reports/structures/metadata

@@ -177,9 +177,7 @@ const geometricDetailsValidation = [
 
 // =================== FLOOR VALIDATION ===================
 const floorValidation = [
-  body('floors')
-    .isArray({ min: 1 })
-    .withMessage('At least one floor is required'),
+  
   
   body('floors.*.floor_number')
     .isInt({ min: 0, max: 200 })
@@ -222,9 +220,6 @@ const floorValidation = [
 
 // =================== FLAT VALIDATION ===================
 const flatValidation = [
-  body('flats')
-    .isArray({ min: 1 })
-    .withMessage('At least one flat is required'),
   
   body('flats.*.flat_number')
     .notEmpty()
