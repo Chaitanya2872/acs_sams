@@ -122,6 +122,7 @@ const administrativeValidation = [
     .withMessage('Contact details must be a valid 10-digit Indian mobile number'),
   
   body('email_id')
+    .optional()
     .notEmpty()
     .withMessage('Email is required')
     .isEmail()
@@ -185,7 +186,7 @@ const floorValidation = [
   
   body('floors.*.floor_type')
     .optional()
-    .isIn(['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational'])
+    .isIn(['residential', 'commercial', 'educational', 'parking', 'utility', 'recreational'])
     .withMessage('Invalid floor type'),
   
   body('floors.*.floor_height')
