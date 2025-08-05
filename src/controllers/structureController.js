@@ -946,36 +946,30 @@ class StructureController {
   }
 
   async getFlatCombinedRatings(req, res) {
-    try {
-      const { id, floorId, flatId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
-      
-      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
-      }
-      
-      const flat = floor.flats.find(f => f.flat_id === flatId);
-      if (!flat) {
-        return sendErrorResponse(res, 'Flat not found', 404);
-      }
-      
-      sendSuccessResponse(res, 'Flat ratings retrieved successfully', {
-        structure_id: id,
-        floor_id: floorId,
-        flat_id: flatId,
-        flat_number: flat.flat_number,
-        flat_type: flat.flat_type,
-        structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
-        non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating(),
-        flat_overall_rating: flat.flat_overall_rating || null
-      });
-
-    } catch (error) {
-      console.error('❌ Get flat combined ratings error:', error);
-      sendErrorResponse(res, 'Failed to get flat ratings', 500, error.message);
+  try {
+    const { id, floorId, flatId } = req.params;
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
     }
+    
+    const flat = floor.flats.find(f => f.flat_id === flatId);
+    if (!flat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    sendSuccessResponse(res, 'Flat ratings retrieved successfully', {
+      structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
+      non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating()
+    });
+
+  } catch (error) {
+    console.error('❌ Get flat combined ratings error:', error);
+    sendErrorResponse(res, 'Failed to get flat ratings', 500, error.message);
   }
+}
 
   async updateFlatCombinedRatings(req, res) {
     return this.saveFlatCombinedRatings(req, res);
