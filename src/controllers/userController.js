@@ -367,6 +367,106 @@ class UserController {
       sendErrorResponse(res, 'Failed to fetch user statistics', 500, error.message);
     }
   }
+
+  /**
+   * Add additional role to a user
+   * @route POST /api/users/:id/roles
+   * @access Private (Admin only)
+   */
+  async addUserRole(req, res) {
+    try {
+      const { id } = req.params;
+      const { role } = req.body;
+      
+      const validRoles = ['AD', 'TE', 'VE', 'FE'];
+      if (!validRoles.includes(role)) {
+        return sendErrorResponse(res, `Invalid role. Must be one of: ${validRoles.join(', ')}`, 400);
+      }
+      
+      const user = await User.findById(id);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+      
+      // Initialize roles array if it doesn't exist
+      if (!user.roles) {
+        user.roles = [user.role];
+      }
+      
+      // Add new role if not already present
+      if (!user.roles.includes(role)) {
+        user.roles.push(role);
+        await user.save();
+        
+        const userData = await User.findById(id).select('-password');
+        sendUpdatedResponse(res, userData, `Role ${role} added to user successfully`);
+      } else {
+        return sendErrorResponse(res, 'User already has this role', 400);
+      }
+      
+    } catch (error) {
+      console.error('❌ Add user role error:', error);
+      sendErrorResponse(res, 'Failed to add user role', 500, error.message);
+    }
+  }
+
+  /**
+   * Remove role from a user
+   * @route DELETE /api/users/:id/roles/:role
+   * @access Private (Admin only)
+   */
+  async removeUserRole(req, res) {
+    try {
+      const { id, role } = req.params;
+      
+      const user = await User.findById(id);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+      
+      // Don't remove the primary role
+      if (user.role === role) {
+        return sendErrorResponse(res, 'Cannot remove primary role. Change primary role first.', 400);
+      }
+      
+      // Remove role from roles array
+      if (user.roles && user.roles.includes(role)) {
+        user.roles = user.roles.filter(r => r !== role);
+        await user.save();
+        
+        const userData = await User.findById(id).select('-password');
+        sendUpdatedResponse(res, userData, `Role ${role} removed from user successfully`);
+      } else {
+        return sendErrorResponse(res, 'User does not have this role', 400);
+      }
+      
+    } catch (error) {
+      console.error('❌ Remove user role error:', error);
+      sendErrorResponse(res, 'Failed to remove user role', 500, error.message);
+    }
+  }
+
+  /**
+   * Migrate existing users to support multiple roles
+   * @route POST /api/users/migrate-roles
+   * @access Private (Admin only)
+   */
+  async migrateUserRoles(req, res) {
+    try {
+      const { migrateUserRoles } = require('../utils/migrateUserRoles');
+      const result = await migrateUserRoles();
+      
+      if (result.success) {
+        sendSuccessResponse(res, 'User roles migration completed successfully', result);
+      } else {
+        sendErrorResponse(res, 'Migration failed', 500, result.error);
+      }
+      
+    } catch (error) {
+      console.error('❌ Migrate user roles error:', error);
+      sendErrorResponse(res, 'Failed to migrate user roles', 500, error.message);
+    }
+  }
 }
 
 module.exports = new UserController();

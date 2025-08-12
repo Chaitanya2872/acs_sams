@@ -69,6 +69,27 @@ router.put('/:id/status', authorizeRole(['admin']), userController.updateUserSta
  */
 router.put('/:id/role', authorizeRole(['admin']), userController.updateUserRole); // Fixed: use authorizeRole
 
+/**
+ * @route   POST /api/users/:id/roles
+ * @desc    Add additional role to user (supports multiple roles)
+ * @access  Private (Admin only)
+ */
+router.post('/:id/roles', authorizeRole(['AD']), userController.addUserRole);
+
+/**
+ * @route   DELETE /api/users/:id/roles/:role
+ * @desc    Remove role from user
+ * @access  Private (Admin only)
+ */
+router.delete('/:id/roles/:role', authorizeRole(['AD']), userController.removeUserRole);
+
+/**
+ * @route   POST /api/users/migrate-roles
+ * @desc    Migrate existing users to support multiple roles
+ * @access  Private (Admin only)
+ */
+router.post('/migrate-roles', authorizeRole(['AD']), userController.migrateUserRoles);
+
 // Error handling middleware for this router
 router.use((error, req, res, next) => {
   console.error('User routes error:', error);

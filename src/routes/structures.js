@@ -1129,6 +1129,38 @@ router.post('/validate-structure-number',
 );
 router.get('/location-stats', structureController.getLocationStructureStats);
 
+// =================== REMARKS MANAGEMENT ===================
+
+/**
+ * @route   POST /api/structures/:id/remarks
+ * @desc    Add a remark to a structure (FE/VE roles only)
+ * @access  Private (FE, VE)
+ * @body    { text: string }
+ */
+router.post('/:id/remarks', structureController.addRemark);
+
+/**
+ * @route   GET /api/structures/:id/remarks
+ * @desc    Get all remarks for a structure (FE/VE roles can view all)
+ * @access  Private (FE, VE)
+ */
+router.get('/:id/remarks', structureController.getRemarks);
+
+/**
+ * @route   PUT /api/structures/:id/remarks/:remarkId
+ * @desc    Update a specific remark (users can only update their own remarks)
+ * @access  Private (FE, VE)
+ * @body    { text: string }
+ */
+router.put('/:id/remarks/:remarkId', structureController.updateRemark);
+
+/**
+ * @route   DELETE /api/structures/:id/remarks/:remarkId
+ * @desc    Delete a specific remark (users can only delete their own remarks)
+ * @access  Private (FE, VE)
+ */
+router.delete('/:id/remarks/:remarkId', structureController.deleteRemark);
+
 // =================== ERROR HANDLING ===================
 router.use('*', (req, res) => {
   res.status(404).json({

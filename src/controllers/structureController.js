@@ -74,6 +74,12 @@ class StructureController {
     this.submitStructure = this.submitStructure.bind(this);
     this.validateStructureNumber = this.validateStructureNumber.bind(this);
     this.getLocationStructureStats = this.getLocationStructureStats.bind(this);
+    
+    // Remarks Management
+    this.addRemark = this.addRemark.bind(this);
+    this.updateRemark = this.updateRemark.bind(this);
+    this.getRemarks = this.getRemarks.bind(this);
+    this.deleteRemark = this.deleteRemark.bind(this);
   }
 
   // =================== UTILITY METHODS ===================
@@ -89,6 +95,20 @@ class StructureController {
     }
     
     return { user, structure };
+  }
+
+  // Find structure across all users (for remarks functionality)
+  async findStructureAcrossUsers(structureId) {
+    const users = await User.find({ 'structures._id': structureId });
+    
+    for (const user of users) {
+      const structure = user.structures.id(structureId);
+      if (structure) {
+        return { user, structure };
+      }
+    }
+    
+    throw new Error('Structure not found');
   }
 
   generateFloorId() {
@@ -2283,6 +2303,24 @@ async getStructureDetails(req, res) {
       recent_recommendations: recommendations.slice(0, 5) // Top 5 most critical
     };
     
+    // Add remarks information
+    const currentUser = await User.findById(req.user.userId);
+    const userRole = this.hasRole(currentUser, 'FE') ? 'FE' : this.hasRole(currentUser, 'VE') ? 'VE' : null;
+    
+    structureDetails.remarks = {
+      fe_remarks: structure.remarks?.fe_remarks || [],
+      ve_remarks: structure.remarks?.ve_remarks || [],
+      total_fe_remarks: (structure.remarks?.fe_remarks || []).length,
+      total_ve_remarks: (structure.remarks?.ve_remarks || []).length,
+      last_updated_by: structure.remarks?.last_updated_by || {},
+      user_permissions: {
+        can_view_remarks: userRole !== null,
+        can_add_remarks: userRole !== null,
+        can_edit_own_remarks: userRole !== null,
+        user_role: userRole
+      }
+    };
+    
     sendSuccessResponse(res, 'Structure details retrieved successfully', structureDetails);
 
   } catch (error) {
@@ -2818,6 +2856,300 @@ async getUserImageStats(req, res) {
     } catch (error) {
       console.error('❌ Location stats error:', error);
       sendErrorResponse(res, 'Failed to get location statistics', 500, error.message);
+    }
+  }
+
+  // =================== UTILITY METHODS FOR ROLES ===================
+  hasRole(user, requiredRole) {
+    // Check if user has the required role in their roles array or primary role
+    return user.roles?.includes(requiredRole) || user.role === requiredRole;
+  }
+
+  // Check role from request user object (which includes roles array)
+  hasRoleFromRequest(req, requiredRole) {
+    const userRoles = req.user.roles || [req.user.role];
+    return userRoles.includes(requiredRole);
+  }
+
+  getUserFullName(user) {
+    if (user.profile?.first_name || user.profile?.last_name) {
+      return `${user.profile.first_name || ''} ${user.profile.last_name || ''}`.trim();
+    }
+    return user.username;
+  }
+
+  // =================== REMARKS MANAGEMENT ===================
+  
+  /**
+   * Add a remark to a structure
+   * @route POST /api/structures/:id/remarks
+   * @access Private (FE, VE roles)
+   */
+  async addRemark(req, res) {
+    try {
+      const { id } = req.params;
+      const { text } = req.body;
+      
+      if (!text || text.trim().length === 0) {
+        return sendErrorResponse(res, 'Remark text is required', 400);
+      }
+
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+
+      // Check if user has FE or VE role
+      const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
+      if (!userRole) {
+        return sendErrorResponse(res, 'Only Field Engineers (FE) and Verification Engineers (VE) can add remarks', 403);
+      }
+
+      const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+      
+      // Initialize remarks object if it doesn't exist
+      if (!structure.remarks) {
+        structure.remarks = {
+          fe_remarks: [],
+          ve_remarks: [],
+          last_updated_by: {}
+        };
+      }
+
+      const authorName = this.getUserFullName(user);
+      const newRemark = {
+        text: text.trim(),
+        author_name: authorName,
+        author_role: userRole,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      // Add remark to appropriate array based on user role
+      if (userRole === 'FE') {
+        structure.remarks.fe_remarks.push(newRemark);
+      } else if (userRole === 'VE') {
+        structure.remarks.ve_remarks.push(newRemark);
+      }
+
+      // Update last_updated_by information
+      structure.remarks.last_updated_by = {
+        role: userRole,
+        name: authorName,
+        date: new Date()
+      };
+
+      structure.creation_info.last_updated_date = new Date();
+      await structureOwner.save();
+
+      const addedRemark = userRole === 'FE' 
+        ? structure.remarks.fe_remarks[structure.remarks.fe_remarks.length - 1]
+        : structure.remarks.ve_remarks[structure.remarks.ve_remarks.length - 1];
+
+      sendCreatedResponse(res, {
+        structure_id: id,
+        remark: addedRemark,
+        total_fe_remarks: structure.remarks.fe_remarks.length,
+        total_ve_remarks: structure.remarks.ve_remarks.length
+      }, 'Remark added successfully');
+
+    } catch (error) {
+      console.error('❌ Add remark error:', error);
+      sendErrorResponse(res, 'Failed to add remark', 500, error.message);
+    }
+  }
+
+  /**
+   * Update a remark in a structure
+   * @route PUT /api/structures/:id/remarks/:remarkId
+   * @access Private (FE, VE roles - can only update their own remarks)
+   */
+  async updateRemark(req, res) {
+    try {
+      const { id, remarkId } = req.params;
+      const { text } = req.body;
+      
+      if (!text || text.trim().length === 0) {
+        return sendErrorResponse(res, 'Remark text is required', 400);
+      }
+
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+
+      const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
+      if (!userRole) {
+        return sendErrorResponse(res, 'Only Field Engineers (FE) and Verification Engineers (VE) can update remarks', 403);
+      }
+
+      const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+      
+      if (!structure.remarks) {
+        return sendErrorResponse(res, 'No remarks found for this structure', 404);
+      }
+
+      let remarkFound = false;
+      let updatedRemark = null;
+
+      // Find and update the remark based on user role
+      if (userRole === 'FE' && structure.remarks.fe_remarks) {
+        const remarkIndex = structure.remarks.fe_remarks.findIndex(r => r._id.toString() === remarkId);
+        if (remarkIndex !== -1) {
+          structure.remarks.fe_remarks[remarkIndex].text = text.trim();
+          structure.remarks.fe_remarks[remarkIndex].updated_at = new Date();
+          updatedRemark = structure.remarks.fe_remarks[remarkIndex];
+          remarkFound = true;
+        }
+      } else if (userRole === 'VE' && structure.remarks.ve_remarks) {
+        const remarkIndex = structure.remarks.ve_remarks.findIndex(r => r._id.toString() === remarkId);
+        if (remarkIndex !== -1) {
+          structure.remarks.ve_remarks[remarkIndex].text = text.trim();
+          structure.remarks.ve_remarks[remarkIndex].updated_at = new Date();
+          updatedRemark = structure.remarks.ve_remarks[remarkIndex];
+          remarkFound = true;
+        }
+      }
+
+      if (!remarkFound) {
+        return sendErrorResponse(res, 'Remark not found or you do not have permission to update it', 404);
+      }
+
+      // Update last_updated_by information
+      structure.remarks.last_updated_by = {
+        role: userRole,
+        name: this.getUserFullName(user),
+        date: new Date()
+      };
+
+      structure.creation_info.last_updated_date = new Date();
+      await structureOwner.save();
+
+      sendUpdatedResponse(res, {
+        structure_id: id,
+        remark: updatedRemark
+      }, 'Remark updated successfully');
+
+    } catch (error) {
+      console.error('❌ Update remark error:', error);
+      sendErrorResponse(res, 'Failed to update remark', 500, error.message);
+    }
+  }
+
+  /**
+   * Get all remarks for a structure
+   * @route GET /api/structures/:id/remarks
+   * @access Private (FE, VE roles can view all remarks)
+   */
+  async getRemarks(req, res) {
+    try {
+      const { id } = req.params;
+
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+
+      const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
+      if (!userRole) {
+        return sendErrorResponse(res, 'Only Field Engineers (FE) and Verification Engineers (VE) can view remarks', 403);
+      }
+
+      const { structure } = await this.findStructureAcrossUsers(id);
+      
+      const remarks = structure.remarks || {
+        fe_remarks: [],
+        ve_remarks: [],
+        last_updated_by: {}
+      };
+
+      sendSuccessResponse(res, 'Remarks retrieved successfully', {
+        structure_id: id,
+        fe_remarks: remarks.fe_remarks || [],
+        ve_remarks: remarks.ve_remarks || [],
+        total_fe_remarks: (remarks.fe_remarks || []).length,
+        total_ve_remarks: (remarks.ve_remarks || []).length,
+        last_updated_by: remarks.last_updated_by || {},
+        user_role: userRole,
+        can_add_remarks: true,
+        can_edit_own_remarks: true
+      });
+
+    } catch (error) {
+      console.error('❌ Get remarks error:', error);
+      sendErrorResponse(res, 'Failed to get remarks', 500, error.message);
+    }
+  }
+
+  /**
+   * Delete a remark from a structure
+   * @route DELETE /api/structures/:id/remarks/:remarkId
+   * @access Private (FE, VE roles - can only delete their own remarks)
+   */
+  async deleteRemark(req, res) {
+    try {
+      const { id, remarkId } = req.params;
+
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+
+      const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
+      if (!userRole) {
+        return sendErrorResponse(res, 'Only Field Engineers (FE) and Verification Engineers (VE) can delete remarks', 403);
+      }
+
+      const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+      
+      if (!structure.remarks) {
+        return sendErrorResponse(res, 'No remarks found for this structure', 404);
+      }
+
+      let remarkFound = false;
+      let deletedRemark = null;
+
+      // Find and delete the remark based on user role
+      if (userRole === 'FE' && structure.remarks.fe_remarks) {
+        const remarkIndex = structure.remarks.fe_remarks.findIndex(r => r._id.toString() === remarkId);
+        if (remarkIndex !== -1) {
+          deletedRemark = structure.remarks.fe_remarks[remarkIndex];
+          structure.remarks.fe_remarks.splice(remarkIndex, 1);
+          remarkFound = true;
+        }
+      } else if (userRole === 'VE' && structure.remarks.ve_remarks) {
+        const remarkIndex = structure.remarks.ve_remarks.findIndex(r => r._id.toString() === remarkId);
+        if (remarkIndex !== -1) {
+          deletedRemark = structure.remarks.ve_remarks[remarkIndex];
+          structure.remarks.ve_remarks.splice(remarkIndex, 1);
+          remarkFound = true;
+        }
+      }
+
+      if (!remarkFound) {
+        return sendErrorResponse(res, 'Remark not found or you do not have permission to delete it', 404);
+      }
+
+      // Update last_updated_by information
+      structure.remarks.last_updated_by = {
+        role: userRole,
+        name: this.getUserFullName(user),
+        date: new Date()
+      };
+
+      structure.creation_info.last_updated_date = new Date();
+      await structureOwner.save();
+
+      sendSuccessResponse(res, 'Remark deleted successfully', {
+        structure_id: id,
+        deleted_remark: deletedRemark,
+        total_fe_remarks: structure.remarks.fe_remarks.length,
+        total_ve_remarks: structure.remarks.ve_remarks.length
+      });
+
+    } catch (error) {
+      console.error('❌ Delete remark error:', error);
+      sendErrorResponse(res, 'Failed to delete remark', 500, error.message);
     }
   }
 }

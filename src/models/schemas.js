@@ -383,6 +383,73 @@ const structureSchema = new mongoose.Schema({
     maxlength: 5000
   },
   
+  // Role-based Remarks System
+  remarks: {
+    fe_remarks: [{
+      text: {
+        type: String,
+        required: true,
+        maxlength: 2000,
+        trim: true
+      },
+      author_name: {
+        type: String,
+        required: true,
+        trim: true
+      },
+      author_role: {
+        type: String,
+        enum: ['FE'],
+        required: true
+      },
+      created_at: {
+        type: Date,
+        default: Date.now
+      },
+      updated_at: {
+        type: Date,
+        default: Date.now
+      }
+    }],
+    ve_remarks: [{
+      text: {
+        type: String,
+        required: true,
+        maxlength: 2000,
+        trim: true
+      },
+      author_name: {
+        type: String,
+        required: true,
+        trim: true
+      },
+      author_role: {
+        type: String,
+        enum: ['VE'],
+        required: true
+      },
+      created_at: {
+        type: Date,
+        default: Date.now
+      },
+      updated_at: {
+        type: Date,
+        default: Date.now
+      }
+    }],
+    last_updated_by: {
+      role: {
+        type: String,
+        enum: ['FE', 'VE']
+      },
+      name: String,
+      date: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  },
+  
   // Creation and Update Information
   creation_info: {
     created_date: {
@@ -416,7 +483,7 @@ const userSchema = new mongoose.Schema({
     maxlength: [50, 'Username cannot exceed 50 characters'],
     match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores']
   },
-  email: {
+  email: {  
     type: String,
     required: true,
     unique: true,
@@ -429,10 +496,16 @@ const userSchema = new mongoose.Schema({
     required: true,
     minlength: [6, 'Password must be at least 6 characters long']
   },
+  roles: [{
+    type: String,
+    enum: ['AD', 'TE', 'VE', 'FE'],
+    required: true
+  }],
+  // Keep primary role for backward compatibility
   role: {
     type: String,
-    enum: ['admin', 'engineer', 'inspector', 'supervisor', 'viewer'],
-    default: 'engineer'
+    enum: ['AD', 'TE', 'VE', 'FE'],
+    required: true,
   },
   profile: {
     first_name: {

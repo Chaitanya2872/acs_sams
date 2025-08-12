@@ -68,6 +68,7 @@ const authenticateToken = async (req, res, next) => {
       username: user.username,
       email: user.email,
       role: user.role,
+      roles: user.roles || [user.role], // Support multiple roles, fallback to single role
       isEmailVerified: user.isEmailVerified,  // ← Should match schema
       is_active: user.is_active               // ← Should match schema
     };
@@ -115,8 +116,12 @@ const authorizeRole = (allowedRoles) => {
         });
       }
 
-      if (!allowedRoles.includes(req.user.role)) {
-        console.log('❌ Role authorization failed. Required:', allowedRoles, 'User has:', req.user.role);
+      // Check if user has any of the allowed roles (support multiple roles)
+      const userRoles = req.user.roles || [req.user.role];
+      const hasAllowedRole = allowedRoles.some(role => userRoles.includes(role));
+      
+      if (!hasAllowedRole) {
+        console.log('❌ Role authorization failed. Required:', allowedRoles, 'User has:', userRoles);
         return res.status(403).json({
           success: false,
           error: `Access denied. Required role: ${allowedRoles.join(' or ')}`
@@ -248,6 +253,7 @@ const optionalAuth = async (req, res, next) => {
         username: user.username,
         email: user.email,
         role: user.role,
+        roles: user.roles || [user.role], // Support multiple roles
         isEmailVerified: user.isEmailVerified,
         is_active: user.is_active
       };
