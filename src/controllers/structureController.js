@@ -692,46 +692,55 @@ class StructureController {
     }
   }
 
-  async getFlatsInFloor(req, res) {
-    try {
-      const { id, floorId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
-      
-      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
-      }
-      
-      const flatsData = floor.flats.map(flat => ({
-        flat_id: flat.flat_id,
-        mongodb_id: flat._id,
-        flat_number: flat.flat_number,
-        flat_type: flat.flat_type,
-        area_sq_mts: flat.area_sq_mts,
-        direction_facing: flat.direction_facing,
-        occupancy_status: flat.occupancy_status,
-        flat_notes: flat.flat_notes,
-        has_structural_ratings: this.hasStructuralRating(flat),
-        has_non_structural_ratings: this.hasNonStructuralRating(flat),
-        flat_overall_rating: flat.flat_overall_rating || null,
-        health_status: flat.flat_overall_rating?.health_status || null,
-        priority: flat.flat_overall_rating?.priority || null,
-        combined_score: flat.flat_overall_rating?.combined_score || null
-      }));
-      
-      sendSuccessResponse(res, 'Flats retrieved successfully', {
-        structure_id: id,
-        floor_id: floorId,
-        floor_number: floor.floor_number,
-        total_flats: flatsData.length,
-        flats: flatsData
-      });
+ async getFlatsInFloor(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
 
-    } catch (error) {
-      console.error('❌ Get flats error:', error);
-      sendErrorResponse(res, 'Failed to get flats', 500, error.message);
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
     }
+
+    const flatsData = floor.flats.map(flat => ({
+      flat_id: flat.flat_id,
+      mongodb_id: flat._id,
+      flat_number: flat.flat_number,
+      flat_type: flat.flat_type,
+      area_sq_mts: flat.area_sq_mts,
+      direction_facing: flat.direction_facing,
+      occupancy_status: flat.occupancy_status,
+      flat_notes: flat.flat_notes,
+
+      // Indicators
+      has_structural_ratings: this.hasStructuralRating(flat),
+      has_non_structural_ratings: this.hasNonStructuralRating(flat),
+
+      // Detailed ratings
+      structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
+      non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating(),
+
+      // Overall rating summary
+      flat_overall_rating: flat.flat_overall_rating || null,
+      health_status: flat.flat_overall_rating?.health_status || null,
+      priority: flat.flat_overall_rating?.priority || null,
+      combined_score: flat.flat_overall_rating?.combined_score || null
+    }));
+
+    sendSuccessResponse(res, 'Flats retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      floor_number: floor.floor_number,
+      total_flats: flatsData.length,
+      flats: flatsData
+    });
+
+  } catch (error) {
+    console.error('❌ Get flats error:', error);
+    sendErrorResponse(res, 'Failed to get flats', 500, error.message);
   }
+}
+
 
   async getFlatById(req, res) {
     try {
