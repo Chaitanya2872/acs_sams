@@ -1,4 +1,5 @@
 const { User } = require('../models/schemas');
+const fileUploadService = require('../services/fileUploadService');
 const StructureNumberGenerator = require('../utils/StructureNumberGenerator');
 const {
   sendSuccessResponse,
@@ -859,7 +860,22 @@ class StructureController {
   async saveFlatCombinedRatings(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { structural_rating, non_structural_rating } = req.body;
+      
+      let { structural_rating, non_structural_rating } = req.body;
+      
+      // Parse JSON if body comes from form-data
+      ["structural_rating", "non_structural_rating"].forEach(key => {
+        if (typeof req.body[key] === 'string') {
+          try {
+            req.body[key] = JSON.parse(req.body[key]);
+          } catch (e) {
+            console.error(`Invalid ${key} JSON:`, e.message);
+            req.body[key] = {};
+          }
+        }
+      });
+      
+      ({ structural_rating, non_structural_rating } = req.body);
       
       const { user, structure } = await this.findUserStructure(req.user.userId, id);
       
@@ -877,139 +893,39 @@ class StructureController {
       
       // Update structural ratings
       if (structural_rating) {
-        flat.structural_rating = {
-          beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
-          columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
-          slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
-          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate)
-        };
-        
-        // Calculate flat structural average
-        const structuralRatings = [
-          flat.structural_rating.beams?.rating,
-          flat.structural_rating.columns?.rating,
-          flat.structural_rating.slab?.rating,
-          flat.structural_rating.foundation?.rating
-        ].filter(r => r);
-        
-        if (structuralRatings.length > 0) {
-          flat.structural_rating.overall_average = this.calculateAverage(structuralRatings);
-          flat.structural_rating.health_status = this.getHealthStatus(flat.structural_rating.overall_average);
-          flat.structural_rating.assessment_date = inspectionDate;
-        }
+        this.updateFlatRatings(flat, 'structural_rating', structural_rating);
       }
       
       // Update non-structural ratings
       if (non_structural_rating) {
-        flat.non_structural_rating = {
-          brick_plaster: this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate),
-          doors_windows: this.createRatingComponent(non_structural_rating.doors_windows, inspectionDate),
-          flooring_tiles: this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate),
-          electrical_wiring: this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate),
-          sanitary_fittings: this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate),
-          railings: this.createRatingComponent(non_structural_rating.railings, inspectionDate),
-          water_tanks: this.createRatingComponent(non_structural_rating.water_tanks, inspectionDate),
-          plumbing: this.createRatingComponent(non_structural_rating.plumbing, inspectionDate),
-          sewage_system: this.createRatingComponent(non_structural_rating.sewage_system, inspectionDate),
-          panel_board: this.createRatingComponent(non_structural_rating.panel_board, inspectionDate),
-          lifts: this.createRatingComponent(non_structural_rating.lifts, inspectionDate)
-        };
-        
-        // Calculate flat non-structural average
-        const nonStructuralRatings = [
-          flat.non_structural_rating.brick_plaster?.rating,
-          flat.non_structural_rating.doors_windows?.rating,
-          flat.non_structural_rating.flooring_tiles?.rating,
-          flat.non_structural_rating.electrical_wiring?.rating,
-          flat.non_structural_rating.sanitary_fittings?.rating,
-          flat.non_structural_rating.railings?.rating,
-          flat.non_structural_rating.water_tanks?.rating,
-          flat.non_structural_rating.plumbing?.rating,
-          flat.non_structural_rating.sewage_system?.rating,
-          flat.non_structural_rating.panel_board?.rating,
-          flat.non_structural_rating.lifts?.rating
-        ].filter(r => r);
-        
-        if (nonStructuralRatings.length > 0) {
-          flat.non_structural_rating.overall_average = this.calculateAverage(nonStructuralRatings);
-          flat.non_structural_rating.assessment_date = inspectionDate;
-        }
+        this.updateFlatRatings(flat, 'non_structural_rating', non_structural_rating);
       }
       
-      // Calculate flat overall rating (combination of structural + non-structural)
-      if (flat.structural_rating?.overall_average && flat.non_structural_rating?.overall_average) {
-        const structuralWeight = 0.7;
-        const nonStructuralWeight = 0.3;
-        
-        const combinedScore = (flat.structural_rating.overall_average * structuralWeight) + 
-                             (flat.non_structural_rating.overall_average * nonStructuralWeight);
-        
-        flat.flat_overall_rating = {
-          combined_score: Math.round(combinedScore * 10) / 10,
-          health_status: this.getHealthStatus(combinedScore),
-          priority: this.getPriority(combinedScore),
-          last_assessment_date: inspectionDate
-        };
-      }
+      // Update flat combined rating
+      this.updateFlatCombinedRating(flat);
       
       structure.creation_info.last_updated_date = new Date();
-      structure.status = 'ratings_in_progress';
       await user.save();
       
-      sendSuccessResponse(res, 'Flat ratings saved successfully', {
+      sendSuccessResponse(res, 'Flat combined ratings saved successfully', {
         structure_id: id,
         floor_id: floorId,
         flat_id: flatId,
         flat_number: flat.flat_number,
-        flat_ratings: {
-          structural_rating: flat.structural_rating,
-          non_structural_rating: flat.non_structural_rating,
-          flat_overall_rating: flat.flat_overall_rating
-        }
+        structural_rating: flat.structural_rating,
+        non_structural_rating: flat.non_structural_rating,
+        flat_overall_rating: flat.flat_overall_rating
       });
-
+      
     } catch (error) {
       console.error('❌ Save flat combined ratings error:', error);
-      sendErrorResponse(res, 'Failed to save flat ratings', 500, error.message);
+      sendErrorResponse(res, 'Failed to save flat combined ratings', 500, error.message);
     }
   }
 
   async getFlatCombinedRatings(req, res) {
-  try {
-    const { id, floorId, flatId } = req.params;
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
-    
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
-    }
-    
-    const flat = floor.flats.find(f => f.flat_id === flatId);
-    if (!flat) {
-      return sendErrorResponse(res, 'Flat not found', 404);
-    }
-    
-    sendSuccessResponse(res, 'Flat ratings retrieved successfully', {
-      structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
-      non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating()
-    });
-
-  } catch (error) {
-    console.error('❌ Get flat combined ratings error:', error);
-    sendErrorResponse(res, 'Failed to get flat ratings', 500, error.message);
-  }
-}
-
-  async updateFlatCombinedRatings(req, res) {
-    return this.saveFlatCombinedRatings(req, res);
-  }
-
-  // =================== LEGACY INDIVIDUAL RATINGS ===================
-  async saveFlatStructuralRating(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { beams, columns, slab, foundation } = req.body;
-      
       const { user, structure } = await this.findUserStructure(req.user.userId, id);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
@@ -1022,29 +938,74 @@ class StructureController {
         return sendErrorResponse(res, 'Flat not found', 404);
       }
       
+      sendSuccessResponse(res, 'Flat ratings retrieved successfully', {
+        structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
+        non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating()
+      });
+
+    } catch (error) {
+      console.error('❌ Get flat combined ratings error:', error);
+      sendErrorResponse(res, 'Failed to get flat ratings', 500, error.message);
+    }
+  }
+
+  async updateFlatCombinedRatings(req, res) {
+    return this.saveFlatCombinedRatings(req, res);
+  }
+
+  // =================== LEGACY INDIVIDUAL RATINGS ===================
+  async saveFlatStructuralRating(req, res) {
+    try {
+      const { id, floorId, flatId } = req.params;
+      let { beams, columns, slab, foundation } = req.body;
+  
+      // 🔹 Parse JSON if body comes from form-data
+      [ "beams", "columns", "slab", "foundation" ].forEach(key => {
+        if (typeof req.body[key] === 'string') {
+          try {
+            req.body[key] = JSON.parse(req.body[key]);
+          } catch (e) {
+            console.error(`Invalid ${key} JSON:`, e.message);
+            req.body[key] = {};
+          }
+        }
+      });
+  
+      ({ beams, columns, slab, foundation } = req.body);
+  
+      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+  
+      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+      if (!floor) {
+        return sendErrorResponse(res, 'Floor not found', 404);
+      }
+  
+      const flat = floor.flats.find(f => f.flat_id === flatId);
+      if (!flat) {
+        return sendErrorResponse(res, 'Flat not found', 404);
+      }
+  
       const inspectionDate = new Date();
-      
+  
       flat.structural_rating = {
-        beams: this.createRatingComponent(beams, inspectionDate),
-        columns: this.createRatingComponent(columns, inspectionDate),
-        slab: this.createRatingComponent(slab, inspectionDate),
-        foundation: this.createRatingComponent(foundation, inspectionDate)
+        beams: await this.createRatingComponent(beams, inspectionDate),
+        columns: await this.createRatingComponent(columns, inspectionDate),
+        slab: await this.createRatingComponent(slab, inspectionDate),
+        foundation: await this.createRatingComponent(foundation, inspectionDate)
       };
-      
-      // Calculate average
+  
       const ratings = [beams.rating, columns.rating, slab.rating, foundation.rating].filter(r => r);
       if (ratings.length > 0) {
         flat.structural_rating.overall_average = this.calculateAverage(ratings);
         flat.structural_rating.health_status = this.getHealthStatus(flat.structural_rating.overall_average);
         flat.structural_rating.assessment_date = inspectionDate;
       }
-      
-      // Update combined rating if non-structural exists
+  
       this.updateFlatCombinedRating(flat);
-      
+  
       structure.creation_info.last_updated_date = new Date();
       await user.save();
-      
+  
       sendSuccessResponse(res, 'Flat structural ratings saved successfully', {
         structure_id: id,
         floor_id: floorId,
@@ -1052,12 +1013,12 @@ class StructureController {
         flat_number: flat.flat_number,
         structural_rating: flat.structural_rating
       });
-
     } catch (error) {
       console.error('❌ Save flat structural rating error:', error);
       sendErrorResponse(res, 'Failed to save flat structural ratings', 500, error.message);
     }
   }
+  
 
   async getFlatStructuralRating(req, res) {
     try {
@@ -1102,58 +1063,78 @@ class StructureController {
   async saveFlatNonStructuralRating(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { 
+      let { 
         brick_plaster, doors_windows, flooring_tiles, electrical_wiring,
         sanitary_fittings, railings, water_tanks, plumbing,
         sewage_system, panel_board, lifts 
       } = req.body;
-      
+  
+      // 🔹 Parse JSON if body comes from form-data
+      [
+        "brick_plaster", "doors_windows", "flooring_tiles", "electrical_wiring",
+        "sanitary_fittings", "railings", "water_tanks", "plumbing",
+        "sewage_system", "panel_board", "lifts"
+      ].forEach(key => {
+        if (typeof req.body[key] === 'string') {
+          try {
+            req.body[key] = JSON.parse(req.body[key]);
+          } catch (e) {
+            console.error(`Invalid ${key} JSON:`, e.message);
+            req.body[key] = {};
+          }
+        }
+      });
+  
+      ({
+        brick_plaster, doors_windows, flooring_tiles, electrical_wiring,
+        sanitary_fittings, railings, water_tanks, plumbing,
+        sewage_system, panel_board, lifts
+      } = req.body);
+  
       const { user, structure } = await this.findUserStructure(req.user.userId, id);
-      
+  
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
         return sendErrorResponse(res, 'Floor not found', 404);
       }
-      
+  
       const flat = floor.flats.find(f => f.flat_id === flatId);
       if (!flat) {
         return sendErrorResponse(res, 'Flat not found', 404);
       }
-      
+  
       const inspectionDate = new Date();
-      
+  
       flat.non_structural_rating = {
-        brick_plaster: this.createRatingComponent(brick_plaster, inspectionDate),
-        doors_windows: this.createRatingComponent(doors_windows, inspectionDate),
-        flooring_tiles: this.createRatingComponent(flooring_tiles, inspectionDate),
-        electrical_wiring: this.createRatingComponent(electrical_wiring, inspectionDate),
-        sanitary_fittings: this.createRatingComponent(sanitary_fittings, inspectionDate),
-        railings: this.createRatingComponent(railings, inspectionDate),
-        water_tanks: this.createRatingComponent(water_tanks, inspectionDate),
-        plumbing: this.createRatingComponent(plumbing, inspectionDate),
-        sewage_system: this.createRatingComponent(sewage_system, inspectionDate),
-        panel_board: this.createRatingComponent(panel_board, inspectionDate),
-        lifts: this.createRatingComponent(lifts, inspectionDate)
+        brick_plaster: await this.createRatingComponent(brick_plaster, inspectionDate),
+        doors_windows: await this.createRatingComponent(doors_windows, inspectionDate),
+        flooring_tiles: await this.createRatingComponent(flooring_tiles, inspectionDate),
+        electrical_wiring: await this.createRatingComponent(electrical_wiring, inspectionDate),
+        sanitary_fittings: await this.createRatingComponent(sanitary_fittings, inspectionDate),
+        railings: await this.createRatingComponent(railings, inspectionDate),
+        water_tanks: await this.createRatingComponent(water_tanks, inspectionDate),
+        plumbing: await this.createRatingComponent(plumbing, inspectionDate),
+        sewage_system: await this.createRatingComponent(sewage_system, inspectionDate),
+        panel_board: await this.createRatingComponent(panel_board, inspectionDate),
+        lifts: await this.createRatingComponent(lifts, inspectionDate)
       };
-      
-      // Calculate average
+  
       const ratings = [
         brick_plaster.rating, doors_windows.rating, flooring_tiles.rating, electrical_wiring.rating,
         sanitary_fittings.rating, railings.rating, water_tanks.rating, plumbing.rating,
         sewage_system.rating, panel_board.rating, lifts.rating
       ].filter(r => r);
-      
+  
       if (ratings.length > 0) {
         flat.non_structural_rating.overall_average = this.calculateAverage(ratings);
         flat.non_structural_rating.assessment_date = inspectionDate;
       }
-      
-      // Update combined rating if structural exists
+  
       this.updateFlatCombinedRating(flat);
-      
+  
       structure.creation_info.last_updated_date = new Date();
       await user.save();
-      
+  
       sendSuccessResponse(res, 'Flat non-structural ratings saved successfully', {
         structure_id: id,
         floor_id: floorId,
@@ -1161,12 +1142,12 @@ class StructureController {
         flat_number: flat.flat_number,
         non_structural_rating: flat.non_structural_rating
       });
-
     } catch (error) {
       console.error('❌ Save flat non-structural rating error:', error);
       sendErrorResponse(res, 'Failed to save flat non-structural ratings', 500, error.message);
     }
   }
+  
 
   async getFlatNonStructuralRating(req, res) {
     try {
@@ -1411,17 +1392,55 @@ class StructureController {
   }
 
   // =================== HELPER METHODS ===================
-  createRatingComponent(ratingData, inspectionDate) {
-    if (!ratingData || !ratingData.rating) return null;
-    
+ /**
+ * Create rating component object with photos
+ * @param {Object} data - rating data { rating, condition_comment, key }
+ * @param {Date} inspectionDate
+ * @param {Object} files - req.files (from Multer)
+ */
+// inside structureController.js
+
+// structureController.js
+
+// inside StructureController class
+static async createRatingComponent(componentName, ratingData, files) {
+  try {
+    if (!ratingData) {
+      return {
+        rating: null,
+        condition_comment: "",
+        photos: []
+      };
+    }
+
+    // Collect files for this component (e.g. beams_photos[], columns_photos[], etc.)
+    let uploadedPhotos = [];
+    if (files && files[`${componentName}_photos`]) {
+      const fileArray = files[`${componentName}_photos`];
+      for (const file of fileArray) {
+        const uploaded = await FileUploadService.uploadImage(file);
+        uploadedPhotos.push(uploaded.url); // or uploaded.path depending on service
+      }
+    }
+
     return {
-      rating: parseInt(ratingData.rating),
-      condition_comment: ratingData.condition_comment || '',
-      inspection_date: inspectionDate,
-      photos: Array.isArray(ratingData.photos) ? ratingData.photos : [],
-      inspector_notes: ratingData.inspector_notes || ''
+      rating: ratingData.rating || null,
+      condition_comment: ratingData.condition_comment || "",
+      photos: uploadedPhotos
+    };
+  } catch (error) {
+    console.error(`Error in createRatingComponent for ${componentName}:`, error);
+    return {
+      rating: null,
+      condition_comment: "",
+      photos: []
     };
   }
+}
+
+
+
+  
   
   calculateAverage(ratings) {
     const validRatings = ratings.filter(r => r && !isNaN(r));

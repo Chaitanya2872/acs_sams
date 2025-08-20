@@ -1,5 +1,8 @@
 const express = require('express');
 const structureController = require('../controllers/structureController');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+const FileUploadService = require('../services/fileUploadService');
 // Add required imports at the top of the file
 const { User } = require('../models/schemas');
 const { sendSuccessResponse, sendErrorResponse, sendPaginatedResponse } = require('../utils/responseHandler');
@@ -95,14 +98,97 @@ router.delete('/:id/floors/:floorId/flats/:flatId', structureController.deleteFl
 
 // =================== FLAT-LEVEL RATINGS (ONLY) ===================
 
+function parseRatingsJSON(req, res, next) {
+  try {
+    if (typeof req.body.structural_rating === 'string') {
+      req.body.structural_rating = JSON.parse(req.body.structural_rating);
+    }
+    if (typeof req.body.non_structural_rating === 'string') {
+      req.body.non_structural_rating = JSON.parse(req.body.non_structural_rating);
+    }
+    next();
+  } catch (err) {
+    return res.status(400).json({ success: false, message: 'Invalid JSON format' });
+  }
+}
+
+async function attachPhotoUrls(req, res, next) {
+  try {
+    req.body.structural_rating ??= {};
+    req.body.non_structural_rating ??= {};
+
+    // map form-data field names to body object paths
+    const map = {
+      beams_photos:            ['structural_rating', 'beams'],
+      columns_photos:          ['structural_rating', 'columns'],
+      slab_photos:             ['structural_rating', 'slab'],
+      foundation_photos:       ['structural_rating', 'foundation'],
+      brick_plaster_photos:    ['non_structural_rating', 'brick_plaster'],
+      doors_windows_photos:    ['non_structural_rating', 'doors_windows'],
+      flooring_tiles_photos:   ['non_structural_rating', 'flooring_tiles'],
+      electrical_wiring_photos:['non_structural_rating', 'electrical_wiring'],
+      sanitary_fittings_photos:['non_structural_rating', 'sanitary_fittings'],
+      railings_photos:         ['non_structural_rating', 'railings'],
+      water_tanks_photos:      ['non_structural_rating', 'water_tanks'],
+      plumbing_photos:         ['non_structural_rating', 'plumbing'],
+      sewage_system_photos:    ['non_structural_rating', 'sewage_system'],
+      panel_board_photos:      ['non_structural_rating', 'panel_board'],
+      lifts_photos:            ['non_structural_rating', 'lifts']
+    };
+
+    // iterate over uploaded files
+    for (const [field, path] of Object.entries(map)) {
+      if (req.files && req.files[field]) {
+        const files = req.files[field]; // always an array from multer
+        if (!Array.isArray(files) || files.length === 0) continue;
+
+        // upload to cloudinary
+        const uploaded = await FileUploadService.uploadMultipleImages(files, {
+          folder: 'sams/ratings'
+        });
+
+        // extract just URLs
+        const urls = uploaded.map(u => u.url);
+
+        // ensure nested object exists
+        const [section, component] = path;
+        req.body[section][component] ??= {};
+        req.body[section][component].photos = urls;
+      }
+    }
+
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'File upload failed',
+      error: error.message
+    });
+  }
+}
+
+
 /**
  * @route   POST /api/structures/:id/floors/:floorId/flats/:flatId/ratings
  * @desc    Save combined flat ratings (structural + non-structural in one request)
  * @access  Private
  */
-router.post('/:id/floors/:floorId/flats/:flatId/ratings', 
-  flatCombinedRatingsValidation, 
-  handleValidationErrors, 
+router.post(
+  '/:id/floors/:floorId/flats/:flatId/ratings',
+  upload.fields([
+    { name: 'beams_photos', maxCount: 10 },
+    { name: 'columns_photos', maxCount: 10 },
+    { name: 'slab_photos', maxCount: 10 },
+    { name: 'foundation_photos', maxCount: 10 },
+    { name: 'brick_plaster_photos', maxCount: 10 },
+    { name: 'doors_windows_photos', maxCount: 10 },
+    { name: 'electrical_wiring_photos', maxCount: 10 },
+    { name: 'panel_board_photos', maxCount: 10 },
+    // add rest...
+  ]),
+  parseRatingsJSON,
+  attachPhotoUrls,
+  flatCombinedRatingsValidation,
   structureController.saveFlatCombinedRatings
 );
 

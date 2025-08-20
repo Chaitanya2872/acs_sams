@@ -3,56 +3,64 @@ const streamifier = require('streamifier');
 
 class FileUploadService {
     // Upload single image to Cloudinary
-    async uploadImage(fileBuffer, options = {}) {
+    async uploadImage(fileInput, options = {}) {
         return new Promise((resolve, reject) => {
-            const uploadOptions = {
-                folder: options.folder || 'sams/structures',
-                resource_type: 'image',
-                transformation: [
-                    { width: 1200, height: 800, crop: 'limit' },
-                    { quality: 'auto' },
-                    { fetch_format: 'auto' }
-                ],
-                ...options
-            };
-
-            const uploadStream = cloudinary.uploader.upload_stream(
-                uploadOptions,
-                (error, result) => {
-                    if (error) {
-                        reject(error);
-                    } else {
-                        resolve({
-                            url: result.secure_url,
-                            publicId: result.public_id,
-                            width: result.width,
-                            height: result.height,
-                            size: result.bytes
-                        });
-                    }
-                }
-            );
-
-            streamifier.createReadStream(fileBuffer).pipe(uploadStream);
+          const uploadOptions = {
+            folder: options.folder || 'sams/structures',
+            resource_type: 'image',
+            transformation: [
+              { width: 1200, height: 800, crop: 'limit' },
+              { quality: 'auto' },
+              { fetch_format: 'auto' }
+            ],
+            ...options
+          };
+      
+          const callback = (error, result) => {
+            if (error) return reject(error);
+            resolve({
+              url: result.secure_url,
+              publicId: result.public_id,
+              width: result.width,
+              height: result.height,
+              size: result.bytes
+            });
+          };
+      
+          if (Buffer.isBuffer(fileInput)) {
+            // memoryStorage
+            const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, callback);
+            streamifier.createReadStream(fileInput).pipe(uploadStream);
+          } else if (typeof fileInput === 'string') {
+            // diskStorage (fileInput is file.path)
+            cloudinary.uploader.upload(fileInput, uploadOptions, callback);
+          } else {
+            reject(new Error('Invalid file input for uploadImage'));
+          }
         });
-    }
+      }
+      
 
     // Upload multiple images
     async uploadMultipleImages(files, options = {}) {
-        const uploadPromises = files.map(file => 
-            this.uploadImage(file.buffer, {
-                folder: options.folder || 'sams/structures',
-                public_id: options.prefix ? `${options.prefix}_${Date.now()}_${Math.random().toString(36).substring(7)}` : undefined
-            })
-        );
-
+        const uploadPromises = files.map(file => {
+          const fileData = file.buffer || file.path;  // <-- support both
+      
+          return this.uploadImage(fileData, {
+            folder: options.folder || 'sams/structures',
+            public_id: options.prefix
+              ? `${options.prefix}_${Date.now()}_${Math.random().toString(36).substring(7)}`
+              : undefined
+          });
+        });
+      
         try {
-            const results = await Promise.all(uploadPromises);
-            return results;
+          return await Promise.all(uploadPromises);
         } catch (error) {
-            throw new Error(`Failed to upload images: ${error.message}`);
+          throw new Error(`Failed to upload images: ${error.message}`);
         }
-    }
+      }
+      
 
     // Delete image from Cloudinary
     async deleteImage(publicId) {
