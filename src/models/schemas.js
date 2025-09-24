@@ -19,13 +19,11 @@ const ratingComponentSchema = {
     type: Date,
     default: Date.now
   },
-  // Simple photo validation
   photos: [{
     type: String,
     validate: {
       validator: function(v) {
         if (!v || v.trim() === '') return true;
-        // Allow base64, blob URLs, file paths, and HTTP URLs
         return v.startsWith('data:image/') || 
                v.startsWith('blob:') || 
                v.includes('/uploads/') || 
@@ -44,7 +42,111 @@ const ratingComponentSchema = {
   }
 };
 
-// Enhanced Flat Schema - ONLY flat-level ratings
+// Industrial Block Schema - For industrial structures
+const industrialBlockSchema = {
+  block_id: {
+    type: String,
+    required: true,
+    unique: false
+  },
+  block_number: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 20
+  },
+  block_name: {
+    type: String,
+    trim: true,
+    maxlength: 100
+  },
+  block_type: {
+    type: String,
+    enum: ['manufacturing', 'warehouse', 'storage', 'office', 'utility', 'mixed'],
+    default: 'manufacturing'
+  },
+  area_sq_mts: {
+    type: Number,
+    min: [1, 'Area must be at least 1 square meter'],
+    max: [100000, 'Area cannot exceed 100,000 square meters']
+  },
+  
+  // BLOCK-LEVEL STRUCTURAL RATINGS
+  structural_rating: {
+    beams: ratingComponentSchema,
+    columns: ratingComponentSchema,
+    slab: ratingComponentSchema,
+    foundation: ratingComponentSchema,
+    roof_truss: ratingComponentSchema,  // Additional for industrial
+    
+    overall_average: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    health_status: {
+      type: String,
+      enum: ['Good', 'Fair', 'Poor', 'Critical']
+    },
+    assessment_date: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  
+  // BLOCK-LEVEL NON-STRUCTURAL RATINGS
+  non_structural_rating: {
+    walls_cladding: ratingComponentSchema,  // Industrial specific
+    industrial_flooring: ratingComponentSchema,  // Heavy duty flooring
+    ventilation: ratingComponentSchema,
+    electrical_system: ratingComponentSchema,
+    fire_safety: ratingComponentSchema,
+    drainage: ratingComponentSchema,
+    overhead_cranes: ratingComponentSchema,  // If applicable
+    loading_docks: ratingComponentSchema,
+    
+    overall_average: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    assessment_date: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  
+  // BLOCK OVERALL HEALTH
+  block_overall_rating: {
+    combined_score: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    health_status: {
+      type: String,
+      enum: ['Good', 'Fair', 'Poor', 'Critical']
+    },
+    priority: {
+      type: String,
+      enum: ['Low', 'Medium', 'High', 'Critical']
+    },
+    last_assessment_date: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  
+  block_notes: {
+    type: String,
+    maxlength: 1000
+  },
+  last_inspection_date: {
+    type: Date
+  }
+};
+
+// Enhanced Flat Schema - ONLY for residential/commercial structures
 const flatSchema = {
   flat_id: {
     type: String,
@@ -78,14 +180,13 @@ const flatSchema = {
     default: 'occupied'
   },
   
-  // ONLY FLAT-LEVEL STRUCTURAL RATINGS
+  // FLAT-LEVEL STRUCTURAL RATINGS
   structural_rating: {
     beams: ratingComponentSchema,
     columns: ratingComponentSchema,
     slab: ratingComponentSchema,
     foundation: ratingComponentSchema,
     
-    // Auto-calculated flat structural summary
     overall_average: {
       type: Number,
       min: 1,
@@ -101,7 +202,7 @@ const flatSchema = {
     }
   },
   
-  // ONLY FLAT-LEVEL NON-STRUCTURAL RATINGS
+  // FLAT-LEVEL NON-STRUCTURAL RATINGS
   non_structural_rating: {
     brick_plaster: ratingComponentSchema,
     doors_windows: ratingComponentSchema,
@@ -115,7 +216,6 @@ const flatSchema = {
     panel_board: ratingComponentSchema,
     lifts: ratingComponentSchema,
     
-    // Auto-calculated flat non-structural summary
     overall_average: {
       type: Number,
       min: 1,
@@ -127,7 +227,7 @@ const flatSchema = {
     }
   },
   
-  // FLAT OVERALL HEALTH (combination of structural + non-structural)
+  // FLAT OVERALL HEALTH
   flat_overall_rating: {
     combined_score: {
       type: Number,
@@ -157,7 +257,7 @@ const flatSchema = {
   }
 };
 
-// Simplified Floor Schema - NO floor-level ratings
+// Enhanced Floor Schema - Supports both flats and industrial blocks
 const floorSchema = {
   floor_id: {
     type: String,
@@ -167,23 +267,27 @@ const floorSchema = {
   floor_number: {
     type: Number,
     required: true,
-    min: [0, 'Floor number cannot be negative'],
+    min: [-5, 'Floor number cannot be less than -5 (for basements)'],
     max: [200, 'Floor number cannot exceed 200']
   },
   floor_type: {
     type: String,
-    enum: ['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational'],
+    enum: ['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational', 'industrial'],
     default: 'residential'
+  },
+  is_parking_floor: {
+    type: Boolean,
+    default: false
   },
   floor_height: {
     type: Number,
     min: [2, 'Floor height must be at least 2 meters'],
-    max: [10, 'Floor height cannot exceed 10 meters']
+    max: [20, 'Floor height cannot exceed 20 meters']  // Higher for industrial
   },
   total_area_sq_mts: {
     type: Number,
     min: [1, 'Total area must be at least 1 square meter'],
-    max: [50000, 'Total area cannot exceed 50,000 square meters']
+    max: [100000, 'Total area cannot exceed 100,000 square meters']  // Larger for industrial
   },
   floor_label_name: {
     type: String,
@@ -193,13 +297,20 @@ const floorSchema = {
   },
   number_of_flats: {
     type: Number,
-    required: true,
     min: [0, 'Number of flats cannot be negative'],
     max: [100, 'Number of flats cannot exceed 100 per floor']
   },
+  number_of_blocks: {
+    type: Number,
+    min: [0, 'Number of blocks cannot be negative'],
+    max: [50, 'Number of blocks cannot exceed 50 per floor']
+  },
   
-  // FLATS ARRAY with only flat-level ratings
+  // FLATS ARRAY - For residential/commercial structures
   flats: [flatSchema],
+  
+  // BLOCKS ARRAY - For industrial structures
+  blocks: [industrialBlockSchema],
   
   floor_notes: {
     type: String,
@@ -207,7 +318,7 @@ const floorSchema = {
   }
 };
 
-// =================== SIMPLIFIED STRUCTURE SCHEMA ===================
+// =================== ENHANCED STRUCTURE SCHEMA ===================
 
 const structureSchema = new mongoose.Schema({
   // Basic Structure Identity (Screen 1)
@@ -218,6 +329,11 @@ const structureSchema = new mongoose.Schema({
       trim: true,
       uppercase: true,
       match: [/^[A-Z0-9]{8,12}$/, 'UID must be 8-12 alphanumeric characters']
+    },
+    structure_name: {
+      type: String,
+      trim: true,
+      maxlength: 200
     },
     structural_identity_number: {
       type: String,
@@ -263,6 +379,13 @@ const structureSchema = new mongoose.Schema({
       type: String,
       enum: ['residential', 'commercial', 'educational', 'hospital', 'industrial'],
       default: 'residential'
+    },
+    commercial_subtype: {
+      type: String,
+      enum: ['only_commercial', 'commercial_residential'],
+      required: function() {
+        return this.type_of_structure === 'commercial';
+      }
     },
     type_code: {
       type: String,
@@ -331,12 +454,22 @@ const structureSchema = new mongoose.Schema({
     }
   },
   
-  // Geometric Details with Simplified Floors and Flats (Screen 3)
+  // Enhanced Geometric Details (Screen 3)
   geometric_details: {
     number_of_floors: {
       type: Number,
       min: [1, 'Number of floors must be at least 1'],
       max: [200, 'Number of floors cannot exceed 200']
+    },
+    has_parking_floors: {
+      type: Boolean,
+      default: false
+    },
+    number_of_parking_floors: {
+      type: Number,
+      min: [0, 'Number of parking floors cannot be negative'],
+      max: [10, 'Number of parking floors cannot exceed 10'],
+      default: 0
     },
     structure_height: {
       type: Number,
@@ -346,15 +479,15 @@ const structureSchema = new mongoose.Schema({
     structure_width: {
       type: Number,
       min: [5, 'Structure width must be at least 5 meters'],
-      max: [500, 'Structure width cannot exceed 500 meters']
+      max: [1000, 'Structure width cannot exceed 1000 meters']  // Larger for industrial
     },
     structure_length: {
       type: Number,
       min: [5, 'Structure length must be at least 5 meters'],
-      max: [500, 'Structure length cannot exceed 500 meters']
+      max: [1000, 'Structure length cannot exceed 1000 meters']  // Larger for industrial
     },
     
-    // SIMPLIFIED FLOORS ARRAY - no floor-level ratings
+    // ENHANCED FLOORS ARRAY - Supports both flats and blocks
     floors: [floorSchema],
     
     building_age: {
@@ -369,11 +502,11 @@ const structureSchema = new mongoose.Schema({
     }
   },
   
-  // Structure Status (simplified)
+  // Structure Status
   status: {
     type: String,
     enum: ['draft', 'location_completed', 'admin_completed', 'geometric_completed', 
-           'ratings_in_progress', 'flat_ratings_completed', 'submitted', 'approved'],
+           'ratings_in_progress', 'ratings_completed', 'submitted', 'approved'],
     default: 'draft'
   },
   
@@ -501,7 +634,6 @@ const userSchema = new mongoose.Schema({
     enum: ['AD', 'TE', 'VE', 'FE'],
     required: true
   }],
-  // Keep primary role for backward compatibility
   role: {
     type: String,
     enum: ['AD', 'TE', 'VE', 'FE'],
@@ -602,7 +734,6 @@ const userSchema = new mongoose.Schema({
     }
   },
   
-  // Account Status
   is_active: {
     type: Boolean,
     default: true
@@ -639,6 +770,7 @@ userSchema.index({ created_at: -1 });
 // Embedded structure indexes
 userSchema.index({ 'structures.structural_identity.structural_identity_number': 1 }, { sparse: true });
 userSchema.index({ 'structures.structural_identity.uid': 1 });
+userSchema.index({ 'structures.structural_identity.structure_name': 1 }, { sparse: true });
 userSchema.index({ 'structures.status': 1 });
 userSchema.index({ 'structures.structural_identity.state_code': 1, 'structures.structural_identity.district_code': 1 });
 userSchema.index({ 'structures.creation_info.created_date': -1 });
@@ -660,19 +792,28 @@ structureSchema.virtual('total_area').get(function() {
   return this.geometric_details.structure_width * this.geometric_details.structure_length;
 });
 
-structureSchema.virtual('total_flats').get(function() {
+// Enhanced virtual for total flats or blocks based on structure type
+structureSchema.virtual('total_units').get(function() {
   if (!this.geometric_details?.floors) return 0;
-  return this.geometric_details.floors.reduce((total, floor) => {
-    return total + (floor.flats ? floor.flats.length : 0);
-  }, 0);
+  
+  if (this.structural_identity?.type_of_structure === 'industrial') {
+    // Count blocks for industrial
+    return this.geometric_details.floors.reduce((total, floor) => {
+      return total + (floor.blocks ? floor.blocks.length : 0);
+    }, 0);
+  } else {
+    // Count flats for residential/commercial
+    return this.geometric_details.floors.reduce((total, floor) => {
+      return total + (floor.flats ? floor.flats.length : 0);
+    }, 0);
+  }
 });
 
-// =================== SIMPLIFIED MIDDLEWARE ===================
+// =================== ENHANCED MIDDLEWARE ===================
 
 userSchema.pre('save', function(next) {
   this.updated_at = new Date();
   
-  // Update structure timestamps and versions
   this.structures.forEach(structure => {
     if (structure.isModified() && !structure.isNew) {
       structure.creation_info.last_updated_date = new Date();
@@ -683,63 +824,126 @@ userSchema.pre('save', function(next) {
   next();
 });
 
-// Simplified pre-save middleware for structures
+// Enhanced pre-save middleware for structures
 structureSchema.pre('save', function(next) {
   if (this.geometric_details?.floors && this.isModified('geometric_details.floors')) {
+    const structureType = this.structural_identity?.type_of_structure;
+    
     this.geometric_details.floors.forEach(floor => {
-      if (floor.flats && floor.flats.length > 0) {
-        floor.flats.forEach(flat => {
-          // Calculate flat structural rating average
-          if (flat.structural_rating) {
-            const structuralRatings = [];
-            if (flat.structural_rating.beams?.rating) structuralRatings.push(flat.structural_rating.beams.rating);
-            if (flat.structural_rating.columns?.rating) structuralRatings.push(flat.structural_rating.columns.rating);
-            if (flat.structural_rating.slab?.rating) structuralRatings.push(flat.structural_rating.slab.rating);
-            if (flat.structural_rating.foundation?.rating) structuralRatings.push(flat.structural_rating.foundation.rating);
-            
-            if (structuralRatings.length > 0) {
-              const average = structuralRatings.reduce((sum, rating) => sum + rating, 0) / structuralRatings.length;
-              flat.structural_rating.overall_average = Math.round(average * 10) / 10;
-              flat.structural_rating.health_status = this.getHealthStatus(average);
-              flat.structural_rating.assessment_date = new Date();
-            }
-          }
-          
-          // Calculate flat non-structural rating average
-          if (flat.non_structural_rating) {
-            const nonStructuralRatings = [];
-            const components = ['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-                               'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-                               'sewage_system', 'panel_board', 'lifts'];
-            
-            components.forEach(component => {
-              if (flat.non_structural_rating[component]?.rating) {
-                nonStructuralRatings.push(flat.non_structural_rating[component].rating);
+      if (structureType === 'industrial') {
+        // Process blocks for industrial structures
+        if (floor.blocks && floor.blocks.length > 0) {
+          floor.blocks.forEach(block => {
+            // Calculate block structural rating average
+            if (block.structural_rating) {
+              const structuralRatings = [];
+              const components = ['beams', 'columns', 'slab', 'foundation', 'roof_truss'];
+              
+              components.forEach(component => {
+                if (block.structural_rating[component]?.rating) {
+                  structuralRatings.push(block.structural_rating[component].rating);
+                }
+              });
+              
+              if (structuralRatings.length > 0) {
+                const average = structuralRatings.reduce((sum, rating) => sum + rating, 0) / structuralRatings.length;
+                block.structural_rating.overall_average = Math.round(average * 10) / 10;
+                block.structural_rating.health_status = this.getHealthStatus(average);
+                block.structural_rating.assessment_date = new Date();
               }
-            });
-            
-            if (nonStructuralRatings.length > 0) {
-              const average = nonStructuralRatings.reduce((sum, rating) => sum + rating, 0) / nonStructuralRatings.length;
-              flat.non_structural_rating.overall_average = Math.round(average * 10) / 10;
-              flat.non_structural_rating.assessment_date = new Date();
             }
-          }
-          
-          // Calculate flat overall rating (combined)
-          if (flat.structural_rating?.overall_average && flat.non_structural_rating?.overall_average) {
-            const structuralWeight = 0.7;
-            const nonStructuralWeight = 0.3;
             
-            const combinedScore = (flat.structural_rating.overall_average * structuralWeight) + 
-                                 (flat.non_structural_rating.overall_average * nonStructuralWeight);
+            // Calculate block non-structural rating average
+            if (block.non_structural_rating) {
+              const nonStructuralRatings = [];
+              const components = ['walls_cladding', 'industrial_flooring', 'ventilation', 'electrical_system',
+                                'fire_safety', 'drainage', 'overhead_cranes', 'loading_docks'];
+              
+              components.forEach(component => {
+                if (block.non_structural_rating[component]?.rating) {
+                  nonStructuralRatings.push(block.non_structural_rating[component].rating);
+                }
+              });
+              
+              if (nonStructuralRatings.length > 0) {
+                const average = nonStructuralRatings.reduce((sum, rating) => sum + rating, 0) / nonStructuralRatings.length;
+                block.non_structural_rating.overall_average = Math.round(average * 10) / 10;
+                block.non_structural_rating.assessment_date = new Date();
+              }
+            }
             
-            flat.flat_overall_rating = flat.flat_overall_rating || {};
-            flat.flat_overall_rating.combined_score = Math.round(combinedScore * 10) / 10;
-            flat.flat_overall_rating.health_status = this.getHealthStatus(combinedScore);
-            flat.flat_overall_rating.priority = this.getPriority(combinedScore);
-            flat.flat_overall_rating.last_assessment_date = new Date();
-          }
-        });
+            // Calculate block overall rating (combined)
+            if (block.structural_rating?.overall_average && block.non_structural_rating?.overall_average) {
+              const structuralWeight = 0.7;
+              const nonStructuralWeight = 0.3;
+              
+              const combinedScore = (block.structural_rating.overall_average * structuralWeight) + 
+                                   (block.non_structural_rating.overall_average * nonStructuralWeight);
+              
+              block.block_overall_rating = block.block_overall_rating || {};
+              block.block_overall_rating.combined_score = Math.round(combinedScore * 10) / 10;
+              block.block_overall_rating.health_status = this.getHealthStatus(combinedScore);
+              block.block_overall_rating.priority = this.getPriority(combinedScore);
+              block.block_overall_rating.last_assessment_date = new Date();
+            }
+          });
+        }
+      } else {
+        // Process flats for residential/commercial structures (existing logic)
+        if (floor.flats && floor.flats.length > 0) {
+          floor.flats.forEach(flat => {
+            // Calculate flat structural rating average
+            if (flat.structural_rating) {
+              const structuralRatings = [];
+              if (flat.structural_rating.beams?.rating) structuralRatings.push(flat.structural_rating.beams.rating);
+              if (flat.structural_rating.columns?.rating) structuralRatings.push(flat.structural_rating.columns.rating);
+              if (flat.structural_rating.slab?.rating) structuralRatings.push(flat.structural_rating.slab.rating);
+              if (flat.structural_rating.foundation?.rating) structuralRatings.push(flat.structural_rating.foundation.rating);
+              
+              if (structuralRatings.length > 0) {
+                const average = structuralRatings.reduce((sum, rating) => sum + rating, 0) / structuralRatings.length;
+                flat.structural_rating.overall_average = Math.round(average * 10) / 10;
+                flat.structural_rating.health_status = this.getHealthStatus(average);
+                flat.structural_rating.assessment_date = new Date();
+              }
+            }
+            
+            // Calculate flat non-structural rating average
+            if (flat.non_structural_rating) {
+              const nonStructuralRatings = [];
+              const components = ['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+                                 'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+                                 'sewage_system', 'panel_board', 'lifts'];
+              
+              components.forEach(component => {
+                if (flat.non_structural_rating[component]?.rating) {
+                  nonStructuralRatings.push(flat.non_structural_rating[component].rating);
+                }
+              });
+              
+              if (nonStructuralRatings.length > 0) {
+                const average = nonStructuralRatings.reduce((sum, rating) => sum + rating, 0) / nonStructuralRatings.length;
+                flat.non_structural_rating.overall_average = Math.round(average * 10) / 10;
+                flat.non_structural_rating.assessment_date = new Date();
+              }
+            }
+            
+            // Calculate flat overall rating (combined)
+            if (flat.structural_rating?.overall_average && flat.non_structural_rating?.overall_average) {
+              const structuralWeight = 0.7;
+              const nonStructuralWeight = 0.3;
+              
+              const combinedScore = (flat.structural_rating.overall_average * structuralWeight) + 
+                                   (flat.non_structural_rating.overall_average * nonStructuralWeight);
+              
+              flat.flat_overall_rating = flat.flat_overall_rating || {};
+              flat.flat_overall_rating.combined_score = Math.round(combinedScore * 10) / 10;
+              flat.flat_overall_rating.health_status = this.getHealthStatus(combinedScore);
+              flat.flat_overall_rating.priority = this.getPriority(combinedScore);
+              flat.flat_overall_rating.last_assessment_date = new Date();
+            }
+          });
+        }
       }
     });
   }
@@ -770,7 +974,6 @@ userSchema.methods.updateStats = function() {
   this.stats.last_activity_date = new Date();
 };
 
-// Simplified structure methods
 structureSchema.methods.getHealthStatus = function(average) {
   if (!average || isNaN(average)) return null;
   if (average >= 4) return 'Good';
@@ -787,9 +990,10 @@ structureSchema.methods.getPriority = function(average) {
   return 'Critical';
 };
 
+// Enhanced completion percentage for different structure types
 structureSchema.methods.getCompletionPercentage = function() {
   let completed = 0;
-  const totalScreens = 4; // Simplified to 4 screens
+  const totalScreens = 4;
   
   // Screen 1: Location
   if (this.structural_identity && this.location?.coordinates?.latitude && this.location?.coordinates?.longitude) {
@@ -807,21 +1011,37 @@ structureSchema.methods.getCompletionPercentage = function() {
     completed++;
   }
   
-  // Screen 4: Flat ratings completed
+  // Screen 4: Ratings completed
   if (this.geometric_details?.floors?.length > 0) {
-    let allFlatsRated = true;
+    const structureType = this.structural_identity?.type_of_structure;
+    let allUnitsRated = true;
+    
     for (const floor of this.geometric_details.floors) {
-      if (floor.flats && floor.flats.length > 0) {
-        for (const flat of floor.flats) {
-          if (!flat.flat_overall_rating?.combined_score) {
-            allFlatsRated = false;
-            break;
+      if (structureType === 'industrial') {
+        // Check blocks for industrial
+        if (floor.blocks && floor.blocks.length > 0) {
+          for (const block of floor.blocks) {
+            if (!block.block_overall_rating?.combined_score) {
+              allUnitsRated = false;
+              break;
+            }
+          }
+        }
+      } else {
+        // Check flats for residential/commercial
+        if (floor.flats && floor.flats.length > 0) {
+          for (const flat of floor.flats) {
+            if (!flat.flat_overall_rating?.combined_score) {
+              allUnitsRated = false;
+              break;
+            }
           }
         }
       }
-      if (!allFlatsRated) break;
+      if (!allUnitsRated) break;
     }
-    if (allFlatsRated) completed++;
+    
+    if (allUnitsRated) completed++;
   }
   
   return Math.round((completed / totalScreens) * 100);
@@ -831,7 +1051,7 @@ structureSchema.methods.isReadyForSubmission = function() {
   return this.getCompletionPercentage() === 100;
 };
 
-// =================== ADDITIONAL SCHEMAS (simplified) ===================
+// =================== ADDITIONAL SCHEMAS ===================
 
 const otpSchema = new mongoose.Schema({
   email: {

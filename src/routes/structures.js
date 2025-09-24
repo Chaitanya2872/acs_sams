@@ -1,9 +1,9 @@
 const express = require('express');
 const structureController = require('../controllers/structureController');
-// Add required imports at the top of the file
 const { User } = require('../models/schemas');
-const { sendSuccessResponse, sendErrorResponse, sendPaginatedResponse } = require('../utils/responseHandler');
+const { sendSuccessResponse, sendErrorResponse, sendPaginatedResponse, sendUpdatedResponse } = require('../utils/responseHandler');
 const { authenticateToken } = require('../middlewares/auth');
+const { handleValidationErrors } = require('../middlewares/validation');
 const { 
   locationValidation, 
   administrativeValidation, 
@@ -12,9 +12,14 @@ const {
   flatValidation,
   flatCombinedRatingsValidation,
   structureNumberValidation,
-  bulkRatingsValidation
+  bulkRatingsValidation,
+  blockValidation,
+  blockRatingsValidation,
+  floorRatingsValidation
 } = require('../utils/screenValidators');
-const { handleValidationErrors } = require('../middlewares/validation');
+
+
+
 
 const router = express.Router();
 
@@ -124,6 +129,16 @@ router.put('/:id/floors/:floorId/flats/:flatId/ratings',
   flatCombinedRatingsValidation, 
   handleValidationErrors, 
   structureController.saveFlatCombinedRatings
+);
+
+router.post('/:id/floors/:floorId/ratings', 
+  floorRatingsValidation, 
+  handleValidationErrors, 
+  structureController.saveFloorRatings
+);
+
+router.get('/:id/floors/:floorId/ratings', 
+  structureController.getFloorRatings
 );
 
 // =================== LEGACY INDIVIDUAL RATINGS (for backward compatibility) ===================
@@ -311,6 +326,325 @@ router.get('/:id/ratings-summary', async (req, res) => {
 });
 
 
+// Add these routes to your existing structures.js file after the flats management section
+
+// =================== INDUSTRIAL BLOCKS MANAGEMENT ===================
+/**
+ * @route   POST /api/structures/:id/floors/:floorId/blocks
+ * @desc    Add blocks to industrial structure floor
+ * @access  Private
+ */
+router.post('/:id/floors/:floorId/blocks', 
+  blockValidation, 
+  handleValidationErrors, 
+  structureController.addBlocksToFloor
+);
+
+/**
+ * @route   GET /api/structures/:id/floors/:floorId/blocks
+ * @desc    Get all blocks in an industrial floor
+ * @access  Private
+ */
+router.get('/:id/floors/:floorId/blocks', async (req, res) => {
+  try {
+    const { id, floorId } = req.params;
+    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
+    }
+
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+
+    const blocksData = floor.blocks?.map(block => ({
+      block_id: block.block_id,
+      mongodb_id: block._id,
+      block_number: block.block_number,
+      block_name: block.block_name,
+      block_type: block.block_type,
+      area_sq_mts: block.area_sq_mts,
+      block_notes: block.block_notes,
+      
+      // Indicators
+      has_structural_ratings: structureController.hasBlockStructuralRating(block),
+      has_non_structural_ratings: structureController.hasBlockNonStructuralRating(block),
+      
+      // Detailed ratings
+      structural_rating: block.structural_rating || structureController.getDefaultIndustrialStructuralRating(),
+      non_structural_rating: block.non_structural_rating || structureController.getDefaultIndustrialNonStructuralRating(),
+      
+      // Overall rating summary
+      block_overall_rating: block.block_overall_rating || null,
+      health_status: block.block_overall_rating?.health_status || null,
+      priority: block.block_overall_rating?.priority || null,
+      combined_score: block.block_overall_rating?.combined_score || null
+    })) || [];
+
+    sendSuccessResponse(res, 'Blocks retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      floor_number: floor.floor_number,
+      total_blocks: blocksData.length,
+      blocks: blocksData
+    });
+
+  } catch (error) {
+    console.error('❌ Get blocks error:', error);
+    sendErrorResponse(res, 'Failed to get blocks', 500, error.message);
+  }
+});
+
+/**
+ * @route   GET /api/structures/:id/floors/:floorId/blocks/:blockId
+ * @desc    Get specific block details
+ * @access  Private
+ */
+router.get('/:id/floors/:floorId/blocks/:blockId', async (req, res) => {
+  try {
+    const { id, floorId, blockId } = req.params;
+    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const block = floor.blocks?.find(b => b.block_id === blockId);
+    if (!block) {
+      return sendErrorResponse(res, 'Block not found', 404);
+    }
+    
+    sendSuccessResponse(res, 'Block details retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      block: {
+        block_id: block.block_id,
+        mongodb_id: block._id,
+        block_number: block.block_number,
+        block_name: block.block_name,
+        block_type: block.block_type,
+        area_sq_mts: block.area_sq_mts,
+        block_notes: block.block_notes,
+        structural_rating: block.structural_rating || {},
+        non_structural_rating: block.non_structural_rating || {},
+        block_overall_rating: block.block_overall_rating || null
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get block error:', error);
+    sendErrorResponse(res, 'Failed to get block details', 500, error.message);
+  }
+});
+
+/**
+ * @route   PUT /api/structures/:id/floors/:floorId/blocks/:blockId
+ * @desc    Update block details
+ * @access  Private
+ */
+router.put('/:id/floors/:floorId/blocks/:blockId', 
+  blockValidation, 
+  handleValidationErrors, 
+  async (req, res) => {
+    try {
+      const { id, floorId, blockId } = req.params;
+      const updateData = req.body;
+      
+      const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
+      
+      if (structure.structural_identity?.type_of_structure !== 'industrial') {
+        return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
+      }
+      
+      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+      if (!floor) {
+        return sendErrorResponse(res, 'Floor not found', 404);
+      }
+      
+      const block = floor.blocks?.find(b => b.block_id === blockId);
+      if (!block) {
+        return sendErrorResponse(res, 'Block not found', 404);
+      }
+      
+      Object.keys(updateData).forEach(key => {
+        if (!['structural_rating', 'non_structural_rating'].includes(key) && updateData[key] !== undefined) {
+          block[key] = updateData[key];
+        }
+      });
+      
+      structure.creation_info.last_updated_date = new Date();
+      await user.save();
+      
+      sendUpdatedResponse(res, {
+        structure_id: id,
+        floor_id: floorId,
+        block_id: blockId,
+        updated_block: {
+          block_id: block.block_id,
+          block_number: block.block_number,
+          block_name: block.block_name,
+          block_type: block.block_type
+        }
+      }, 'Block updated successfully');
+
+    } catch (error) {
+      console.error('❌ Update block error:', error);
+      sendErrorResponse(res, 'Failed to update block', 500, error.message);
+    }
+});
+
+/**
+ * @route   DELETE /api/structures/:id/floors/:floorId/blocks/:blockId
+ * @desc    Delete a block from industrial floor
+ * @access  Private
+ */
+router.delete('/:id/floors/:floorId/blocks/:blockId', async (req, res) => {
+  try {
+    const { id, floorId, blockId } = req.params;
+    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const blockIndex = floor.blocks?.findIndex(block => block.block_id === blockId);
+    if (blockIndex === -1) {
+      return sendErrorResponse(res, 'Block not found', 404);
+    }
+    
+    floor.blocks.splice(blockIndex, 1);
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Block deleted successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      deleted_block_id: blockId
+    });
+
+  } catch (error) {
+    console.error('❌ Delete block error:', error);
+    sendErrorResponse(res, 'Failed to delete block', 500, error.message);
+  }
+});
+
+// =================== BLOCK-LEVEL RATINGS (Industrial Only) ===================
+
+/**
+ * @route   POST /api/structures/:id/floors/:floorId/blocks/:blockId/ratings
+ * @desc    Save block ratings (structural + non-structural for industrial)
+ * @access  Private
+ */
+router.post('/:id/floors/:floorId/blocks/:blockId/ratings', 
+  blockRatingsValidation, 
+  handleValidationErrors, 
+  structureController.saveBlockRatings
+);
+
+/**
+ * @route   GET /api/structures/:id/floors/:floorId/blocks/:blockId/ratings
+ * @desc    Get block ratings for industrial structure
+ * @access  Private
+ */
+router.get('/:id/floors/:floorId/blocks/:blockId/ratings', async (req, res) => {
+  try {
+    const { id, floorId, blockId } = req.params;
+    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const block = floor.blocks?.find(b => b.block_id === blockId);
+    if (!block) {
+      return sendErrorResponse(res, 'Block not found', 404);
+    }
+    
+    sendSuccessResponse(res, 'Block ratings retrieved successfully', {
+      structural_rating: block.structural_rating || structureController.getDefaultIndustrialStructuralRating(),
+      non_structural_rating: block.non_structural_rating || structureController.getDefaultIndustrialNonStructuralRating()
+    });
+
+  } catch (error) {
+    console.error('❌ Get block ratings error:', error);
+    sendErrorResponse(res, 'Failed to get block ratings', 500, error.message);
+  }
+});
+
+/**
+ * @route   PUT /api/structures/:id/floors/:floorId/blocks/:blockId/ratings
+ * @desc    Update block ratings for industrial structure
+ * @access  Private
+ */
+router.put('/:id/floors/:floorId/blocks/:blockId/ratings', 
+  blockRatingsValidation, 
+  handleValidationErrors, 
+  structureController.saveBlockRatings
+);
+
+// Helper methods to add to structureController
+structureController.hasBlockStructuralRating = function(block) {
+  return block.structural_rating && 
+         block.structural_rating.beams?.rating &&
+         block.structural_rating.columns?.rating &&
+         block.structural_rating.slab?.rating &&
+         block.structural_rating.foundation?.rating &&
+         block.structural_rating.roof_truss?.rating;
+};
+
+structureController.hasBlockNonStructuralRating = function(block) {
+  return block.non_structural_rating &&
+         block.non_structural_rating.walls_cladding?.rating &&
+         block.non_structural_rating.industrial_flooring?.rating &&
+         block.non_structural_rating.ventilation?.rating &&
+         block.non_structural_rating.electrical_system?.rating &&
+         block.non_structural_rating.fire_safety?.rating &&
+         block.non_structural_rating.drainage?.rating;
+};
+
+structureController.getDefaultIndustrialStructuralRating = function() {
+  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
+  return {
+    beams: defaultRating,
+    columns: defaultRating,
+    slab: defaultRating,
+    foundation: defaultRating,
+    roof_truss: defaultRating
+  };
+};
+
+structureController.getDefaultIndustrialNonStructuralRating = function() {
+  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
+  return {
+    walls_cladding: defaultRating,
+    industrial_flooring: defaultRating,
+    ventilation: defaultRating,
+    electrical_system: defaultRating,
+    fire_safety: defaultRating,
+    drainage: defaultRating,
+    overhead_cranes: defaultRating,
+    loading_docks: defaultRating
+  };
+};
+
+
 // Add these routes to your existing structures.js router file
 
 // =================== STRUCTURE LISTING & DETAILS (Add near the top after authentication) ===================
@@ -330,6 +664,13 @@ router.get('/', structureController.getAllStructures);
  * @query   include_images, include_ratings
  */
 router.get('/:id', structureController.getStructureDetails);
+
+/**
+ * @route   DELETE /api/structures/:id
+ * @desc    Delete a structure by ID (owner or admin)
+ * @access  Private
+ */
+router.delete('/:id', structureController.deleteStructure);
 
 // =================== IMAGE MANAGEMENT APIs ===================
 
@@ -1169,5 +1510,7 @@ router.use('*', (req, res) => {
     statusCode: 404
   });
 });
+
+console.log('structureController keys:', Object.keys(structureController));
 
 module.exports = router;

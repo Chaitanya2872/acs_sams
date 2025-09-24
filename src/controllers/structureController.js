@@ -121,179 +121,173 @@ class StructureController {
 
   // =================== STRUCTURE INITIALIZATION ===================
   async initializeStructure(req, res) {
-    try {
-      console.log('🚀 Initializing new structure...');
-      console.log('👤 User:', req.user.userId, req.user.email);
-      
-      const user = await User.findById(req.user.userId);
-      if (!user) {
-        return sendErrorResponse(res, 'User not found', 404);
-      }
-
-      console.log('👤 User found, current structures:', user.structures.length);
-
-      // Generate a simple UID
-      const generateValidUID = () => {
-        const timestamp = Date.now().toString(36).toUpperCase();
-        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const uid = `${random}${timestamp}`.substring(0, 12);
-        console.log('🔑 Generated UID:', uid, 'Length:', uid.length);
-        return uid;
-      };
-
-      // Create simple structure without complex validation
-      const newStructure = {
-        structural_identity: {
-          uid: generateValidUID(),
-          structural_identity_number: '',
-          zip_code: '',
-          state_code: '',
-          district_code: '',
-          city_name: '',
-          location_code: '',
-          structure_number: '',
-          type_of_structure: 'residential',
-          type_code: '01'
-        },
-        location: {
-          coordinates: {
-            latitude: null,
-            longitude: null
-          }
-        },
-        administration: {},
-        geometric_details: {
-          number_of_floors: 1,
-          structure_height: null,
-          structure_width: null,
-          structure_length: null,
-          floors: []
-        },
-        creation_info: {
-          created_date: new Date(),
-          last_updated_date: new Date(),
-          version: 1
-        },
-        status: 'draft'
-      };
-
-      console.log('📝 Structure object created, adding to user...');
-
-      user.structures.push(newStructure);
-      
-      console.log('💾 Saving user with new structure...');
-      await user.save();
-
-      const createdStructure = user.structures[user.structures.length - 1];
-      
-      console.log('✅ Structure initialized successfully:', {
-        id: createdStructure._id,
-        uid: createdStructure.structural_identity.uid,
-        status: createdStructure.status
-      });
-      
-      sendCreatedResponse(res, {
-        structure_id: createdStructure._id,
-        uid: createdStructure.structural_identity.uid,
-        status: createdStructure.status,
-        total_structures: user.structures.length
-      }, 'Structure initialized successfully');
-
-    } catch (error) {
-      console.error('❌ Structure initialization error:', error);
-      console.error('❌ Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
-      
-      if (error.name === 'ValidationError') {
-        console.error('❌ Validation errors:', Object.keys(error.errors));
-        const validationErrors = Object.values(error.errors).map(err => ({
-          field: err.path,
-          message: err.message,
-          value: err.value
-        }));
-        
-        return res.status(400).json({
-          success: false,
-          message: 'Structure validation failed',
-          errors: validationErrors
-        });
-      }
-      
-      sendErrorResponse(res, 'Failed to initialize structure', 500, error.message);
+  try {
+    console.log('🚀 Initializing new structure...');
+    console.log('👤 User:', req.user.userId, req.user.email);
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
     }
+
+    console.log('👤 User found, current structures:', user.structures.length);
+
+    // Generate a simple UID
+    const generateValidUID = () => {
+      const timestamp = Date.now().toString(36).toUpperCase();
+      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const uid = `${random}${timestamp}`.substring(0, 12);
+      console.log('🔑 Generated UID:', uid, 'Length:', uid.length);
+      return uid;
+    };
+
+    // Create simple structure without complex validation
+    const newStructure = {
+      structural_identity: {
+        uid: generateValidUID(),
+        structure_name: '',
+        structural_identity_number: '',
+        zip_code: '',
+        state_code: '',
+        district_code: '',
+        city_name: '',
+        location_code: '',
+        structure_number: '',
+        type_of_structure: 'residential',
+        commercial_subtype: null,
+        type_code: '01'
+      },
+      location: {
+        coordinates: {
+          latitude: null,
+          longitude: null
+        }
+      },
+      administration: {},
+      geometric_details: {
+        number_of_floors: 1,
+        has_parking_floors: false,
+        number_of_parking_floors: 0,
+        structure_height: null,
+        structure_width: null,
+        structure_length: null,
+        floors: []
+      },
+      creation_info: {
+        created_date: new Date(),
+        last_updated_date: new Date(),
+        version: 1
+      },
+      status: 'draft'
+    };
+
+    console.log('📝 Structure object created, adding to user...');
+
+    user.structures.push(newStructure);
+    
+    console.log('💾 Saving user with new structure...');
+    await user.save();
+
+    const createdStructure = user.structures[user.structures.length - 1];
+    
+    console.log('✅ Structure initialized successfully:', {
+      id: createdStructure._id,
+      uid: createdStructure.structural_identity.uid,
+      status: createdStructure.status
+    });
+    
+    sendCreatedResponse(res, {
+      structure_id: createdStructure._id,
+      uid: createdStructure.structural_identity.uid,
+      status: createdStructure.status,
+      total_structures: user.structures.length
+    }, 'Structure initialized successfully');
+
+  } catch (error) {
+    console.error('❌ Structure initialization error:', error);
+    sendErrorResponse(res, 'Failed to initialize structure', 500, error.message);
   }
+}
 
   // =================== SCREEN 1: LOCATION ===================
-  async saveLocationScreen(req, res) {
-    try {
-      const { id } = req.params;
-      const { 
-        zip_code, state_code, district_code, city_name, location_code, type_of_structure,
-        longitude, latitude, address 
-      } = req.body;
-      
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
-      
-      // Get next sequence number for this location
-      const nextSequence = await this.getNextSequenceForLocation(
-        state_code, district_code, city_name, location_code
-      );
-      
-      // Generate structural identity number and components
-      const generatedNumbers = this.structureNumberGenerator.generateStructureNumber({
-        state_code,
-        district_code, 
-        city_name,
-        location_code,
-        type_of_structure
-      }, nextSequence);
-      
-      // Update structural identity
-      structure.structural_identity = {
-        uid: structure.structural_identity.uid,
-        structural_identity_number: generatedNumbers.structural_identity_number,
-        zip_code: zip_code,
-        state_code: generatedNumbers.components.state_code,
-        district_code: generatedNumbers.components.district_code,
-        city_name: generatedNumbers.components.city_code,
-        location_code: generatedNumbers.components.location_code,
-        structure_number: generatedNumbers.components.structure_sequence,
-        type_of_structure: type_of_structure,
-        type_code: generatedNumbers.components.type_code
-      };
-      
-      // Update location coordinates
-      structure.location = {
-        coordinates: {
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude)
-        },
-        address: address || ''
-      };
-      
-      structure.creation_info.last_updated_date = new Date();
-      structure.status = 'location_completed';
-      await user.save();
-      
-      console.log(`✅ Generated Structure Number: ${generatedNumbers.structural_identity_number}`);
-      
-      sendSuccessResponse(res, 'Location details saved successfully', {
-        structure_id: id,
-        uid: structure.structural_identity.uid,
-        structural_identity_number: structure.structural_identity.structural_identity_number,
-        location: structure.location,
-        formatted_display: generatedNumbers.formatted_display,
-        status: structure.status
-      });
-
-    } catch (error) {
-      console.error('❌ Location save error:', error);
-      sendErrorResponse(res, 'Failed to save location details', 500, error.message);
+ async saveLocationScreen(req, res) {
+  try {
+    const { id } = req.params;
+    const { 
+      structure_name, zip_code, state_code, district_code, city_name, location_code, 
+      type_of_structure, commercial_subtype, longitude, latitude, address 
+    } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    // Validate commercial subtype requirement
+    if (type_of_structure === 'commercial' && !commercial_subtype) {
+      return sendErrorResponse(res, 'Commercial subtype is required for commercial structures', 400);
     }
+    
+    // Get next sequence number for this location
+    const nextSequence = await this.getNextSequenceForLocation(
+      state_code, district_code, city_name, location_code
+    );
+    
+    // Generate structural identity number and components
+    const generatedNumbers = this.structureNumberGenerator.generateStructureNumber({
+      state_code,
+      district_code, 
+      city_name,
+      location_code,
+      type_of_structure
+    }, nextSequence);
+    
+    // Update structural identity
+    structure.structural_identity = {
+      uid: structure.structural_identity.uid,
+      structure_name: structure_name || '',
+      structural_identity_number: generatedNumbers.structural_identity_number,
+      zip_code: zip_code,
+      state_code: generatedNumbers.components.state_code,
+      district_code: generatedNumbers.components.district_code,
+      city_name: generatedNumbers.components.city_code,
+      location_code: generatedNumbers.components.location_code,
+      structure_number: generatedNumbers.components.structure_sequence,
+      type_of_structure: type_of_structure,
+      commercial_subtype: type_of_structure === 'commercial' ? commercial_subtype : null,
+      type_code: generatedNumbers.components.type_code
+    };
+    
+    // Update location coordinates
+    structure.location = {
+      coordinates: {
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude)
+      },
+      address: address || ''
+    };
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'location_completed';
+    await user.save();
+    
+    console.log(`✅ Generated Structure Number: ${generatedNumbers.structural_identity_number}`);
+    
+    sendSuccessResponse(res, 'Location details saved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity.uid,
+      structure_name: structure.structural_identity.structure_name,
+      structural_identity_number: structure.structural_identity.structural_identity_number,
+      type_of_structure: structure.structural_identity.type_of_structure,
+      commercial_subtype: structure.structural_identity.commercial_subtype,
+      location: structure.location,
+      formatted_display: generatedNumbers.formatted_display,
+      status: structure.status
+    });
+
+  } catch (error) {
+    console.error('❌ Location save error:', error);
+    sendErrorResponse(res, 'Failed to save location details', 500, error.message);
   }
+}
+
 
   async getLocationScreen(req, res) {
     try {
@@ -373,42 +367,92 @@ class StructureController {
 
   // =================== SCREEN 3: GEOMETRIC DETAILS ===================
   async saveGeometricDetails(req, res) {
-    try {
-      const { id } = req.params;
-      const { number_of_floors, structure_width, structure_length, structure_height } = req.body;
+  try {
+    const { id } = req.params;
+    const { 
+      number_of_floors, structure_width, structure_length, structure_height,
+      has_parking_floors, number_of_parking_floors 
+    } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    const structureType = structure.structural_identity?.type_of_structure;
+    const commercialSubtype = structure.structural_identity?.commercial_subtype;
+    
+    // Apply parking logic for residential and commercial+residential structures
+    const needsParkingOption = structureType === 'residential' || 
+                               commercialSubtype === 'commercial_residential';
+    
+    structure.geometric_details = {
+      ...structure.geometric_details,
+      number_of_floors: parseInt(number_of_floors),
+      has_parking_floors: needsParkingOption ? (has_parking_floors || false) : false,
+      number_of_parking_floors: needsParkingOption && has_parking_floors ? 
+                                parseInt(number_of_parking_floors || 0) : 0,
+      structure_width: parseFloat(structure_width),
+      structure_length: parseFloat(structure_length),
+      structure_height: parseFloat(structure_height)
+    };
+    
+    // Auto-create parking floors if specified
+    if (needsParkingOption && has_parking_floors && number_of_parking_floors > 0) {
+      const existingParkingFloors = structure.geometric_details.floors?.filter(
+        f => f.is_parking_floor
+      ) || [];
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const parkingFloorsToAdd = parseInt(number_of_parking_floors) - existingParkingFloors.length;
       
-      structure.geometric_details = {
-        ...structure.geometric_details,
-        number_of_floors: parseInt(number_of_floors),
-        structure_width: parseFloat(structure_width),
-        structure_length: parseFloat(structure_length),
-        structure_height: parseFloat(structure_height)
-      };
-      
-      structure.creation_info.last_updated_date = new Date();
-      structure.status = 'geometric_completed';
-      await user.save();
-      
-      sendSuccessResponse(res, 'Geometric details saved successfully', {
-        structure_id: id,
-        uid: structure.structural_identity.uid,
-        geometric_details: {
-          number_of_floors: structure.geometric_details.number_of_floors,
-          structure_width: structure.geometric_details.structure_width,
-          structure_length: structure.geometric_details.structure_length,
-          structure_height: structure.geometric_details.structure_height,
-          total_area: structure.geometric_details.structure_width * structure.geometric_details.structure_length
-        },
-        status: structure.status
-      });
-
-    } catch (error) {
-      console.error('❌ Geometric details save error:', error);
-      sendErrorResponse(res, 'Failed to save geometric details', 500, error.message);
+      if (parkingFloorsToAdd > 0) {
+        for (let i = 0; i < parkingFloorsToAdd; i++) {
+          const floorNumber = -(existingParkingFloors.length + i + 1); // Negative for basement parking
+          const parkingFloor = {
+            floor_id: this.generateFloorId(),
+            floor_number: floorNumber,
+            floor_type: 'parking',
+            is_parking_floor: true,
+            floor_label_name: `Parking Level ${Math.abs(floorNumber)}`,
+            floor_height: 3, // Default parking height
+            total_area_sq_mts: structure_width * structure_length,
+            number_of_flats: 0,
+            number_of_blocks: 0,
+            flats: [],
+            blocks: [],
+            floor_notes: 'Auto-generated parking floor'
+          };
+          
+          structure.geometric_details.floors = structure.geometric_details.floors || [];
+          structure.geometric_details.floors.push(parkingFloor);
+        }
+      }
     }
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'geometric_completed';
+    await user.save();
+    
+    sendSuccessResponse(res, 'Geometric details saved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity.uid,
+      structure_type: structureType,
+      commercial_subtype: commercialSubtype,
+      geometric_details: {
+        number_of_floors: structure.geometric_details.number_of_floors,
+        has_parking_floors: structure.geometric_details.has_parking_floors,
+        number_of_parking_floors: structure.geometric_details.number_of_parking_floors,
+        structure_width: structure.geometric_details.structure_width,
+        structure_length: structure.geometric_details.structure_length,
+        structure_height: structure.geometric_details.structure_height,
+        total_area: structure.geometric_details.structure_width * structure.geometric_details.structure_length,
+        total_floors_created: structure.geometric_details.floors?.length || 0
+      },
+      status: structure.status
+    });
+
+  } catch (error) {
+    console.error('❌ Geometric details save error:', error);
+    sendErrorResponse(res, 'Failed to save geometric details', 500, error.message);
   }
+}
 
   async getGeometricDetails(req, res) {
     try {
@@ -435,6 +479,199 @@ class StructureController {
       sendErrorResponse(res, 'Failed to get geometric details', 500, error.message);
     }
   }
+
+  async addBlocksToFloor(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { blocks } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Blocks can only be added to industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+
+    const createdBlocks = [];
+    
+    blocks.forEach((blockData, index) => {
+      const blockId = this.generateBlockId();
+      const newBlock = {
+        block_id: blockId,
+        block_number: blockData.block_number || `B${floor.floor_number}-${String(index + 1).padStart(2, '0')}`,
+        block_name: blockData.block_name || `Block ${index + 1}`,
+        block_type: blockData.block_type || 'manufacturing',
+        area_sq_mts: blockData.area_sq_mts || null,
+        // Initialize empty rating structures for industrial components
+        structural_rating: {
+          beams: { rating: null, condition_comment: '', photos: [] },
+          columns: { rating: null, condition_comment: '', photos: [] },
+          slab: { rating: null, condition_comment: '', photos: [] },
+          foundation: { rating: null, condition_comment: '', photos: [] },
+          roof_truss: { rating: null, condition_comment: '', photos: [] }
+        },
+        non_structural_rating: {
+          walls_cladding: { rating: null, condition_comment: '', photos: [] },
+          industrial_flooring: { rating: null, condition_comment: '', photos: [] },
+          ventilation: { rating: null, condition_comment: '', photos: [] },
+          electrical_system: { rating: null, condition_comment: '', photos: [] },
+          fire_safety: { rating: null, condition_comment: '', photos: [] },
+          drainage: { rating: null, condition_comment: '', photos: [] },
+          overhead_cranes: { rating: null, condition_comment: '', photos: [] },
+          loading_docks: { rating: null, condition_comment: '', photos: [] }
+        },
+        block_notes: blockData.block_notes || ''
+      };
+      
+      floor.blocks = floor.blocks || [];
+      floor.blocks.push(newBlock);
+      createdBlocks.push({
+        block_id: blockId,
+        block_number: newBlock.block_number,
+        block_name: newBlock.block_name,
+        block_type: newBlock.block_type,
+        area_sq_mts: newBlock.area_sq_mts
+      });
+    });
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendCreatedResponse(res, {
+      structure_id: id,
+      floor_id: floorId,
+      blocks_added: createdBlocks.length,
+      blocks: createdBlocks
+    }, `${createdBlocks.length} block(s) added successfully`);
+
+  } catch (error) {
+    console.error('❌ Add blocks error:', error);
+    sendErrorResponse(res, 'Failed to add blocks', 500, error.message);
+  }
+}
+
+async saveBlockRatings(req, res) {
+  try {
+    const { id, floorId, blockId } = req.params;
+    const { structural_rating, non_structural_rating } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const block = floor.blocks?.find(b => b.block_id === blockId);
+    if (!block) {
+      return sendErrorResponse(res, 'Block not found', 404);
+    }
+    
+    const inspectionDate = new Date();
+    
+    // Update structural ratings for industrial components
+    if (structural_rating) {
+      block.structural_rating = {
+        beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
+        columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
+        slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
+        foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate),
+        roof_truss: this.createRatingComponent(structural_rating.roof_truss, inspectionDate)
+      };
+      
+      // Calculate block structural average
+      const structuralRatings = [
+        block.structural_rating.beams?.rating,
+        block.structural_rating.columns?.rating,
+        block.structural_rating.slab?.rating,
+        block.structural_rating.foundation?.rating,
+        block.structural_rating.roof_truss?.rating
+      ].filter(r => r);
+      
+      if (structuralRatings.length > 0) {
+        block.structural_rating.overall_average = this.calculateAverage(structuralRatings);
+        block.structural_rating.health_status = this.getHealthStatus(block.structural_rating.overall_average);
+        block.structural_rating.assessment_date = inspectionDate;
+      }
+    }
+    
+    // Update non-structural ratings for industrial components
+    if (non_structural_rating) {
+      block.non_structural_rating = {
+        walls_cladding: this.createRatingComponent(non_structural_rating.walls_cladding, inspectionDate),
+        industrial_flooring: this.createRatingComponent(non_structural_rating.industrial_flooring, inspectionDate),
+        ventilation: this.createRatingComponent(non_structural_rating.ventilation, inspectionDate),
+        electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate),
+        fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate),
+        drainage: this.createRatingComponent(non_structural_rating.drainage, inspectionDate),
+        overhead_cranes: this.createRatingComponent(non_structural_rating.overhead_cranes, inspectionDate),
+        loading_docks: this.createRatingComponent(non_structural_rating.loading_docks, inspectionDate)
+      };
+      
+      // Calculate block non-structural average
+      const nonStructuralRatings = [
+        block.non_structural_rating.walls_cladding?.rating,
+        block.non_structural_rating.industrial_flooring?.rating,
+        block.non_structural_rating.ventilation?.rating,
+        block.non_structural_rating.electrical_system?.rating,
+        block.non_structural_rating.fire_safety?.rating,
+        block.non_structural_rating.drainage?.rating,
+        block.non_structural_rating.overhead_cranes?.rating,
+        block.non_structural_rating.loading_docks?.rating
+      ].filter(r => r);
+      
+      if (nonStructuralRatings.length > 0) {
+        block.non_structural_rating.overall_average = this.calculateAverage(nonStructuralRatings);
+        block.non_structural_rating.assessment_date = inspectionDate;
+      }
+    }
+    
+    // Calculate block overall rating (combination of structural + non-structural)
+    if (block.structural_rating?.overall_average && block.non_structural_rating?.overall_average) {
+      const structuralWeight = 0.7;
+      const nonStructuralWeight = 0.3;
+      
+      const combinedScore = (block.structural_rating.overall_average * structuralWeight) + 
+                           (block.non_structural_rating.overall_average * nonStructuralWeight);
+      
+      block.block_overall_rating = {
+        combined_score: Math.round(combinedScore * 10) / 10,
+        health_status: this.getHealthStatus(combinedScore),
+        priority: this.getPriority(combinedScore),
+        last_assessment_date: inspectionDate
+      };
+    }
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'ratings_in_progress';
+    await user.save();
+    
+    sendSuccessResponse(res, 'Block ratings saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      block_id: blockId,
+      block_number: block.block_number,
+      block_name: block.block_name,
+      block_ratings: {
+        structural_rating: block.structural_rating,
+        non_structural_rating: block.non_structural_rating,
+        block_overall_rating: block.block_overall_rating
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Save block ratings error:', error);
+    sendErrorResponse(res, 'Failed to save block ratings', 500, error.message);
+  }
+}
 
   async updateGeometricDetails(req, res) {
     return this.saveGeometricDetails(req, res);
@@ -856,50 +1093,54 @@ class StructureController {
   }
 
   // =================== FLAT RATINGS (ONLY flat-level) ===================
-  async saveFlatCombinedRatings(req, res) {
-    try {
-      const { id, floorId, flatId } = req.params;
-      const { structural_rating, non_structural_rating } = req.body;
-      
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
-      
-      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
-      }
-      
-      const flat = floor.flats.find(f => f.flat_id === flatId);
-      if (!flat) {
-        return sendErrorResponse(res, 'Flat not found', 404);
-      }
-      
+// =================== FLAT-LEVEL RATINGS ===================
+async saveFlatCombinedRatings(req, res) {
+  try {
+    const { id, floorId, flatId } = req.params;
+    const { structural_rating, non_structural_rating } = req.body;
+
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+
+    const type = structure.structural_identity?.type_of_structure;
+    const subtype = structure.structural_identity?.commercial_subtype;
+
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) return sendErrorResponse(res, 'Floor not found', 404);
+
+    const flat = floor.flats?.find(fl => fl.flat_id === flatId);
+    if (!flat) return sendErrorResponse(res, 'Flat not found', 404);
+
+    // ✅ Check if flat ratings are allowed
+    if (
+      type === 'residential' ||
+      (type === 'commercial' && subtype === 'commercial_residential' && floor.floor_type === 'residential')
+    ) {
       const inspectionDate = new Date();
-      
-      // Update structural ratings
+
+      // Structural ratings
       if (structural_rating) {
         flat.structural_rating = {
           beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
           columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
           slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
-          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate)
+          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate),
         };
-        
-        // Calculate flat structural average
-        const structuralRatings = [
+
+        const ratings = [
           flat.structural_rating.beams?.rating,
           flat.structural_rating.columns?.rating,
           flat.structural_rating.slab?.rating,
           flat.structural_rating.foundation?.rating
         ].filter(r => r);
-        
-        if (structuralRatings.length > 0) {
-          flat.structural_rating.overall_average = this.calculateAverage(structuralRatings);
+
+        if (ratings.length > 0) {
+          flat.structural_rating.overall_average = this.calculateAverage(ratings);
           flat.structural_rating.health_status = this.getHealthStatus(flat.structural_rating.overall_average);
           flat.structural_rating.assessment_date = inspectionDate;
         }
       }
-      
-      // Update non-structural ratings
+
+      // Non-structural ratings
       if (non_structural_rating) {
         flat.non_structural_rating = {
           brick_plaster: this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate),
@@ -907,43 +1148,28 @@ class StructureController {
           flooring_tiles: this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate),
           electrical_wiring: this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate),
           sanitary_fittings: this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate),
-          railings: this.createRatingComponent(non_structural_rating.railings, inspectionDate),
-          water_tanks: this.createRatingComponent(non_structural_rating.water_tanks, inspectionDate),
-          plumbing: this.createRatingComponent(non_structural_rating.plumbing, inspectionDate),
-          sewage_system: this.createRatingComponent(non_structural_rating.sewage_system, inspectionDate),
-          panel_board: this.createRatingComponent(non_structural_rating.panel_board, inspectionDate),
-          lifts: this.createRatingComponent(non_structural_rating.lifts, inspectionDate)
         };
-        
-        // Calculate flat non-structural average
-        const nonStructuralRatings = [
+
+        const ratings = [
           flat.non_structural_rating.brick_plaster?.rating,
           flat.non_structural_rating.doors_windows?.rating,
           flat.non_structural_rating.flooring_tiles?.rating,
           flat.non_structural_rating.electrical_wiring?.rating,
-          flat.non_structural_rating.sanitary_fittings?.rating,
-          flat.non_structural_rating.railings?.rating,
-          flat.non_structural_rating.water_tanks?.rating,
-          flat.non_structural_rating.plumbing?.rating,
-          flat.non_structural_rating.sewage_system?.rating,
-          flat.non_structural_rating.panel_board?.rating,
-          flat.non_structural_rating.lifts?.rating
+          flat.non_structural_rating.sanitary_fittings?.rating
         ].filter(r => r);
-        
-        if (nonStructuralRatings.length > 0) {
-          flat.non_structural_rating.overall_average = this.calculateAverage(nonStructuralRatings);
+
+        if (ratings.length > 0) {
+          flat.non_structural_rating.overall_average = this.calculateAverage(ratings);
           flat.non_structural_rating.assessment_date = inspectionDate;
         }
       }
-      
-      // Calculate flat overall rating (combination of structural + non-structural)
+
+      // Combined flat rating
       if (flat.structural_rating?.overall_average && flat.non_structural_rating?.overall_average) {
-        const structuralWeight = 0.7;
-        const nonStructuralWeight = 0.3;
-        
-        const combinedScore = (flat.structural_rating.overall_average * structuralWeight) + 
-                             (flat.non_structural_rating.overall_average * nonStructuralWeight);
-        
+        const combinedScore =
+          (flat.structural_rating.overall_average * 0.7) +
+          (flat.non_structural_rating.overall_average * 0.3);
+
         flat.flat_overall_rating = {
           combined_score: Math.round(combinedScore * 10) / 10,
           health_status: this.getHealthStatus(combinedScore),
@@ -951,28 +1177,31 @@ class StructureController {
           last_assessment_date: inspectionDate
         };
       }
-      
+
       structure.creation_info.last_updated_date = new Date();
       structure.status = 'ratings_in_progress';
       await user.save();
-      
-      sendSuccessResponse(res, 'Flat ratings saved successfully', {
+
+      return sendSuccessResponse(res, 'Flat ratings saved successfully', {
         structure_id: id,
         floor_id: floorId,
         flat_id: flatId,
-        flat_number: flat.flat_number,
         flat_ratings: {
           structural_rating: flat.structural_rating,
           non_structural_rating: flat.non_structural_rating,
           flat_overall_rating: flat.flat_overall_rating
         }
       });
-
-    } catch (error) {
-      console.error('❌ Save flat combined ratings error:', error);
-      sendErrorResponse(res, 'Failed to save flat ratings', 500, error.message);
     }
+
+    return sendErrorResponse(res, 'Flat ratings not allowed for this structure/floor type', 400);
+
+  } catch (err) {
+    console.error('❌ Flat ratings error:', err);
+    sendErrorResponse(res, 'Failed to save flat ratings', 500, err.message);
   }
+}
+
 
   async getFlatCombinedRatings(req, res) {
   try {
@@ -1670,6 +1899,134 @@ extractFlatImages(flat, options = {}) {
   return images;
 }
 
+
+// =================== FLOOR-LEVEL RATINGS ===================
+async saveFloorRatings(req, res) {
+  try {
+    const { id, floorId } = req.params;  // :/floors/:floorId/ratings
+    const { structural_rating, non_structural_rating } = req.body;
+
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+
+    const type = structure.structural_identity?.type_of_structure;
+    const subtype = structure.structural_identity?.commercial_subtype;
+
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) return sendErrorResponse(res, 'Floor not found', 404);
+
+    // ✅ Check if floor ratings are allowed
+    if (
+      (type === 'commercial' && subtype === 'pure') ||
+      (type === 'industrial') ||
+      (type === 'commercial' && subtype === 'commercial_residential' && floor.floor_type === 'commercial')
+    ) {
+      const inspectionDate = new Date();
+
+      // Structural ratings
+      if (structural_rating) {
+        floor.structural_rating = {
+          beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
+          columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
+          slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
+          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate),
+        };
+
+        const ratings = [
+          floor.structural_rating.beams?.rating,
+          floor.structural_rating.columns?.rating,
+          floor.structural_rating.slab?.rating,
+          floor.structural_rating.foundation?.rating
+        ].filter(r => r);
+
+        if (ratings.length > 0) {
+          floor.structural_rating.overall_average = this.calculateAverage(ratings);
+          floor.structural_rating.health_status = this.getHealthStatus(floor.structural_rating.overall_average);
+          floor.structural_rating.assessment_date = inspectionDate;
+        }
+      }
+
+      // Non-structural ratings
+      if (non_structural_rating) {
+        floor.non_structural_rating = {
+          walls: this.createRatingComponent(non_structural_rating.walls, inspectionDate),
+          flooring: this.createRatingComponent(non_structural_rating.flooring, inspectionDate),
+          electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate),
+          fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate),
+        };
+
+        const ratings = [
+          floor.non_structural_rating.walls?.rating,
+          floor.non_structural_rating.flooring?.rating,
+          floor.non_structural_rating.electrical_system?.rating,
+          floor.non_structural_rating.fire_safety?.rating
+        ].filter(r => r);
+
+        if (ratings.length > 0) {
+          floor.non_structural_rating.overall_average = this.calculateAverage(ratings);
+          floor.non_structural_rating.assessment_date = inspectionDate;
+        }
+      }
+
+      // Combined floor rating
+      if (floor.structural_rating?.overall_average && floor.non_structural_rating?.overall_average) {
+        const combinedScore =
+          (floor.structural_rating.overall_average * 0.7) +
+          (floor.non_structural_rating.overall_average * 0.3);
+
+        floor.floor_overall_rating = {
+          combined_score: Math.round(combinedScore * 10) / 10,
+          health_status: this.getHealthStatus(combinedScore),
+          priority: this.getPriority(combinedScore),
+          last_assessment_date: inspectionDate
+        };
+      }
+
+      structure.creation_info.last_updated_date = new Date();
+      structure.status = 'ratings_in_progress';
+      await user.save();
+
+      return sendSuccessResponse(res, 'Floor ratings saved successfully', {
+        structure_id: id,
+        floor_id: floorId,
+        floor_number: floor.floor_number,
+        floor_ratings: {
+          structural_rating: floor.structural_rating,
+          non_structural_rating: floor.non_structural_rating,
+          floor_overall_rating: floor.floor_overall_rating
+        }
+      });
+    }
+
+    return sendErrorResponse(res, 'Floor ratings not allowed for this structure/floor type', 400);
+
+  } catch (err) {
+    console.error('❌ Floor ratings error:', err);
+    sendErrorResponse(res, 'Failed to save floor ratings', 500, err.message);
+  }
+}
+
+
+async getFloorRatings(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) return sendErrorResponse(res, 'Floor not found', 404);
+
+    return sendSuccessResponse(res, 'Floor ratings retrieved successfully', {
+      structural_rating: floor.structural_rating || {},
+      non_structural_rating: floor.non_structural_rating || {},
+      floor_overall_rating: floor.floor_overall_rating || null
+    });
+  } catch (err) {
+    console.error('❌ Get floor ratings error:', err);
+    sendErrorResponse(res, 'Failed to get floor ratings', 500, err.message);
+  }
+}
+
+
+
 /**
  * Generate maintenance recommendations for a structure
  * @param {Object} structure - Structure document
@@ -1879,44 +2236,68 @@ getStructuresByStatus(structures) {
   }
 
   calculateProgress(structure) {
-    let progress = {
-      location: false,
-      administrative: false,
-      geometric_details: false,
-      floors_added: false,
-      flats_added: false,
-      flat_ratings_completed: false,
-      overall_percentage: 0
-    };
+  let progress = {
+    location: false,
+    administrative: false,
+    geometric_details: false,
+    floors_added: false,
+    units_added: false, // Can be flats or blocks
+    ratings_completed: false,
+    overall_percentage: 0
+  };
 
-    // Check location
-    if (structure.structural_identity?.structural_identity_number && structure.location?.coordinates?.latitude) {
-      progress.location = true;
-    }
+const structureType = structure.structural_identity?.type_of_structure;
 
-    // Check administrative
-    if (structure.administration?.client_name && structure.administration?.email_id) {
-      progress.administrative = true;
-    }
+  // Check location
+  if (structure.structural_identity?.structural_identity_number && structure.location?.coordinates?.latitude) {
+    progress.location = true;
+  }
 
-    // Check geometric details
-    if (structure.geometric_details?.structure_width && structure.geometric_details?.structure_height) {
-      progress.geometric_details = true;
-    }
+  // Check administrative
+  if (structure.administration?.client_name && structure.administration?.email_id) {
+    progress.administrative = true;
+  }
 
-    // Check floors
-    if (structure.geometric_details?.floors?.length > 0) {
-      progress.floors_added = true;
-      
-      // Check flats
+  // Check geometric details
+  if (structure.geometric_details?.structure_width && structure.geometric_details?.structure_height) {
+    progress.geometric_details = true;
+  }
+
+  // Check floors
+  if (structure.geometric_details?.floors?.length > 0) {
+    progress.floors_added = true;
+    
+    if (structureType === 'industrial') {
+      // Check blocks for industrial
+      const hasBlocks = structure.geometric_details.floors.some(floor => floor.blocks?.length > 0);
+      if (hasBlocks) {
+        progress.units_added = true;
+        
+        // Check if all blocks have ratings
+        let allBlocksRated = true;
+        for (const floor of structure.geometric_details.floors) {
+          if (floor.blocks?.length > 0) {
+            for (const block of floor.blocks) {
+              if (!block.block_overall_rating?.combined_score) {
+                allBlocksRated = false;
+                break;
+              }
+            }
+          }
+          if (!allBlocksRated) break;
+        }
+        progress.ratings_completed = allBlocksRated;
+      }
+    } else {
+      // Check flats for residential/commercial
       const hasFlats = structure.geometric_details.floors.some(floor => floor.flats?.length > 0);
       if (hasFlats) {
-        progress.flats_added = true;
+        progress.units_added = true;
         
-        // Check if all flats have ratings
+        // Check if all flats have ratings (skip parking floors)
         let allFlatsRated = true;
         for (const floor of structure.geometric_details.floors) {
-          if (floor.flats?.length > 0) {
+          if (!floor.is_parking_floor && floor.flats?.length > 0) {
             for (const flat of floor.flats) {
               if (!flat.flat_overall_rating?.combined_score) {
                 allFlatsRated = false;
@@ -1926,16 +2307,22 @@ getStructuresByStatus(structures) {
           }
           if (!allFlatsRated) break;
         }
-        progress.flat_ratings_completed = allFlatsRated;
+        progress.ratings_completed = allFlatsRated;
       }
     }
-
-    // Calculate percentage
-    const completedSteps = Object.values(progress).filter(val => val === true).length;
-    progress.overall_percentage = Math.round((completedSteps / 6) * 100);
-
-    return progress;
   }
+
+  // Calculate percentage
+  const completedSteps = Object.values(progress).filter(val => val === true).length;
+  progress.overall_percentage = Math.round((completedSteps / 6) * 100);
+
+  return progress;
+}
+
+// Helper methods
+generateBlockId() {
+  return `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
 
   async submitStructure(req, res) {
     try {
@@ -3164,3 +3551,95 @@ async getUserImageStats(req, res) {
 }
 
 module.exports = new StructureController();
+
+/**
+ * Delete entire structure by ID for the authenticated user (owner) or admin
+ * Hard delete + optional local file purge from /uploads if file paths reference the structure
+ */
+StructureController.prototype.deleteStructure = async function(req, res) {
+  try {
+    const { id } = req.params;
+    const requesterId = req.user.userId?.toString();
+    const requesterRole = req.user.role;
+
+    // Find the user document that owns this structure
+    const ownerUser = await User.findOne({ 'structures._id': id });
+    if (!ownerUser) {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+
+    const isOwner = ownerUser._id.toString() === requesterId;
+    const isAdmin = requesterRole === 'admin';
+
+    if (!isOwner && !isAdmin) {
+      return sendErrorResponse(res, 'Not authorized to delete this structure', 403);
+    }
+
+    // Extract structure for potential cleanup
+    const structure = ownerUser.structures.id(id);
+    if (!structure) {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+
+    // Remove structure subdocument (compatible with Mongoose v7)
+    const idx = ownerUser.structures.findIndex(s => s._id.toString() === id);
+    if (idx === -1) {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+    ownerUser.structures.splice(idx, 1);
+
+    // Update stats if present
+    if (ownerUser.stats) {
+      ownerUser.stats.last_activity_date = new Date();
+      if (typeof ownerUser.stats.total_structures_created === 'number') {
+        ownerUser.stats.total_structures_created = Math.max(0, (ownerUser.stats.total_structures_created || 0) - 1);
+      }
+    }
+
+    await ownerUser.save();
+
+    // Attempt to purge related local uploads referenced by this structure
+    try {
+      const path = require('path');
+      const fs = require('fs');
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+
+      if (fs.existsSync(uploadsDir)) {
+        const collectFileNames = [];
+
+        const addIfUpload = (val) => {
+          if (!val) return;
+          if (typeof val === 'string' && (val.includes('/uploads/') || val.startsWith('/uploads/'))) {
+            const file = val.split('/uploads/')[1];
+            if (file) collectFileNames.push(file);
+          }
+          if (Array.isArray(val)) val.forEach(addIfUpload);
+          if (typeof val === 'object') {
+            Object.values(val).forEach(addIfUpload);
+          }
+        };
+
+        // Walk through structure object to find any photo/url fields captured by our rating schemas
+        addIfUpload(structure);
+
+        // Deduplicate and delete
+        const uniqueFiles = [...new Set(collectFileNames)];
+        uniqueFiles.forEach((fname) => {
+          const fullPath = path.join(uploadsDir, fname);
+          if (fs.existsSync(fullPath)) {
+            try { fs.unlinkSync(fullPath); } catch (_) { /* ignore */ }
+          }
+        });
+      }
+    } catch (_) {
+      // Swallow file purge errors; main delete already succeeded
+    }
+
+    return sendSuccessResponse(res, 'Structure deleted successfully', {
+      deleted_structure_id: id
+    });
+  } catch (error) {
+    console.error('❌ Delete structure error:', error);
+    return sendErrorResponse(res, 'Failed to delete structure', 500, error.message);
+  }
+};
