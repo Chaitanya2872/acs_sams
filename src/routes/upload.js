@@ -33,7 +33,7 @@ const upload = multer({
     if (mimetype && extname) {
       return cb(null, true);
     } else {
-      cb(new Error('Only images and documents are allowed'));
+      cb(new Error('Only images and documents are allow'));
     }
   }
 });
