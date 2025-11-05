@@ -44,12 +44,15 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
+    // 🔧 FIXED: Check for empty array and fall back to single role
+    const userRoles = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
+
     req.user = {
       userId: user._id,
       username: user.username,
       email: user.email,
       role: user.role,
-      roles: user.roles || [user.role],
+      roles: userRoles,
       isEmailVerified: user.isEmailVerified,
       is_active: user.is_active
     };
@@ -91,7 +94,8 @@ const authorizeRole = (allowedRoles) => {
       });
     }
 
-    const userRoles = req.user.roles || [req.user.role];
+    // 🔧 FIXED: Check for empty array
+    const userRoles = (req.user.roles && req.user.roles.length > 0) ? req.user.roles : [req.user.role];
     const hasAllowedRole = allowedRoles.some(role => userRoles.includes(role));
     
     if (!hasAllowedRole) {
@@ -132,8 +136,11 @@ const requireEmailVerification = (req, res, next) => {
  */
 const hasPrivilegedAccess = (user) => {
   if (!user) return false;
-  const userRoles = user.roles || [user.role];
+  
+  // 🔧 FIXED: Check for empty array
+  const userRoles = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
   const privilegedRoles = ['AD', 'VE', 'TE', 'admin'];
+  
   return privilegedRoles.some(role => userRoles.includes(role));
 };
 
