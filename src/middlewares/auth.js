@@ -175,7 +175,7 @@ const requireEmailVerification = (req, res, next) => {
 
 /**
  * Middleware to check if user can access a specific structure
- * Users can only access structures they created unless they're admin
+ * Users can only access structures they created unless they have privileged roles
  */
 const authorizeStructureAccess = async (req, res, next) => {
   try {
@@ -186,9 +186,13 @@ const authorizeStructureAccess = async (req, res, next) => {
       });
     }
 
-    // Admin can access all structures
-    if (req.user.role === 'admin') {
-      console.log('✅ Admin access granted for structure access');
+    // Check if user has privileged roles (AD, VE, TE can access all structures)
+    const userRoles = req.user.roles || [req.user.role];
+    const privilegedRoles = ['AD', 'VE', 'TE', 'admin'];
+    const hasPrivilegedAccess = privilegedRoles.some(role => userRoles.includes(role));
+
+    if (hasPrivilegedAccess) {
+      console.log('✅ Privileged access granted for structure access. User roles:', userRoles);
       return next();
     }
 
@@ -353,6 +357,17 @@ const debugAuth = (req, res, next) => {
   next();
 };
 
+/**
+ * Helper function to check if user has privileged access
+ * Privileged roles: AD, VE, TE, admin
+ */
+const hasPrivilegedAccess = (user) => {
+  if (!user) return false;
+  const userRoles = user.roles || [user.role];
+  const privilegedRoles = ['AD', 'VE', 'TE', 'admin'];
+  return privilegedRoles.some(role => userRoles.includes(role));
+};
+
 module.exports = {
   authenticateToken,
   authorizeRole,
@@ -362,5 +377,6 @@ module.exports = {
   validateRequest,
   auditLog,
   userRateLimit,
-  debugAuth  // ← NEW: Add this for debugging
+  debugAuth,  // ← NEW: Add this for debugging
+  hasPrivilegedAccess  // ← NEW: Export helper function
 };

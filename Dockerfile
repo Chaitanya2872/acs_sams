@@ -1,36 +1,35 @@
-# Multi-stage Docker build
+# ------------------------------
+# Stage 1: Builder
+# ------------------------------
 FROM node:18-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install dependencies
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci --only=production && npm cache clean --force
 
 # Copy source code
 COPY . .
 
-# Build application
-RUN npm run build
+# (No build step needed)
+# RUN npm run build  <-- remove this
 
-# Production stage
+# ------------------------------
+# Stage 2: Production
+# ------------------------------
 FROM node:18-alpine AS production
 
 # Install dumb-init for proper signal handling
 RUN apk add --no-cache dumb-init
 
-# Create app directory and user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodeuser -u 1001
-
+# Create app directory and non-root user
+RUN addgroup -g 1001 -S nodejs && adduser -S nodeuser -u 1001
 WORKDIR /app
 
-# Copy built application
-COPY --from=builder --chown=nodeuser:nodejs /app/dist ./
-COPY --from=builder --chown=nodeuser:nodejs /app/node_modules ./node_modules
+# Copy source and dependencies from builder
+COPY --from=builder --chown=nodeuser:nodejs /app ./
 
 # Create logs directory
 RUN mkdir -p logs && chown nodeuser:nodejs logs

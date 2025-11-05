@@ -1,6 +1,7 @@
 // @ts-nocheck
 const { User } = require('../models/schemas');
 const StructureNumberGenerator = require('../utils/StructureNumberGenerator');
+const { hasPrivilegedAccess } = require('../middlewares/auth');
 const {
   sendSuccessResponse,
   sendErrorResponse,
@@ -85,7 +86,14 @@ class StructureController {
   }
 
   // =================== UTILITY METHODS ===================
-  async findUserStructure(userId, structureId) {
+  async findUserStructure(userId, structureId, requestUser = null) {
+    // If requestUser is provided and has privileged access, search across all users
+    if (requestUser && hasPrivilegedAccess(requestUser)) {
+      console.log('🔑 Privileged user accessing structure:', structureId);
+      return await this.findStructureAcrossUsers(structureId);
+    }
+    
+    // Regular user - only search their own structures
     const user = await User.findById(userId);
     if (!user) {
       throw new Error('User not found');
@@ -99,7 +107,7 @@ class StructureController {
     return { user, structure };
   }
 
-  // Find structure across all users (for remarks functionality)
+  // Find structure across all users (for remarks functionality and privileged access)
   async findStructureAcrossUsers(structureId) {
     const users = await User.find({ 'structures._id': structureId });
     
@@ -206,7 +214,7 @@ class StructureController {
       type_of_structure, commercial_subtype, longitude, latitude, address 
     } = req.body;
     
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     // Validate commercial subtype requirement
     if (type_of_structure === 'commercial' && !commercial_subtype) {
@@ -286,7 +294,7 @@ class StructureController {
   async getLocationScreen(req, res) {
     try {
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       sendSuccessResponse(res, 'Location details retrieved successfully', {
         structure_id: id,
@@ -311,7 +319,7 @@ class StructureController {
       const { id } = req.params;
       const { client_name, custodian, engineer_designation, contact_details, email_id } = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       structure.administration = {
         client_name,
@@ -341,7 +349,7 @@ class StructureController {
   async getAdministrativeScreen(req, res) {
     try {
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       sendSuccessResponse(res, 'Administrative details retrieved successfully', {
         structure_id: id,
@@ -368,7 +376,7 @@ class StructureController {
       has_parking_floors, number_of_parking_floors 
     } = req.body;
     
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     const structureType = structure.structural_identity?.type_of_structure;
     const commercialSubtype = structure.structural_identity?.commercial_subtype;
@@ -451,7 +459,7 @@ class StructureController {
   async getGeometricDetails(req, res) {
     try {
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const geometricData = structure.geometric_details || {};
       
@@ -479,7 +487,7 @@ class StructureController {
     const { id, floorId } = req.params;
     const { blocks } = req.body;
     
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     if (structure.structural_identity?.type_of_structure !== 'industrial') {
       return sendErrorResponse(res, 'Blocks can only be added to industrial structures', 400);
@@ -553,7 +561,7 @@ async saveBlockRatings(req, res) {
     const { id, floorId, blockId } = req.params;
     const { structural_rating, non_structural_rating } = req.body;
     
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     if (structure.structural_identity?.type_of_structure !== 'industrial') {
       return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
@@ -677,7 +685,7 @@ async saveBlockRatings(req, res) {
       const { id } = req.params;
       const { floors } = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       if (!structure.geometric_details) {
         return sendErrorResponse(res, 'Please save geometric details first', 400);
@@ -726,7 +734,7 @@ async saveBlockRatings(req, res) {
   async getFloors(req, res) {
     try {
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floors = structure.geometric_details?.floors || [];
       const floorsData = floors.map(floor => ({
@@ -756,7 +764,7 @@ async saveBlockRatings(req, res) {
   async getFloorById(req, res) {
     try {
       const { id, floorId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -790,7 +798,7 @@ async saveBlockRatings(req, res) {
       const { id, floorId } = req.params;
       const updateData = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -826,7 +834,7 @@ async saveBlockRatings(req, res) {
   async deleteFloor(req, res) {
     try {
       const { id, floorId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floorIndex = structure.geometric_details?.floors?.findIndex(
         floor => floor.floor_id === floorId
@@ -857,7 +865,7 @@ async saveBlockRatings(req, res) {
       const { id, floorId } = req.params;
       const { flats } = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -926,7 +934,7 @@ async saveBlockRatings(req, res) {
  async getFlatsInFloor(req, res) {
   try {
     const { id, floorId } = req.params;
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
 
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
     if (!floor) {
@@ -976,7 +984,7 @@ async saveBlockRatings(req, res) {
   async getFlatById(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1017,7 +1025,7 @@ async saveBlockRatings(req, res) {
       const { id, floorId, flatId } = req.params;
       const updateData = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1058,7 +1066,7 @@ async saveBlockRatings(req, res) {
   async deleteFlat(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1093,7 +1101,7 @@ async saveFlatCombinedRatings(req, res) {
     const { id, floorId, flatId } = req.params;
     const { structural_rating, non_structural_rating } = req.body;
 
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
 
     const type = structure.structural_identity?.type_of_structure;
     const subtype = structure.structural_identity?.commercial_subtype;
@@ -1200,7 +1208,7 @@ async saveFlatCombinedRatings(req, res) {
   async getFlatCombinedRatings(req, res) {
   try {
     const { id, floorId, flatId } = req.params;
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
     if (!floor) {
@@ -1233,7 +1241,7 @@ async saveFlatCombinedRatings(req, res) {
       const { id, floorId, flatId } = req.params;
       const { beams, columns, slab, foundation } = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1285,7 +1293,7 @@ async saveFlatCombinedRatings(req, res) {
   async getFlatStructuralRating(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1331,7 +1339,7 @@ async saveFlatCombinedRatings(req, res) {
         sewage_system, panel_board, lifts 
       } = req.body;
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1394,7 +1402,7 @@ async saveFlatCombinedRatings(req, res) {
   async getFlatNonStructuralRating(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1451,7 +1459,7 @@ async saveFlatCombinedRatings(req, res) {
         return sendErrorResponse(res, 'Floors data is required and must be an array', 400);
       }
       
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       console.log(`👤 Found user: ${user.username}, structure: ${structure.structural_identity?.uid}`);
       
       let updatedFloors = 0;
@@ -1585,7 +1593,7 @@ async saveFlatCombinedRatings(req, res) {
     try {
       console.log('📊 Getting bulk ratings...');
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       if (!structure.geometric_details?.floors || structure.geometric_details.floors.length === 0) {
         return sendSuccessResponse(res, 'No floors found in structure', {
@@ -1900,7 +1908,7 @@ async saveFloorRatings(req, res) {
     const { id, floorId } = req.params;  // :/floors/:floorId/ratings
     const { structural_rating, non_structural_rating } = req.body;
 
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
 
     const type = structure.structural_identity?.type_of_structure;
     const subtype = structure.structural_identity?.commercial_subtype;
@@ -2003,7 +2011,7 @@ async saveFloorRatings(req, res) {
 async getFloorRatings(req, res) {
   try {
     const { id, floorId } = req.params;
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
 
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
     if (!floor) return sendErrorResponse(res, 'Floor not found', 404);
@@ -2212,7 +2220,7 @@ getStructuresByStatus(structures) {
   async getStructureProgress(req, res) {
     try {
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const progress = this.calculateProgress(structure);
       
@@ -2321,7 +2329,7 @@ generateBlockId() {
   async submitStructure(req, res) {
     try {
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id);
+      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
       const progress = this.calculateProgress(structure);
       
@@ -2362,12 +2370,45 @@ async getAllStructures(req, res) {
     const sortBy = req.query.sortBy || 'creation_date';
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
     
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
+    // Check if user has privileged access (AD, VE, TE, admin)
+    const isPrivileged = hasPrivilegedAccess(req.user);
+    
+    let structures = [];
+    let ownerInfo = {}; // To track structure owners for privileged users
+    
+    if (isPrivileged) {
+      console.log('✅ Privileged user - fetching ALL structures from ALL users');
+      
+      // Get all users with their structures
+      const allUsers = await User.find({ 
+        'structures.0': { $exists: true } // Only users who have structures
+      }).select('structures username email profile');
+      
+      // Aggregate all structures with owner info
+      allUsers.forEach(user => {
+        if (user.structures && user.structures.length > 0) {
+          user.structures.forEach(structure => {
+            // Add structure with owner info
+            const structureWithOwner = structure.toObject();
+            structureWithOwner._ownerId = user._id;
+            structureWithOwner._ownerUsername = user.username;
+            structureWithOwner._ownerEmail = user.email;
+            structures.push(structureWithOwner);
+          });
+        }
+      });
+      
+      console.log(`📊 Total structures from all users: ${structures.length}`);
+    } else {
+      console.log('👤 Regular user - fetching only own structures');
+      
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return sendErrorResponse(res, 'User not found', 404);
+      }
+      
+      structures = user.structures || [];
     }
-
-    let structures = user.structures || [];
     
     // Apply filters
     if (status) {
@@ -2380,7 +2421,11 @@ async getAllStructures(req, res) {
         structure.structural_identity?.structural_identity_number?.toLowerCase().includes(searchLower) ||
         structure.structural_identity?.uid?.toLowerCase().includes(searchLower) ||
         structure.administration?.client_name?.toLowerCase().includes(searchLower) ||
-        structure.structural_identity?.city_name?.toLowerCase().includes(searchLower)
+        structure.structural_identity?.city_name?.toLowerCase().includes(searchLower) ||
+        (isPrivileged && (
+          structure._ownerUsername?.toLowerCase().includes(searchLower) ||
+          structure._ownerEmail?.toLowerCase().includes(searchLower)
+        ))
       );
     }
     
@@ -2404,6 +2449,15 @@ async getAllStructures(req, res) {
         case 'client_name':
           aValue = a.administration?.client_name || '';
           bValue = b.administration?.client_name || '';
+          break;
+        case 'owner': // New sort option for privileged users
+          if (isPrivileged) {
+            aValue = a._ownerUsername || '';
+            bValue = b._ownerUsername || '';
+          } else {
+            aValue = a.creation_info?.created_date || new Date(0);
+            bValue = b.creation_info?.created_date || new Date(0);
+          }
           break;
         default:
           aValue = a.creation_info?.created_date || new Date(0);
@@ -2460,7 +2514,7 @@ async getAllStructures(req, res) {
         }
       }
       
-      return {
+      const structureData = {
         structure_id: structure._id,
         uid: structure.structural_identity?.uid,
         structural_identity_number: structure.structural_identity?.structural_identity_number,
@@ -2492,6 +2546,17 @@ async getAllStructures(req, res) {
           last_updated_date: structure.creation_info?.last_updated_date
         }
       };
+      
+      // Add owner info for privileged users
+      if (isPrivileged && structure._ownerId) {
+        structureData.owner = {
+          user_id: structure._ownerId,
+          username: structure._ownerUsername,
+          email: structure._ownerEmail
+        };
+      }
+      
+      return structureData;
     });
     
     sendPaginatedResponse(res, 'Structures retrieved successfully', {
@@ -2511,8 +2576,9 @@ async getAllStructures(req, res) {
         sort_order: sortOrder === 1 ? 'asc' : 'desc'
       },
       summary: {
-        total_structures: user.structures?.length || 0,
-        by_status: this.getStructuresByStatus(user.structures || [])
+        total_structures: structures.length,
+        by_status: this.getStructuresByStatus(structures),
+        is_privileged_view: isPrivileged
       }
     });
 
@@ -2534,7 +2600,7 @@ async getStructureDetails(req, res) {
     const includeImages = req.query.include_images === 'true';
     const includeRatings = req.query.include_ratings !== 'false'; // Default true
     
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     // Calculate comprehensive metrics
     const progress = this.calculateProgress(structure);
@@ -2834,7 +2900,7 @@ async getStructureImages(req, res) {
     const floorNumber = req.query.floor; // specific floor filter
     const groupBy = req.query.group_by || 'component'; // 'component', 'floor', 'flat', 'date'
     
-    const { user, structure } = await this.findUserStructure(req.user.userId, id);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     const structureImages = [];
     
