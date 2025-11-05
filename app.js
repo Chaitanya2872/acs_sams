@@ -3,7 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
-const reportsRoutes = require('./src/routes/reports');
+
 
 const app = express();
 
@@ -80,8 +80,10 @@ mongoose.connect(process.env.MONGODB_URI, {
 // ===== ROUTES =====
 // Import your routes
 const authRoutes = require('./src/routes/authRoutes');
+const adminRoutes = require('./src/routes/admin');        // MOVE THIS UP
 const structuresRoutes = require('./src/routes/structures');
 const userRoutes = require('./src/routes/users');
+const reportsRoutes = require('./src/routes/reports');
 // Add other routes as needed
 // const structureRoutes = require('./src/routes/structures');
 // const adminRoutes = require('./src/routes/admin');
@@ -98,10 +100,13 @@ app.get('/', (req, res) => {
 });
 
 // API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/structures', structuresRoutes);
-app.use('/api/reports', reportsRoutes);
+// API routes - ORDER IS CRITICAL!
+app.use('/api/auth', authRoutes);           // 1. Public auth routes
+app.use('/api/admin', adminRoutes);         // 2. Admin routes BEFORE structures
+app.use('/api/users', userRoutes);          // 3. User routes
+app.use('/api/structures', structuresRoutes); // 4. Structure routes
+app.use('/api/reports', reportsRoutes);     // 5. Reports routes
+// app.use('/api/users', userRoutes)
 // app.use('/api/structures', structureRoutes);
 // app.use('/api/admin', adminRoutes);
 

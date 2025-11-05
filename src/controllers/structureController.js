@@ -1,7 +1,7 @@
 // @ts-nocheck
 const { User } = require('../models/schemas');
+const { hasPrivilegedAccess } = require('../middlewares/auth'); 
 const StructureNumberGenerator = require('../utils/StructureNumberGenerator');
-const { hasPrivilegedAccess } = require('../middlewares/auth');
 const {
   sendSuccessResponse,
   sendErrorResponse,
@@ -86,26 +86,26 @@ class StructureController {
   }
 
   // =================== UTILITY METHODS ===================
-  async findUserStructure(userId, structureId, requestUser = null) {
-    // If requestUser is provided and has privileged access, search across all users
-    if (requestUser && hasPrivilegedAccess(requestUser)) {
-      console.log('🔑 Privileged user accessing structure:', structureId);
-      return await this.findStructureAcrossUsers(structureId);
-    }
-    
-    // Regular user - only search their own structures
-    const user = await User.findById(userId);
-    if (!user) {
-      throw new Error('User not found');
-    }
-    
-    const structure = user.structures.id(structureId);
-    if (!structure) {
-      throw new Error('Structure not found');
-    }
-    
-    return { user, structure };
+ async findUserStructure(userId, structureId, requestUser = null) {
+  // If requestUser is provided and has privileged access, search across all users
+  if (requestUser && hasPrivilegedAccess(requestUser)) {
+    console.log('🔓 Privileged user accessing structure:', structureId);
+    return await this.findStructureAcrossUsers(structureId);
   }
+  
+  // Regular user - only search their own structures
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  const structure = user.structures.id(structureId);
+  if (!structure) {
+    throw new Error('Structure not found');
+  }
+  
+  return { user, structure };
+}
 
   // Find structure across all users (for remarks functionality and privileged access)
   async findStructureAcrossUsers(structureId) {
@@ -579,14 +579,14 @@ async saveBlockRatings(req, res) {
     
     const inspectionDate = new Date();
     
-    // Update structural ratings for industrial components
+    // ✅ FIXED: Update structural ratings for industrial components with IDs
     if (structural_rating) {
       block.structural_rating = {
-        beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
-        columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
-        slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
-        foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate),
-        roof_truss: this.createRatingComponent(structural_rating.roof_truss, inspectionDate)
+        beams: this.createRatingComponent(structural_rating.beams, inspectionDate, 'beams'),
+        columns: this.createRatingComponent(structural_rating.columns, inspectionDate, 'columns'),
+        slab: this.createRatingComponent(structural_rating.slab, inspectionDate, 'slab'),
+        foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate, 'foundation'),
+        roof_truss: this.createRatingComponent(structural_rating.roof_truss, inspectionDate, 'roof_truss')
       };
       
       // Calculate block structural average
@@ -605,17 +605,17 @@ async saveBlockRatings(req, res) {
       }
     }
     
-    // Update non-structural ratings for industrial components
+    // ✅ FIXED: Update non-structural ratings for industrial components with IDs
     if (non_structural_rating) {
       block.non_structural_rating = {
-        walls_cladding: this.createRatingComponent(non_structural_rating.walls_cladding, inspectionDate),
-        industrial_flooring: this.createRatingComponent(non_structural_rating.industrial_flooring, inspectionDate),
-        ventilation: this.createRatingComponent(non_structural_rating.ventilation, inspectionDate),
-        electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate),
-        fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate),
-        drainage: this.createRatingComponent(non_structural_rating.drainage, inspectionDate),
-        overhead_cranes: this.createRatingComponent(non_structural_rating.overhead_cranes, inspectionDate),
-        loading_docks: this.createRatingComponent(non_structural_rating.loading_docks, inspectionDate)
+        walls_cladding: this.createRatingComponent(non_structural_rating.walls_cladding, inspectionDate, 'walls_cladding'),
+        industrial_flooring: this.createRatingComponent(non_structural_rating.industrial_flooring, inspectionDate, 'industrial_flooring'),
+        ventilation: this.createRatingComponent(non_structural_rating.ventilation, inspectionDate, 'ventilation'),
+        electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate, 'electrical_system'),
+        fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate, 'fire_safety'),
+        drainage: this.createRatingComponent(non_structural_rating.drainage, inspectionDate, 'drainage'),
+        overhead_cranes: this.createRatingComponent(non_structural_rating.overhead_cranes, inspectionDate, 'overhead_cranes'),
+        loading_docks: this.createRatingComponent(non_structural_rating.loading_docks, inspectionDate, 'loading_docks')
       };
       
       // Calculate block non-structural average
@@ -636,7 +636,7 @@ async saveBlockRatings(req, res) {
       }
     }
     
-    // Calculate block overall rating (combination of structural + non-structural)
+    // Calculate block overall rating
     if (block.structural_rating?.overall_average && block.non_structural_rating?.overall_average) {
       const structuralWeight = 0.7;
       const nonStructuralWeight = 0.3;
@@ -674,7 +674,6 @@ async saveBlockRatings(req, res) {
     sendErrorResponse(res, 'Failed to save block ratings', 500, error.message);
   }
 }
-
   async updateGeometricDetails(req, res) {
     return this.saveGeometricDetails(req, res);
   }
@@ -1112,20 +1111,20 @@ async saveFlatCombinedRatings(req, res) {
     const flat = floor.flats?.find(fl => fl.flat_id === flatId);
     if (!flat) return sendErrorResponse(res, 'Flat not found', 404);
 
-    // ✅ Check if flat ratings are allowed
+    // Check if flat ratings are allowed
     if (
       type === 'residential' ||
       (type === 'commercial' && subtype === 'commercial_residential' && floor.floor_type === 'residential')
     ) {
       const inspectionDate = new Date();
 
-      // Structural ratings
+      // ✅ FIXED: Structural ratings with component IDs and names
       if (structural_rating) {
         flat.structural_rating = {
-          beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
-          columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
-          slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
-          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate),
+          beams: this.createRatingComponent(structural_rating.beams, inspectionDate, 'beams'),
+          columns: this.createRatingComponent(structural_rating.columns, inspectionDate, 'columns'),
+          slab: this.createRatingComponent(structural_rating.slab, inspectionDate, 'slab'),
+          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate, 'foundation'),
         };
 
         const ratings = [
@@ -1142,14 +1141,20 @@ async saveFlatCombinedRatings(req, res) {
         }
       }
 
-      // Non-structural ratings
+      // ✅ FIXED: Non-structural ratings with component IDs and names
       if (non_structural_rating) {
         flat.non_structural_rating = {
-          brick_plaster: this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate),
-          doors_windows: this.createRatingComponent(non_structural_rating.doors_windows, inspectionDate),
-          flooring_tiles: this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate),
-          electrical_wiring: this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate),
-          sanitary_fittings: this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate),
+          brick_plaster: this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate, 'brick_plaster'),
+          doors_windows: this.createRatingComponent(non_structural_rating.doors_windows, inspectionDate, 'doors_windows'),
+          flooring_tiles: this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate, 'flooring_tiles'),
+          electrical_wiring: this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate, 'electrical_wiring'),
+          sanitary_fittings: this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate, 'sanitary_fittings'),
+          railings: this.createRatingComponent(non_structural_rating.railings, inspectionDate, 'railings'),
+          water_tanks: this.createRatingComponent(non_structural_rating.water_tanks, inspectionDate, 'water_tanks'),
+          plumbing: this.createRatingComponent(non_structural_rating.plumbing, inspectionDate, 'plumbing'),
+          sewage_system: this.createRatingComponent(non_structural_rating.sewage_system, inspectionDate, 'sewage_system'),
+          panel_board: this.createRatingComponent(non_structural_rating.panel_board, inspectionDate, 'panel_board'),
+          lifts: this.createRatingComponent(non_structural_rating.lifts, inspectionDate, 'lifts')
         };
 
         const ratings = [
@@ -1157,7 +1162,13 @@ async saveFlatCombinedRatings(req, res) {
           flat.non_structural_rating.doors_windows?.rating,
           flat.non_structural_rating.flooring_tiles?.rating,
           flat.non_structural_rating.electrical_wiring?.rating,
-          flat.non_structural_rating.sanitary_fittings?.rating
+          flat.non_structural_rating.sanitary_fittings?.rating,
+          flat.non_structural_rating.railings?.rating,
+          flat.non_structural_rating.water_tanks?.rating,
+          flat.non_structural_rating.plumbing?.rating,
+          flat.non_structural_rating.sewage_system?.rating,
+          flat.non_structural_rating.panel_board?.rating,
+          flat.non_structural_rating.lifts?.rating
         ].filter(r => r);
 
         if (ratings.length > 0) {
@@ -1642,17 +1653,155 @@ async saveFlatCombinedRatings(req, res) {
   }
 
   // =================== HELPER METHODS ===================
-  createRatingComponent(ratingData, inspectionDate) {
-    if (!ratingData || !ratingData.rating) return null;
-    
-    return {
-      rating: parseInt(ratingData.rating),
-      condition_comment: ratingData.condition_comment || '',
-      inspection_date: inspectionDate,
-      photos: Array.isArray(ratingData.photos) ? ratingData.photos : [],
-      inspector_notes: ratingData.inspector_notes || ''
-    };
+ /**
+ * Create rating component with ID and name
+ * @param {Object} ratingData - Rating data from request
+ * @param {Date} inspectionDate - Inspection date
+ * @param {String} componentName - Name of the component (e.g., 'beams', 'columns')
+ * @returns {Object|null} Rating component object
+ */
+/**
+ * Create rating component with unique ID and display name
+ * 
+ * @param {Object} ratingData - Rating data from request body
+ * @param {number} ratingData.rating - Rating value (1-5)
+ * @param {string} ratingData.condition_comment - Condition description
+ * @param {Array<string>} ratingData.photos - Array of photo URLs
+ * @param {string} ratingData.inspector_notes - Inspector's notes
+ * @param {string} ratingData.component_id - Custom component ID (optional)
+ * @param {string} ratingData.component_name - Custom component name (optional)
+ * 
+ * @param {Date} inspectionDate - Date of inspection
+ * @param {string} componentName - Component key name (e.g., 'beams', 'columns', 'brick_plaster')
+ * 
+ * @returns {Object|null} Rating component object with ID and name, or null if invalid
+ * 
+ * @example
+ * // Example usage:
+ * const beamRating = this.createRatingComponent(
+ *   {
+ *     rating: 4,
+ *     condition_comment: "Good condition",
+ *     photos: ["url1.jpg", "url2.jpg"],
+ *     inspector_notes: "Minor repairs needed",
+ *     component_id: "custom_beam_001", // Optional
+ *     component_name: "Main Load Bearing Beams" // Optional
+ *   },
+ *   new Date(),
+ *   'beams'
+ * );
+ * 
+ * // Returns:
+ * {
+ *   component_id: "custom_beam_001",
+ *   component_name: "Main Load Bearing Beams",
+ *   rating: 4,
+ *   condition_comment: "Good condition",
+ *   inspection_date: "2024-01-15T10:30:00.000Z",
+ *   photos: ["url1.jpg", "url2.jpg"],
+ *   inspector_notes: "Minor repairs needed"
+ * }
+ */
+createRatingComponent(ratingData, inspectionDate, componentName) {
+  // Validate input - return null if no rating provided
+  if (!ratingData || !ratingData.rating) {
+    console.log(`⚠️  No rating data provided for component: ${componentName}`);
+    return null;
   }
+
+  // Validate rating value
+  const rating = parseInt(ratingData.rating);
+  if (isNaN(rating) || rating < 1 || rating > 5) {
+    console.error(`❌ Invalid rating value for ${componentName}: ${ratingData.rating}`);
+    return null;
+  }
+
+  // Generate unique component ID if not provided
+  let componentId;
+  if (ratingData.component_id && ratingData.component_id.trim() !== '') {
+    // Use provided component ID (validate it's not too long)
+    componentId = ratingData.component_id.trim().substring(0, 100);
+    console.log(`✅ Using provided component ID for ${componentName}: ${componentId}`);
+  } else {
+    // Auto-generate unique component ID
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substr(2, 9);
+    componentId = `${componentName}_${timestamp}_${randomString}`;
+    console.log(`🆔 Auto-generated component ID for ${componentName}: ${componentId}`);
+  }
+
+  // Generate display-friendly component name
+  let displayName;
+  if (ratingData.component_name && ratingData.component_name.trim() !== '') {
+    // Use provided component name
+    displayName = ratingData.component_name.trim().substring(0, 100);
+    console.log(`✅ Using provided component name for ${componentName}: ${displayName}`);
+  } else {
+    // Auto-generate display name from component key
+    // Convert snake_case to Title Case
+    // Example: 'brick_plaster' → 'Brick Plaster'
+    // Example: 'doors_windows' → 'Doors Windows'
+    displayName = componentName
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+    console.log(`📝 Auto-generated component name for ${componentName}: ${displayName}`);
+  }
+
+  // Process photos array
+  let photos = [];
+  if (Array.isArray(ratingData.photos)) {
+    // Validate and clean photo URLs
+    photos = ratingData.photos
+      .filter(photo => photo && typeof photo === 'string' && photo.trim() !== '')
+      .map(photo => photo.trim())
+      .slice(0, 50); // Limit to 50 photos max
+    
+    if (photos.length > 0) {
+      console.log(`📸 Added ${photos.length} photo(s) for ${componentName}`);
+    }
+  }
+
+  // Validate condition comment for low ratings
+  const conditionComment = ratingData.condition_comment 
+    ? ratingData.condition_comment.trim().substring(0, 1000) 
+    : '';
+  
+  if (rating < 3 && !conditionComment) {
+    console.warn(`⚠️  Warning: Rating below 3 for ${componentName} but no condition comment provided`);
+  }
+
+  // Validate photos requirement for low ratings
+  if (rating < 3 && photos.length === 0) {
+    console.warn(`⚠️  Warning: Rating below 3 for ${componentName} but no photos provided`);
+  }
+
+  // Process inspector notes
+  const inspectorNotes = ratingData.inspector_notes 
+    ? ratingData.inspector_notes.trim().substring(0, 2000) 
+    : '';
+
+  // Create and return the rating component object
+  const ratingComponent = {
+    component_id: componentId,
+    component_name: displayName,
+    rating: rating,
+    condition_comment: conditionComment,
+    inspection_date: inspectionDate || new Date(),
+    photos: photos,
+    inspector_notes: inspectorNotes
+  };
+
+  console.log(`✅ Created rating component for ${componentName}:`, {
+    component_id: componentId,
+    component_name: displayName,
+    rating: rating,
+    photos_count: photos.length,
+    has_comment: !!conditionComment,
+    has_notes: !!inspectorNotes
+  });
+
+  return ratingComponent;
+}
   
   calculateAverage(ratings) {
     const validRatings = ratings.filter(r => r && !isNaN(r));
@@ -1678,55 +1827,49 @@ async saveFlatCombinedRatings(req, res) {
     return 'Critical';
   }
 
-  updateFlatRatings(flat, ratingType, ratingsData) {
-    if (!flat[ratingType]) {
-      flat[ratingType] = {};
+ updateFlatRatings(flat, ratingType, ratingsData) {
+  if (!flat[ratingType]) {
+    flat[ratingType] = {};
+  }
+  
+  const inspectionDate = new Date();
+  console.log(`🔧 Updating ${ratingType} with ${Object.keys(ratingsData).length} components`);
+  
+  // ✅ FIXED: Update each component rating with IDs
+  Object.keys(ratingsData).forEach(component => {
+    const componentData = ratingsData[component];
+    
+    if (componentData && typeof componentData === 'object' && componentData.rating) {
+      flat[ratingType][component] = this.createRatingComponent(componentData, inspectionDate, component);
+      console.log(`  ✅ Updated ${component}: rating ${componentData.rating}`);
     }
-    
-    const inspectionDate = new Date();
-    console.log(`🔧 Updating ${ratingType} with ${Object.keys(ratingsData).length} components`);
-    
-    // Update each component rating
-    Object.keys(ratingsData).forEach(component => {
-      const componentData = ratingsData[component];
-      
-      if (componentData && typeof componentData === 'object' && componentData.rating) {
-        flat[ratingType][component] = {
-          rating: parseInt(componentData.rating),
-          condition_comment: componentData.condition_comment || '',
-          inspection_date: inspectionDate,
-          photos: Array.isArray(componentData.photos) ? componentData.photos : [],
-          inspector_notes: componentData.inspector_notes || ''
-        };
-        console.log(`  ✅ Updated ${component}: rating ${componentData.rating}`);
-      }
-    });
+  });
 
-    // Calculate averages for the rating type
-    if (ratingType === 'structural_rating') {
-      const structuralRatings = ['beams', 'columns', 'slab', 'foundation']
-        .map(comp => flat.structural_rating[comp]?.rating)
-        .filter(r => r);
-      if (structuralRatings.length > 0) {
-        flat.structural_rating.overall_average = this.calculateAverage(structuralRatings);
-        flat.structural_rating.health_status = this.getHealthStatus(flat.structural_rating.overall_average);
-        flat.structural_rating.assessment_date = inspectionDate;
-      }
-    } else if (ratingType === 'non_structural_rating') {
-      const nonStructuralComponents = [
-        'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-        'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-        'sewage_system', 'panel_board', 'lifts'
-      ];
-      const nonStructuralRatings = nonStructuralComponents
-        .map(comp => flat.non_structural_rating[comp]?.rating)
-        .filter(r => r);
-      if (nonStructuralRatings.length > 0) {
-        flat.non_structural_rating.overall_average = this.calculateAverage(nonStructuralRatings);
-        flat.non_structural_rating.assessment_date = inspectionDate;
-      }
+  // Calculate averages for the rating type
+  if (ratingType === 'structural_rating') {
+    const structuralRatings = ['beams', 'columns', 'slab', 'foundation']
+      .map(comp => flat.structural_rating[comp]?.rating)
+      .filter(r => r);
+    if (structuralRatings.length > 0) {
+      flat.structural_rating.overall_average = this.calculateAverage(structuralRatings);
+      flat.structural_rating.health_status = this.getHealthStatus(flat.structural_rating.overall_average);
+      flat.structural_rating.assessment_date = inspectionDate;
+    }
+  } else if (ratingType === 'non_structural_rating') {
+    const nonStructuralComponents = [
+      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+      'sewage_system', 'panel_board', 'lifts'
+    ];
+    const nonStructuralRatings = nonStructuralComponents
+      .map(comp => flat.non_structural_rating[comp]?.rating)
+      .filter(r => r);
+    if (nonStructuralRatings.length > 0) {
+      flat.non_structural_rating.overall_average = this.calculateAverage(nonStructuralRatings);
+      flat.non_structural_rating.assessment_date = inspectionDate;
     }
   }
+}
 
   updateFlatCombinedRating(flat) {
     if (flat.structural_rating?.overall_average && flat.non_structural_rating?.overall_average) {
@@ -1745,32 +1888,46 @@ async saveFlatCombinedRatings(req, res) {
     }
   }
 
-  getDefaultStructuralRating() {
-    const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
-    return {
-      beams: defaultRating,
-      columns: defaultRating,
-      slab: defaultRating,
-      foundation: defaultRating
-    };
-  }
+ getDefaultStructuralRating() {
+  const defaultRating = { 
+    component_id: null,
+    component_name: null,
+    rating: null, 
+    condition_comment: '', 
+    photos: [], 
+    inspection_date: null 
+  };
+  return {
+    beams: { ...defaultRating, component_name: 'Beams' },
+    columns: { ...defaultRating, component_name: 'Columns' },
+    slab: { ...defaultRating, component_name: 'Slab' },
+    foundation: { ...defaultRating, component_name: 'Foundation' }
+  };
+}
 
-  getDefaultNonStructuralRating() {
-    const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
-    return {
-      brick_plaster: defaultRating,
-      doors_windows: defaultRating,
-      flooring_tiles: defaultRating,
-      electrical_wiring: defaultRating,
-      sanitary_fittings: defaultRating,
-      railings: defaultRating,
-      water_tanks: defaultRating,
-      plumbing: defaultRating,
-      sewage_system: defaultRating,
-      panel_board: defaultRating,
-      lifts: defaultRating
-    };
-  }
+ getDefaultNonStructuralRating() {
+  const defaultRating = { 
+    component_id: null,
+    component_name: null,
+    rating: null, 
+    condition_comment: '', 
+    photos: [], 
+    inspection_date: null 
+  };
+  return {
+    brick_plaster: { ...defaultRating, component_name: 'Brick & Plaster' },
+    doors_windows: { ...defaultRating, component_name: 'Doors & Windows' },
+    flooring_tiles: { ...defaultRating, component_name: 'Flooring & Tiles' },
+    electrical_wiring: { ...defaultRating, component_name: 'Electrical Wiring' },
+    sanitary_fittings: { ...defaultRating, component_name: 'Sanitary Fittings' },
+    railings: { ...defaultRating, component_name: 'Railings' },
+    water_tanks: { ...defaultRating, component_name: 'Water Tanks' },
+    plumbing: { ...defaultRating, component_name: 'Plumbing' },
+    sewage_system: { ...defaultRating, component_name: 'Sewage System' },
+    panel_board: { ...defaultRating, component_name: 'Panel Board' },
+    lifts: { ...defaultRating, component_name: 'Lifts' }
+  };
+}
 
   hasStructuralRating(flat) {
     return flat.structural_rating && 
@@ -1905,7 +2062,7 @@ extractFlatImages(flat, options = {}) {
 // =================== FLOOR-LEVEL RATINGS ===================
 async saveFloorRatings(req, res) {
   try {
-    const { id, floorId } = req.params;  // :/floors/:floorId/ratings
+    const { id, floorId } = req.params;
     const { structural_rating, non_structural_rating } = req.body;
 
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
@@ -1916,7 +2073,7 @@ async saveFloorRatings(req, res) {
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
     if (!floor) return sendErrorResponse(res, 'Floor not found', 404);
 
-    // ✅ Check if floor ratings are allowed
+    // Check if floor ratings are allowed
     if (
       (type === 'commercial' && subtype === 'pure') ||
       (type === 'industrial') ||
@@ -1924,13 +2081,13 @@ async saveFloorRatings(req, res) {
     ) {
       const inspectionDate = new Date();
 
-      // Structural ratings
+      // ✅ FIXED: Structural ratings with component IDs and names
       if (structural_rating) {
         floor.structural_rating = {
-          beams: this.createRatingComponent(structural_rating.beams, inspectionDate),
-          columns: this.createRatingComponent(structural_rating.columns, inspectionDate),
-          slab: this.createRatingComponent(structural_rating.slab, inspectionDate),
-          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate),
+          beams: this.createRatingComponent(structural_rating.beams, inspectionDate, 'beams'),
+          columns: this.createRatingComponent(structural_rating.columns, inspectionDate, 'columns'),
+          slab: this.createRatingComponent(structural_rating.slab, inspectionDate, 'slab'),
+          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate, 'foundation'),
         };
 
         const ratings = [
@@ -1947,13 +2104,13 @@ async saveFloorRatings(req, res) {
         }
       }
 
-      // Non-structural ratings
+      // ✅ FIXED: Non-structural ratings with component IDs and names
       if (non_structural_rating) {
         floor.non_structural_rating = {
-          walls: this.createRatingComponent(non_structural_rating.walls, inspectionDate),
-          flooring: this.createRatingComponent(non_structural_rating.flooring, inspectionDate),
-          electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate),
-          fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate),
+          walls: this.createRatingComponent(non_structural_rating.walls, inspectionDate, 'walls'),
+          flooring: this.createRatingComponent(non_structural_rating.flooring, inspectionDate, 'flooring'),
+          electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate, 'electrical_system'),
+          fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate, 'fire_safety'),
         };
 
         const ratings = [
@@ -2378,11 +2535,14 @@ async getAllStructures(req, res) {
     
     if (isPrivileged) {
       console.log('✅ Privileged user - fetching ALL structures from ALL users');
+      console.log('   User roles:', req.user.roles || [req.user.role]);
       
       // Get all users with their structures
       const allUsers = await User.find({ 
         'structures.0': { $exists: true } // Only users who have structures
       }).select('structures username email profile');
+      
+      console.log(`📊 Found ${allUsers.length} users with structures`);
       
       // Aggregate all structures with owner info
       allUsers.forEach(user => {
@@ -2559,28 +2719,7 @@ async getAllStructures(req, res) {
       return structureData;
     });
     
-    sendPaginatedResponse(res, 'Structures retrieved successfully', {
-      structures: structuresData,
-      pagination: {
-        current_page: page,
-        per_page: limit,
-        total_items: structures.length,
-        total_pages: Math.ceil(structures.length / limit),
-        has_next_page: endIndex < structures.length,
-        has_prev_page: page > 1
-      },
-      filters: {
-        status: status || 'all',
-        search: search || '',
-        sort_by: sortBy,
-        sort_order: sortOrder === 1 ? 'asc' : 'desc'
-      },
-      summary: {
-        total_structures: structures.length,
-        by_status: this.getStructuresByStatus(structures),
-        is_privileged_view: isPrivileged
-      }
-    });
+    sendPaginatedResponse(res, structuresData, page, limit, structures.length, 'Structures retrieved successfully');
 
   } catch (error) {
     console.error('❌ Get all structures error:', error);
@@ -3361,7 +3500,8 @@ async getUserImageStats(req, res) {
         return sendErrorResponse(res, 'Only Field Engineers (FE) and Verification Engineers (VE) can add remarks', 403);
       }
 
-      const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+   // Use findStructureAcrossUsers to allow privileged access
+const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
       
       // Initialize remarks object if it doesn't exist
       if (!structure.remarks) {

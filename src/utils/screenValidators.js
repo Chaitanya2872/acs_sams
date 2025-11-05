@@ -638,7 +638,22 @@ const blockRatingsValidation = [
 // =================== FLAT COMBINED RATINGS VALIDATION (Main Rating System) ===================
 const flatCombinedRatingsValidation = [
   // =================== STRUCTURAL RATINGS ===================
+  
   // Beams
+  body('structural_rating.beams.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Beams component ID must be 1-100 characters'),
+  
+  body('structural_rating.beams.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Beams component name must be 1-100 characters'),
+  
   body('structural_rating.beams.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -664,6 +679,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Beams inspector notes cannot exceed 2000 characters'),
 
   // Columns
+  body('structural_rating.columns.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Columns component ID must be 1-100 characters'),
+  
+  body('structural_rating.columns.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Columns component name must be 1-100 characters'),
+  
   body('structural_rating.columns.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -689,6 +718,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Columns inspector notes cannot exceed 2000 characters'),
 
   // Slab
+  body('structural_rating.slab.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Slab component ID must be 1-100 characters'),
+  
+  body('structural_rating.slab.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Slab component name must be 1-100 characters'),
+  
   body('structural_rating.slab.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -714,6 +757,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Slab inspector notes cannot exceed 2000 characters'),
 
   // Foundation
+  body('structural_rating.foundation.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Foundation component ID must be 1-100 characters'),
+  
+  body('structural_rating.foundation.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Foundation component name must be 1-100 characters'),
+  
   body('structural_rating.foundation.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -739,7 +796,22 @@ const flatCombinedRatingsValidation = [
     .withMessage('Foundation inspector notes cannot exceed 2000 characters'),
 
   // =================== NON-STRUCTURAL RATINGS ===================
+  
   // Brick & Plaster
+  body('non_structural_rating.brick_plaster.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Brick & Plaster component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.brick_plaster.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Brick & Plaster component name must be 1-100 characters'),
+  
   body('non_structural_rating.brick_plaster.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -765,6 +837,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Brick & Plaster inspector notes cannot exceed 2000 characters'),
 
   // Doors & Windows
+  body('non_structural_rating.doors_windows.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Doors & Windows component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.doors_windows.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Doors & Windows component name must be 1-100 characters'),
+  
   body('non_structural_rating.doors_windows.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -790,6 +876,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Doors & Windows inspector notes cannot exceed 2000 characters'),
 
   // Flooring & Tiles
+  body('non_structural_rating.flooring_tiles.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Flooring & Tiles component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.flooring_tiles.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Flooring & Tiles component name must be 1-100 characters'),
+  
   body('non_structural_rating.flooring_tiles.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -815,6 +915,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Flooring & Tiles inspector notes cannot exceed 2000 characters'),
 
   // Electrical Wiring
+  body('non_structural_rating.electrical_wiring.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Electrical Wiring component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.electrical_wiring.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Electrical Wiring component name must be 1-100 characters'),
+  
   body('non_structural_rating.electrical_wiring.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -840,6 +954,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Electrical Wiring inspector notes cannot exceed 2000 characters'),
 
   // Sanitary Fittings
+  body('non_structural_rating.sanitary_fittings.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Sanitary Fittings component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.sanitary_fittings.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Sanitary Fittings component name must be 1-100 characters'),
+  
   body('non_structural_rating.sanitary_fittings.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -865,6 +993,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Sanitary Fittings inspector notes cannot exceed 2000 characters'),
 
   // Railings
+  body('non_structural_rating.railings.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Railings component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.railings.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Railings component name must be 1-100 characters'),
+  
   body('non_structural_rating.railings.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -890,6 +1032,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Railings inspector notes cannot exceed 2000 characters'),
 
   // Water Tanks
+  body('non_structural_rating.water_tanks.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Water Tanks component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.water_tanks.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Water Tanks component name must be 1-100 characters'),
+  
   body('non_structural_rating.water_tanks.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -915,6 +1071,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Water Tanks inspector notes cannot exceed 2000 characters'),
 
   // Plumbing
+  body('non_structural_rating.plumbing.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Plumbing component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.plumbing.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Plumbing component name must be 1-100 characters'),
+  
   body('non_structural_rating.plumbing.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -940,6 +1110,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Plumbing inspector notes cannot exceed 2000 characters'),
 
   // Sewage System
+  body('non_structural_rating.sewage_system.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Sewage System component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.sewage_system.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Sewage System component name must be 1-100 characters'),
+  
   body('non_structural_rating.sewage_system.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -965,6 +1149,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Sewage System inspector notes cannot exceed 2000 characters'),
 
   // Panel Board
+  body('non_structural_rating.panel_board.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Panel Board component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.panel_board.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Panel Board component name must be 1-100 characters'),
+  
   body('non_structural_rating.panel_board.rating')
     .optional()
     .isInt({ min: 1, max: 5 })
@@ -990,6 +1188,20 @@ const flatCombinedRatingsValidation = [
     .withMessage('Panel Board inspector notes cannot exceed 2000 characters'),
 
   // Lifts
+  body('non_structural_rating.lifts.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Lifts component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.lifts.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Lifts component name must be 1-100 characters'),
+  
   body('non_structural_rating.lifts.rating')
     .optional()
     .isInt({ min: 1, max: 5 })

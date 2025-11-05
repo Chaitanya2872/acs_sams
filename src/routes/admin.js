@@ -1,381 +1,218 @@
 const express = require('express');
-const adminController = require('../controllers/adminController');
-const { protect, authorize } = require('../middlewares/auth');
-const {
-  validateObjectId,
-  validateQueryParams,
-  handleValidationErrors
-} = require('../middlewares/validation');
-const { body, param } = require('express-validator');
+const { User } = require('../models/schemas');
+const { protect, isAdmin } = require('../middlewares/auth');
 
 const router = express.Router();
 
-// All admin routes require authentication and admin role
+// All routes require authentication and admin privileges
 router.use(protect);
-router.use(authorize('admin'));
-
-// User Management Routes
+router.use(isAdmin);
 
 /**
- * @route   GET /api/admin/users
- * @desc    Get all users with pagination and filtering
- * @access  Private (Admin only)
+ * GET /api/admin/users
+ * Get all users
  */
-router.get('/users', validateQueryParams, adminController.getUsers);
+router.get('/users', async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('-password -structures')
+      .limit(100)
+      .lean();
+
+    res.json({
+      success: true,
+      message: 'Users retrieved successfully',
+      data: users,
+      total: users.length
+    });
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve users'
+    });
+  }
+});
 
 /**
- * @route   GET /api/admin/users/:id
- * @desc    Get single user by ID
- * @access  Private (Admin only)
+ * GET /api/admin/users/:id
+ * Get single user by ID
  */
-router.get('/users/:id', validateObjectId('id'), adminController.getUser);
+router.get('/users/:id', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select('-password')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User retrieved successfully',
+      data: {
+        ...user,
+        structure_count: user.structures?.length || 0
+      }
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve user'
+    });
+  }
+});
 
 /**
- * @route   POST /api/admin/users
- * @desc    Create new user
- * @access  Private (Admin only)
+ * GET /api/admin/structures
+ * Get all structures from all users
  */
-router.post(
-  '/users',
-  [
-    body('name')
-      .trim()
-      .notEmpty()
-      .withMessage('Name is required')
-      .isLength({ min: 2, max: 50 })
-      .withMessage('Name must be between 2 and 50 characters'),
+router.get('/structures', async (req, res) => {
+  try {
+    console.log('📊 Admin fetching all structures');
     
-    body('email')
-      .isEmail()
-      .normalizeEmail()
-      .withMessage('Please provide a valid email'),
+    const allUsers = await User.find({ 
+      'structures.0': { $exists: true } 
+    }).select('structures username email').limit(100);
+
+    console.log(`📊 Found ${allUsers.length} users with structures`);
+
+    const allStructures = [];
     
-    body('role')
-      .isIn(['user', 'admin', 'inspector', 'engineer'])
-      .withMessage('Invalid role'),
-    
-    body('designation')
-      .optional()
-      .trim()
-      .isLength({ max: 100 })
-      .withMessage('Designation cannot exceed 100 characters'),
-    
-    body('contactNumber')
-      .optional()
-      .matches(/^[0-9]{10}$/)
-      .withMessage('Contact number must be a valid 10-digit number'),
-    
-    handleValidationErrors
-  ],
-  adminController.createUser
-);
+    allUsers.forEach(user => {
+      if (user.structures && user.structures.length > 0) {
+        user.structures.forEach(structure => {
+          allStructures.push({
+            structure_id: structure._id,
+            uid: structure.structural_identity?.uid,
+            structure_number: structure.structural_identity?.structural_identity_number,
+            structure_name: structure.structural_identity?.structure_name,
+            client_name: structure.administration?.client_name,
+            status: structure.status,
+            type: structure.structural_identity?.type_of_structure,
+            location: {
+              city: structure.structural_identity?.city_name,
+              state: structure.structural_identity?.state_code
+            },
+            owner: {
+              user_id: user._id,
+              username: user.username,
+              email: user.email
+            },
+            created_date: structure.creation_info?.created_date,
+            last_updated: structure.creation_info?.last_updated_date
+          });
+        });
+      }
+    });
+
+    console.log(`📊 Total structures: ${allStructures.length}`);
+
+    res.json({
+      success: true,
+      message: 'Structures retrieved successfully',
+      data: allStructures,
+      total: allStructures.length
+    });
+  } catch (error) {
+    console.error('Get structures error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve structures'
+    });
+  }
+});
 
 /**
- * @route   PUT /api/admin/users/:id
- * @desc    Update user
- * @access  Private (Admin only)
+ * GET /api/admin/structures/:id
+ * Get single structure by ID
  */
-router.put(
-  '/users/:id',
-  validateObjectId('id'),
-  [
-    body('name')
-      .optional()
-      .trim()
-      .isLength({ min: 2, max: 50 })
-      .withMessage('Name must be between 2 and 50 characters'),
+router.get('/structures/:id', async (req, res) => {
+  try {
+    const users = await User.find({ 'structures._id': req.params.id });
     
-    body('role')
-      .optional()
-      .isIn(['user', 'admin', 'inspector', 'engineer'])
-      .withMessage('Invalid role'),
+    let foundStructure = null;
+    let foundUser = null;
     
-    body('designation')
-      .optional()
-      .trim()
-      .isLength({ max: 100 })
-      .withMessage('Designation cannot exceed 100 characters'),
-    
-    body('contactNumber')
-      .optional()
-      .matches(/^[0-9]{10}$/)
-      .withMessage('Contact number must be a valid 10-digit number'),
-    
-    body('isActive')
-      .optional()
-      .isBoolean()
-      .withMessage('isActive must be a boolean'),
-    
-    handleValidationErrors
-  ],
-  adminController.updateUser
-);
+    for (const user of users) {
+      const structure = user.structures.id(req.params.id);
+      if (structure) {
+        foundStructure = structure;
+        foundUser = user;
+        break;
+      }
+    }
+
+    if (!foundStructure) {
+      return res.status(404).json({
+        success: false,
+        error: 'Structure not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Structure retrieved successfully',
+      data: {
+        ...foundStructure.toObject(),
+        owner: {
+          user_id: foundUser._id,
+          username: foundUser.username,
+          email: foundUser.email
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get structure error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve structure'
+    });
+  }
+});
 
 /**
- * @route   DELETE /api/admin/users/:id
- * @desc    Delete user
- * @access  Private (Admin only)
+ * GET /api/admin/system-stats
+ * Get system statistics
  */
-router.delete('/users/:id', validateObjectId('id'), adminController.deleteUser);
-
-/**
- * @route   POST /api/admin/users/:id/reset-password
- * @desc    Reset user password
- * @access  Private (Admin only)
- */
-router.post('/users/:id/reset-password', validateObjectId('id'), adminController.resetUserPassword);
-
-// Code Management Routes
-
-/**
- * @route   GET /api/admin/codes/states
- * @desc    Get all state codes
- * @access  Private (Admin only)
- */
-router.get('/codes/states', adminController.getStateCodes);
-
-/**
- * @route   GET /api/admin/codes/districts/:stateCode
- * @desc    Get district codes by state
- * @access  Private (Admin only)
- */
-router.get(
-  '/codes/districts/:stateCode',
-  [
-    param('stateCode')
-      .isLength({ min: 2, max: 2 })
-      .withMessage('State code must be exactly 2 characters')
-      .isAlpha()
-      .withMessage('State code must contain only letters'),
-    handleValidationErrors
-  ],
-  adminController.getDistrictCodes
-);
-
-/**
- * @route   POST /api/admin/codes/districts
- * @desc    Create district code
- * @access  Private (Admin only)
- */
-router.post(
-  '/codes/districts',
-  [
-    body('stateCode')
-      .isLength({ min: 2, max: 2 })
-      .withMessage('State code must be exactly 2 characters')
-      .isAlpha()
-      .withMessage('State code must contain only letters'),
-    
-    body('code')
-      .isLength({ min: 2, max: 2 })
-      .withMessage('District code must be exactly 2 characters'),
-    
-    body('name')
-      .trim()
-      .notEmpty()
-      .withMessage('District name is required')
-      .isLength({ max: 100 })
-      .withMessage('District name cannot exceed 100 characters'),
-    
-    handleValidationErrors
-  ],
-  adminController.createDistrictCode
-);
-
-/**
- * @route   GET /api/admin/codes/structure-types
- * @desc    Get all structure types
- * @access  Private (Admin only)
- */
-router.get('/codes/structure-types', adminController.getStructureTypes);
-
-/**
- * @route   POST /api/admin/codes/structure-types
- * @desc    Create structure type
- * @access  Private (Admin only)
- */
-router.post(
-  '/codes/structure-types',
-  [
-    body('code')
-      .trim()
-      .notEmpty()
-      .withMessage('Structure type code is required')
-      .isLength({ max: 10 })
-      .withMessage('Code cannot exceed 10 characters'),
-    
-    body('name')
-      .trim()
-      .notEmpty()
-      .withMessage('Structure type name is required')
-      .isLength({ max: 100 })
-      .withMessage('Name cannot exceed 100 characters'),
-    
-    body('category')
-      .isIn(['residential', 'commercial', 'educational', 'hospital', 'industrial', 'other'])
-      .withMessage('Invalid category'),
-    
-    body('description')
-      .optional()
-      .trim()
-      .isLength({ max: 500 })
-      .withMessage('Description cannot exceed 500 characters'),
-    
-    handleValidationErrors
-  ],
-  adminController.createStructureType
-);
-
-/**
- * @route   GET /api/admin/codes/structural-forms
- * @desc    Get all structural forms
- * @access  Private (Admin only)
- */
-router.get('/codes/structural-forms', adminController.getStructuralForms);
-
-/**
- * @route   GET /api/admin/codes/materials
- * @desc    Get all construction materials
- * @access  Private (Admin only)
- */
-router.get('/codes/materials', adminController.getConstructionMaterials);
-
-/**
- * @route   GET /api/admin/codes/rating-descriptions
- * @desc    Get rating descriptions
- * @access  Private (Admin only)
- */
-router.get('/codes/rating-descriptions', adminController.getRatingDescriptions);
-
-/**
- * @route   POST /api/admin/codes/rating-descriptions
- * @desc    Create rating description
- * @access  Private (Admin only)
- */
-router.post(
-  '/codes/rating-descriptions',
-  [
-    body('elementType')
-      .isIn([
-        'beams', 'columns', 'slab', 'foundation',
-        'brick_plaster', 'doors_windows', 'flooring_bathroom_tiles',
-        'electrical_wiring', 'fittings_sanitary', 'railings',
-        'water_tanks', 'plumbing', 'sewage_system',
-        'panel_board_transformer', 'lifts'
+router.get('/system-stats', async (req, res) => {
+  try {
+    const [totalUsers, activeUsers, totalStructures] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ is_active: true }),
+      User.aggregate([
+        { $project: { structureCount: { $size: { $ifNull: ['$structures', []] } } } },
+        { $group: { _id: null, total: { $sum: '$structureCount' } } }
       ])
-      .withMessage('Invalid element type'),
-    
-    body('rating')
-      .isInt({ min: 1, max: 5 })
-      .withMessage('Rating must be between 1 and 5'),
-    
-    body('condition')
-      .isIn(['excellent', 'good', 'fair', 'poor', 'very_poor', 'failure'])
-      .withMessage('Invalid condition'),
-    
-    body('description')
-      .trim()
-      .notEmpty()
-      .withMessage('Description is required')
-      .isLength({ max: 1000 })
-      .withMessage('Description cannot exceed 1000 characters'),
-    
-    body('recommendedAction')
-      .optional()
-      .trim()
-      .isLength({ max: 500 })
-      .withMessage('Recommended action cannot exceed 500 characters'),
-    
-    handleValidationErrors
-  ],
-  adminController.createRatingDescription
-);
+    ]);
 
-/**
- * @route   PUT /api/admin/codes/rating-descriptions/:id
- * @desc    Update rating description
- * @access  Private (Admin only)
- */
-router.put(
-  '/codes/rating-descriptions/:id',
-  validateObjectId('id'),
-  [
-    body('condition')
-      .optional()
-      .isIn(['excellent', 'good', 'fair', 'poor', 'very_poor', 'failure'])
-      .withMessage('Invalid condition'),
-    
-    body('description')
-      .optional()
-      .trim()
-      .isLength({ max: 1000 })
-      .withMessage('Description cannot exceed 1000 characters'),
-    
-    body('recommendedAction')
-      .optional()
-      .trim()
-      .isLength({ max: 500 })
-      .withMessage('Recommended action cannot exceed 500 characters'),
-    
-    handleValidationErrors
-  ],
-  adminController.updateRatingDescription
-);
-
-// System Management Routes
-
-/**
- * @route   GET /api/admin/system-stats
- * @desc    Get system statistics
- * @access  Private (Admin only)
- */
-router.get('/system-stats', adminController.getSystemStats);
-
-/**
- * @route   PUT /api/admin/structures/bulk-update
- * @desc    Bulk update structures
- * @access  Private (Admin only)
- */
-router.put(
-  '/structures/bulk-update',
-  [
-    body('structureIds')
-      .isArray({ min: 1 })
-      .withMessage('Structure IDs must be a non-empty array')
-      .custom((ids) => {
-        return ids.every(id => id.match(/^[0-9a-fA-F]{24}$/));
-      })
-      .withMessage('All structure IDs must be valid MongoDB ObjectIds'),
-    
-    body('updateData')
-      .isObject()
-      .withMessage('Update data must be an object'),
-    
-    body('updateData.status')
-      .optional()
-      .isIn(['draft', 'submitted', 'under_inspection', 'completed', 'rejected'])
-      .withMessage('Invalid status'),
-    
-    body('updateData.priorityLevel')
-      .optional()
-      .isIn(['low', 'medium', 'high', 'critical'])
-      .withMessage('Invalid priority level'),
-    
-    body('updateData.inspectorId')
-      .optional()
-      .isMongoId()
-      .withMessage('Inspector ID must be a valid MongoDB ObjectId'),
-    
-    handleValidationErrors
-  ],
-  adminController.bulkUpdateStructures
-);
-
-/**
- * @route   GET /api/admin/audit-logs
- * @desc    Get audit logs
- * @access  Private (Admin only)
- */
-router.get('/audit-logs', validateQueryParams, adminController.getAuditLogs);
+    res.json({
+      success: true,
+      message: 'System statistics retrieved',
+      data: {
+        users: {
+          total: totalUsers,
+          active: activeUsers,
+          inactive: totalUsers - activeUsers
+        },
+        structures: {
+          total: totalStructures[0]?.total || 0
+        },
+        timestamp: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('System stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve system statistics'
+    });
+  }
+});
 
 module.exports = router;
