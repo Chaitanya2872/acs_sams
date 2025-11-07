@@ -32,6 +32,25 @@ class StructureController {
     this.saveGeometricDetails = this.saveGeometricDetails.bind(this);
     this.getGeometricDetails = this.getGeometricDetails.bind(this);
     this.updateGeometricDetails = this.updateGeometricDetails.bind(this);
+
+    // Flat-level bulk component ratings
+  this.saveFlatStructuralComponentsBulk = this.saveFlatStructuralComponentsBulk.bind(this);
+  this.saveFlatNonStructuralComponentsBulk = this.saveFlatNonStructuralComponentsBulk.bind(this);
+  
+  // Floor-level bulk component ratings
+  this.saveFloorStructuralComponentsBulk = this.saveFloorStructuralComponentsBulk.bind(this);
+  this.saveFloorNonStructuralComponentsBulk = this.saveFloorNonStructuralComponentsBulk.bind(this);
+  this.getFloorStructuralComponents = this.getFloorStructuralComponents.bind(this);
+  this.getFloorNonStructuralComponents = this.getFloorNonStructuralComponents.bind(this);
+  
+  // Block-level bulk component ratings
+  this.saveBlockStructuralComponentsBulk = this.saveBlockStructuralComponentsBulk.bind(this);
+  this.saveBlockNonStructuralComponentsBulk = this.saveBlockNonStructuralComponentsBulk.bind(this);
+  
+  // Helper calculation methods (if not already bound)
+  this.calculateBlockStructuralAverage = this.calculateBlockStructuralAverage.bind(this);
+  this.calculateBlockNonStructuralAverage = this.calculateBlockNonStructuralAverage.bind(this);
+  this.calculateBlockCombinedRating = this.calculateBlockCombinedRating.bind(this);
     
     // Floors Management
     this.addFloors = this.addFloors.bind(this);
@@ -127,6 +146,13 @@ class StructureController {
 
   generateFlatId() {
     return `flat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // ✅ NEW: Generate unique component ID
+  generateComponentId(componentType) {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    return `${componentType}_${timestamp}_${random}`;
   }
 
   // =================== STRUCTURE INITIALIZATION ===================
@@ -3473,6 +3499,759 @@ async getUserImageStats(req, res) {
     return user.username;
   }
 
+
+  // =================== NEW COMPONENT RATING METHODS ===================
+// Add these methods to your StructureController class
+
+/**
+ * Save structural ratings for a flat
+ * @route POST /structures/:id/flats/:flatId/structural
+ */
+async saveFlatStructuralComponents(req, res) {
+  try {
+    const { id, flatId } = req.params;
+    const { component_type, components } = req.body;
+    
+    console.log(`📝 Saving structural components for flat ${flatId}, type: ${component_type}`);
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat across all floors
+    let targetFlat = null;
+    let targetFloor = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        targetFloor = floor;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Initialize structural_rating if not exists
+    if (!targetFlat.structural_rating) {
+      targetFlat.structural_rating = {};
+    }
+    
+    // Validate component_type is structural
+    const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
+    if (!structuralComponents.includes(component_type)) {
+      return sendErrorResponse(res, 'Invalid structural component type', 400);
+    }
+    
+    // Save components array
+    targetFlat.structural_rating[component_type] = components;
+    
+    // Calculate overall average for structural ratings
+    this.calculateStructuralAverage(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'ratings_in_progress';
+    await user.save();
+    
+    sendSuccessResponse(res, `Structural ${component_type} saved successfully`, {
+      structure_id: id,
+      flat_id: flatId,
+      component_type,
+      components_saved: components.length,
+      structural_rating: targetFlat.structural_rating
+    });
+    
+  } catch (error) {
+    console.error('❌ Save flat structural components error:', error);
+    sendErrorResponse(res, 'Failed to save structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save non-structural ratings for a flat
+ * @route POST /structures/:id/flats/:flatId/non-structural
+ */
+async saveFlatNonStructuralComponents(req, res) {
+  try {
+    const { id, flatId } = req.params;
+    const { component_type, components } = req.body;
+    
+    console.log(`📝 Saving non-structural components for flat ${flatId}, type: ${component_type}`);
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    let targetFloor = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        targetFloor = floor;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Initialize non_structural_rating if not exists
+    if (!targetFlat.non_structural_rating) {
+      targetFlat.non_structural_rating = {};
+    }
+    
+    // Validate component_type is non-structural
+    const nonStructuralComponents = [
+      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+      'sewage_system', 'panel_board', 'lifts'
+    ];
+    
+    if (!nonStructuralComponents.includes(component_type)) {
+      return sendErrorResponse(res, 'Invalid non-structural component type', 400);
+    }
+    
+    // Save components array
+    targetFlat.non_structural_rating[component_type] = components;
+    
+    // Calculate overall average for non-structural ratings
+    this.calculateNonStructuralAverage(targetFlat);
+    
+    // Calculate combined rating if both structural and non-structural exist
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'ratings_in_progress';
+    await user.save();
+    
+    sendSuccessResponse(res, `Non-structural ${component_type} saved successfully`, {
+      structure_id: id,
+      flat_id: flatId,
+      component_type,
+      components_saved: components.length,
+      non_structural_rating: targetFlat.non_structural_rating,
+      flat_overall_rating: targetFlat.flat_overall_rating
+    });
+    
+  } catch (error) {
+    console.error('❌ Save flat non-structural components error:', error);
+    sendErrorResponse(res, 'Failed to save non-structural components', 500, error.message);
+  }
+}
+
+/**
+ * Get structural components of specific type for a flat
+ * @route GET /structures/:id/flats/:flatId/structural/:type
+ */
+async getFlatStructuralComponents(req, res) {
+  try {
+    const { id, flatId, type } = req.params;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    const components = targetFlat.structural_rating?.[type] || [];
+    
+    sendSuccessResponse(res, 'Structural components retrieved successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      component_type: type,
+      components: components,
+      total_components: components.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Get flat structural components error:', error);
+    sendErrorResponse(res, 'Failed to get structural components', 500, error.message);
+  }
+}
+
+/**
+ * Get non-structural components of specific type for a flat
+ * @route GET /structures/:id/flats/:flatId/non-structural/:type
+ */
+async getFlatNonStructuralComponents(req, res) {
+  try {
+    const { id, flatId, type } = req.params;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    const components = targetFlat.non_structural_rating?.[type] || [];
+    
+    sendSuccessResponse(res, 'Non-structural components retrieved successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      component_type: type,
+      components: components,
+      total_components: components.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Get flat non-structural components error:', error);
+    sendErrorResponse(res, 'Failed to get non-structural components', 500, error.message);
+  }
+}
+
+/**
+ * Update a specific structural component instance
+ * @route PATCH /structures/:id/flats/:flatId/structural/:componentId
+ */
+async updateFlatStructuralComponent(req, res) {
+  try {
+    const { id, flatId, componentId } = req.params;
+    const updateData = req.body;
+    
+    console.log(`📝 Updating structural component ${componentId} for flat ${flatId}`);
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Find the component across all structural types
+    let found = false;
+    let componentType = null;
+    const structuralTypes = ['beams', 'columns', 'slab', 'foundation'];
+    
+    for (const type of structuralTypes) {
+      const components = targetFlat.structural_rating?.[type];
+      if (components && Array.isArray(components)) {
+        const componentIndex = components.findIndex(c => c._id === componentId);
+        if (componentIndex !== -1) {
+          // Update component
+          Object.keys(updateData).forEach(key => {
+            if (updateData[key] !== undefined) {
+              components[componentIndex][key] = updateData[key];
+            }
+          });
+          components[componentIndex].inspection_date = new Date();
+          found = true;
+          componentType = type;
+          break;
+        }
+      }
+    }
+    
+    if (!found) {
+      return sendErrorResponse(res, 'Component not found', 404);
+    }
+    
+    // Recalculate averages
+    this.calculateStructuralAverage(targetFlat);
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Structural component updated successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      component_id: componentId,
+      component_type: componentType,
+      updated_fields: Object.keys(updateData)
+    });
+    
+  } catch (error) {
+    console.error('❌ Update flat structural component error:', error);
+    sendErrorResponse(res, 'Failed to update structural component', 500, error.message);
+  }
+}
+
+/**
+ * Update a specific non-structural component instance
+ * @route PATCH /structures/:id/flats/:flatId/non-structural/:componentId
+ */
+async updateFlatNonStructuralComponent(req, res) {
+  try {
+    const { id, flatId, componentId } = req.params;
+    const updateData = req.body;
+    
+    console.log(`📝 Updating non-structural component ${componentId} for flat ${flatId}`);
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Find the component across all non-structural types
+    let found = false;
+    let componentType = null;
+    const nonStructuralTypes = [
+      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+      'sewage_system', 'panel_board', 'lifts'
+    ];
+    
+    for (const type of nonStructuralTypes) {
+      const components = targetFlat.non_structural_rating?.[type];
+      if (components && Array.isArray(components)) {
+        const componentIndex = components.findIndex(c => c._id === componentId);
+        if (componentIndex !== -1) {
+          // Update component
+          Object.keys(updateData).forEach(key => {
+            if (updateData[key] !== undefined) {
+              components[componentIndex][key] = updateData[key];
+            }
+          });
+          components[componentIndex].inspection_date = new Date();
+          found = true;
+          componentType = type;
+          break;
+        }
+      }
+    }
+    
+    if (!found) {
+      return sendErrorResponse(res, 'Component not found', 404);
+    }
+    
+    // Recalculate averages
+    this.calculateNonStructuralAverage(targetFlat);
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Non-structural component updated successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      component_id: componentId,
+      component_type: componentType,
+      updated_fields: Object.keys(updateData)
+    });
+    
+  } catch (error) {
+    console.error('❌ Update flat non-structural component error:', error);
+    sendErrorResponse(res, 'Failed to update non-structural component', 500, error.message);
+  }
+}
+
+/**
+ * Delete a specific structural component instance
+ * @route DELETE /structures/:id/flats/:flatId/structural/:componentId
+ */
+async deleteFlatStructuralComponent(req, res) {
+  try {
+    const { id, flatId, componentId } = req.params;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Find and delete the component
+    let found = false;
+    let componentType = null;
+    const structuralTypes = ['beams', 'columns', 'slab', 'foundation'];
+    
+    for (const type of structuralTypes) {
+      const components = targetFlat.structural_rating?.[type];
+      if (components && Array.isArray(components)) {
+        const componentIndex = components.findIndex(c => c._id === componentId);
+        if (componentIndex !== -1) {
+          components.splice(componentIndex, 1);
+          found = true;
+          componentType = type;
+          break;
+        }
+      }
+    }
+    
+    if (!found) {
+      return sendErrorResponse(res, 'Component not found', 404);
+    }
+    
+    // Recalculate averages
+    this.calculateStructuralAverage(targetFlat);
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Structural component deleted successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      component_id: componentId,
+      component_type: componentType
+    });
+    
+  } catch (error) {
+    console.error('❌ Delete flat structural component error:', error);
+    sendErrorResponse(res, 'Failed to delete structural component', 500, error.message);
+  }
+}
+
+/**
+ * Delete a specific non-structural component instance
+ * @route DELETE /structures/:id/flats/:flatId/non-structural/:componentId
+ */
+async deleteFlatNonStructuralComponent(req, res) {
+  try {
+    const { id, flatId, componentId } = req.params;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Find and delete the component
+    let found = false;
+    let componentType = null;
+    const nonStructuralTypes = [
+      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+      'sewage_system', 'panel_board', 'lifts'
+    ];
+    
+    for (const type of nonStructuralTypes) {
+      const components = targetFlat.non_structural_rating?.[type];
+      if (components && Array.isArray(components)) {
+        const componentIndex = components.findIndex(c => c._id === componentId);
+        if (componentIndex !== -1) {
+          components.splice(componentIndex, 1);
+          found = true;
+          componentType = type;
+          break;
+        }
+      }
+    }
+    
+    if (!found) {
+      return sendErrorResponse(res, 'Component not found', 404);
+    }
+    
+    // Recalculate averages
+    this.calculateNonStructuralAverage(targetFlat);
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Non-structural component deleted successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      component_id: componentId,
+      component_type: componentType
+    });
+    
+  } catch (error) {
+    console.error('❌ Delete flat non-structural component error:', error);
+    sendErrorResponse(res, 'Failed to delete non-structural component', 500, error.message);
+  }
+}
+
+// =================== FLOOR-LEVEL RATING METHODS ===================
+
+/**
+ * Save structural ratings for a floor
+ * @route POST /structures/:id/floors/:floorId/structural
+ */
+async saveFloorStructuralComponents(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { component_type, components } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    // Initialize structural_rating if not exists
+    if (!floor.structural_rating) {
+      floor.structural_rating = {};
+    }
+    
+    // Save components
+    floor.structural_rating[component_type] = components;
+    
+    // Calculate average
+    this.calculateFloorStructuralAverage(floor);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, `Floor structural ${component_type} saved successfully`, {
+      structure_id: id,
+      floor_id: floorId,
+      component_type,
+      components_saved: components.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Save floor structural components error:', error);
+    sendErrorResponse(res, 'Failed to save floor structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save non-structural ratings for a floor
+ * @route POST /structures/:id/floors/:floorId/non-structural
+ */
+async saveFloorNonStructuralComponents(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { component_type, components } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    // Initialize non_structural_rating if not exists
+    if (!floor.non_structural_rating) {
+      floor.non_structural_rating = {};
+    }
+    
+    // Save components
+    floor.non_structural_rating[component_type] = components;
+    
+    // Calculate average
+    this.calculateFloorNonStructuralAverage(floor);
+    this.calculateFloorCombinedRating(floor);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, `Floor non-structural ${component_type} saved successfully`, {
+      structure_id: id,
+      floor_id: floorId,
+      component_type,
+      components_saved: components.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Save floor non-structural components error:', error);
+    sendErrorResponse(res, 'Failed to save floor non-structural components', 500, error.message);
+  }
+}
+
+// Similar GET, PATCH, DELETE methods for floors...
+// (Following same pattern as flats)
+
+// =================== HELPER CALCULATION METHODS ===================
+
+calculateStructuralAverage(flat) {
+  if (!flat.structural_rating) return;
+  
+  const allRatings = [];
+  const types = ['beams', 'columns', 'slab', 'foundation'];
+  
+  types.forEach(type => {
+    const components = flat.structural_rating[type];
+    if (components && Array.isArray(components)) {
+      components.forEach(comp => {
+        if (comp.rating) allRatings.push(comp.rating);
+      });
+    }
+  });
+  
+  if (allRatings.length > 0) {
+    const average = allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length;
+    flat.structural_rating.overall_average = Math.round(average * 10) / 10;
+    flat.structural_rating.health_status = this.getHealthStatus(average);
+    flat.structural_rating.assessment_date = new Date();
+  }
+}
+
+calculateNonStructuralAverage(flat) {
+  if (!flat.non_structural_rating) return;
+  
+  const allRatings = [];
+  const types = [
+    'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+    'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+    'sewage_system', 'panel_board', 'lifts'
+  ];
+  
+  types.forEach(type => {
+    const components = flat.non_structural_rating[type];
+    if (components && Array.isArray(components)) {
+      components.forEach(comp => {
+        if (comp.rating) allRatings.push(comp.rating);
+      });
+    }
+  });
+  
+  if (allRatings.length > 0) {
+    const average = allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length;
+    flat.non_structural_rating.overall_average = Math.round(average * 10) / 10;
+    flat.non_structural_rating.assessment_date = new Date();
+  }
+}
+
+calculateCombinedRating(flat) {
+  if (flat.structural_rating?.overall_average && flat.non_structural_rating?.overall_average) {
+    const combinedScore = (flat.structural_rating.overall_average * 0.7) + 
+                         (flat.non_structural_rating.overall_average * 0.3);
+    
+    flat.flat_overall_rating = {
+      combined_score: Math.round(combinedScore * 10) / 10,
+      health_status: this.getHealthStatus(combinedScore),
+      priority: this.getPriority(combinedScore),
+      last_assessment_date: new Date()
+    };
+  }
+}
+
+calculateFloorStructuralAverage(floor) {
+  if (!floor.structural_rating) return;
+  
+  const allRatings = [];
+  const types = ['beams', 'columns', 'slab', 'foundation'];
+  
+  types.forEach(type => {
+    const components = floor.structural_rating[type];
+    if (components && Array.isArray(components)) {
+      components.forEach(comp => {
+        if (comp.rating) allRatings.push(comp.rating);
+      });
+    }
+  });
+  
+  if (allRatings.length > 0) {
+    const average = allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length;
+    floor.structural_rating.overall_average = Math.round(average * 10) / 10;
+    floor.structural_rating.health_status = this.getHealthStatus(average);
+    floor.structural_rating.assessment_date = new Date();
+  }
+}
+
+calculateFloorNonStructuralAverage(floor) {
+  if (!floor.non_structural_rating) return;
+  
+  const allRatings = [];
+  const types = ['walls', 'flooring', 'electrical_system', 'fire_safety'];
+  
+  types.forEach(type => {
+    const components = floor.non_structural_rating[type];
+    if (components && Array.isArray(components)) {
+      components.forEach(comp => {
+        if (comp.rating) allRatings.push(comp.rating);
+      });
+    }
+  });
+  
+  if (allRatings.length > 0) {
+    const average = allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length;
+    floor.non_structural_rating.overall_average = Math.round(average * 10) / 10;
+    floor.non_structural_rating.assessment_date = new Date();
+  }
+}
+
+calculateFloorCombinedRating(floor) {
+  if (floor.structural_rating?.overall_average && floor.non_structural_rating?.overall_average) {
+    const combinedScore = (floor.structural_rating.overall_average * 0.7) + 
+                         (floor.non_structural_rating.overall_average * 0.3);
+    
+    floor.floor_overall_rating = {
+      combined_score: Math.round(combinedScore * 10) / 10,
+      health_status: this.getHealthStatus(combinedScore),
+      priority: this.getPriority(combinedScore),
+      last_assessment_date: new Date()
+    };
+  }
+}
+
+getHealthStatus(average) {
+  if (!average || isNaN(average)) return null;
+  if (average >= 4) return 'Good';
+  if (average >= 3) return 'Fair';
+  if (average >= 2) return 'Poor';
+  return 'Critical';
+}
+
+getPriority(average) {
+  if (!average || isNaN(average)) return null;
+  if (average >= 4) return 'Low';
+  if (average >= 3) return 'Medium';
+  if (average >= 2) return 'High';
+  return 'Critical';
+}
+
   // =================== REMARKS MANAGEMENT ===================
   
   /**
@@ -3811,6 +4590,594 @@ async deleteRemark(req, res) {
       sendErrorResponse(res, 'Failed to delete structure', 500, error.message);
     }
   }
+
+
+
+  // =================== NEW BULK COMPONENT RATING METHODS ===================
+// Add these methods to the StructureController class body
+
+/**
+ * Save multiple structural component types for a flat in one request
+ * @route POST /structures/:id/flats/:flatId/structural/bulk
+ */
+async saveFlatStructuralComponentsBulk(req, res) {
+  try {
+    const { id, flatId } = req.params;
+    const { structures } = req.body;
+    
+    console.log(`📦 Saving multiple structural component types for flat ${flatId}`);
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    let targetFloor = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        targetFloor = floor;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Initialize structural_rating if not exists
+    if (!targetFlat.structural_rating) {
+      targetFlat.structural_rating = {};
+    }
+    
+    const inspectionDate = new Date();
+    let totalComponentsSaved = 0;
+    const savedComponentTypes = [];
+    
+    // Process each component type
+    structures.forEach(({ component_type, components }) => {
+      // Validate it's a structural component
+      const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
+      if (!structuralComponents.includes(component_type)) {
+        throw new Error(`Invalid structural component type: ${component_type}`);
+      }
+      
+      // ✅ FIXED: Auto-generate component IDs if not provided
+      const formattedComponents = components.map(comp => ({
+        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
+        name: comp.name,
+        rating: parseInt(comp.rating),
+        photo: comp.photo,
+        condition_comment: comp.condition_comment,
+        inspector_notes: comp.inspector_notes || '',
+        inspection_date: inspectionDate
+      }));
+      
+      // Save to flat
+      targetFlat.structural_rating[component_type] = formattedComponents;
+      totalComponentsSaved += formattedComponents.length;
+      savedComponentTypes.push({
+        component_type,
+        count: formattedComponents.length,
+        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+      });
+    });
+    
+    // Calculate overall average
+    this.calculateStructuralAverage(targetFlat);
+    
+    // Update combined rating if non-structural exists
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'ratings_in_progress';
+    await user.save();
+    
+    sendSuccessResponse(res, 'Structural components saved successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      total_components_saved: totalComponentsSaved,
+      component_types_saved: savedComponentTypes,
+      structural_rating: targetFlat.structural_rating,
+      flat_overall_rating: targetFlat.flat_overall_rating
+    });
+    
+  } catch (error) {
+    console.error('❌ Save flat structural components bulk error:', error);
+    sendErrorResponse(res, 'Failed to save structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save multiple non-structural component types for a flat in one request
+ */
+async saveFlatNonStructuralComponentsBulk(req, res) {
+  try {
+    const { id, flatId } = req.params;
+    const { structures } = req.body;
+    
+    console.log(`📦 Saving multiple non-structural component types for flat ${flatId}`);
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Find the flat
+    let targetFlat = null;
+    
+    for (const floor of structure.geometric_details?.floors || []) {
+      const flat = floor.flats?.find(f => f.flat_id === flatId);
+      if (flat) {
+        targetFlat = flat;
+        break;
+      }
+    }
+    
+    if (!targetFlat) {
+      return sendErrorResponse(res, 'Flat not found', 404);
+    }
+    
+    // Initialize non_structural_rating if not exists
+    if (!targetFlat.non_structural_rating) {
+      targetFlat.non_structural_rating = {};
+    }
+    
+    const inspectionDate = new Date();
+    let totalComponentsSaved = 0;
+    const savedComponentTypes = [];
+    
+    // Process each component type
+    structures.forEach(({ component_type, components }) => {
+      // Validate it's a non-structural component
+      const nonStructuralComponents = [
+        'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
+        'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+        'sewage_system', 'panel_board', 'lifts'
+      ];
+      
+      if (!nonStructuralComponents.includes(component_type)) {
+        throw new Error(`Invalid non-structural component type: ${component_type}`);
+      }
+      
+      // ✅ FIXED: Auto-generate component IDs if not provided
+      const formattedComponents = components.map(comp => ({
+        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
+        name: comp.name,
+        rating: parseInt(comp.rating),
+        photo: comp.photo,
+        condition_comment: comp.condition_comment,
+        inspector_notes: comp.inspector_notes || '',
+        inspection_date: inspectionDate
+      }));
+      
+      // Save to flat
+      targetFlat.non_structural_rating[component_type] = formattedComponents;
+      totalComponentsSaved += formattedComponents.length;
+      savedComponentTypes.push({
+        component_type,
+        count: formattedComponents.length,
+        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+      });
+    });
+    
+    // Calculate overall average
+    this.calculateNonStructuralAverage(targetFlat);
+    
+    // Update combined rating
+    this.calculateCombinedRating(targetFlat);
+    
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'ratings_in_progress';
+    await user.save();
+    
+    sendSuccessResponse(res, 'Non-structural components saved successfully', {
+      structure_id: id,
+      flat_id: flatId,
+      total_components_saved: totalComponentsSaved,
+      component_types_saved: savedComponentTypes,
+      non_structural_rating: targetFlat.non_structural_rating,
+      flat_overall_rating: targetFlat.flat_overall_rating
+    });
+    
+  } catch (error) {
+    console.error('❌ Save flat non-structural components bulk error:', error);
+    sendErrorResponse(res, 'Failed to save non-structural components', 500, error.message);
+  }
+}
+
+/**
+ * Get floor structural components
+ */
+async getFloorStructuralComponents(req, res) {
+  try {
+    const { id, floorId, type } = req.params;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const components = floor.structural_rating?.[type] || [];
+    
+    sendSuccessResponse(res, 'Floor structural components retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      component_type: type,
+      components: components,
+      total_components: components.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Get floor structural components error:', error);
+    sendErrorResponse(res, 'Failed to get floor structural components', 500, error.message);
+  }
+}
+
+/**
+ * Get floor non-structural components
+ */
+async getFloorNonStructuralComponents(req, res) {
+  try {
+    const { id, floorId, type } = req.params;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const components = floor.non_structural_rating?.[type] || [];
+    
+    sendSuccessResponse(res, 'Floor non-structural components retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      component_type: type,
+      components: components,
+      total_components: components.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Get floor non-structural components error:', error);
+    sendErrorResponse(res, 'Failed to get floor non-structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save multiple structural component types for a floor
+ */
+async saveFloorStructuralComponentsBulk(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { structures } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    if (!floor.structural_rating) {
+      floor.structural_rating = {};
+    }
+    
+    const inspectionDate = new Date();
+    let totalComponentsSaved = 0;
+    const savedComponentTypes = [];
+    
+    structures.forEach(({ component_type, components }) => {
+      // ✅ FIXED: Auto-generate component IDs if not provided
+      const formattedComponents = components.map(comp => ({
+        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
+        name: comp.name,
+        rating: parseInt(comp.rating),
+        photo: comp.photo,
+        condition_comment: comp.condition_comment,
+        inspector_notes: comp.inspector_notes || '',
+        inspection_date: inspectionDate
+      }));
+      
+      floor.structural_rating[component_type] = formattedComponents;
+      totalComponentsSaved += formattedComponents.length;
+      savedComponentTypes.push({
+        component_type,
+        count: formattedComponents.length,
+        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+      });
+    });
+    
+    this.calculateFloorStructuralAverage(floor);
+    this.calculateFloorCombinedRating(floor);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Floor structural components saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      total_components_saved: totalComponentsSaved,
+      component_types_saved: savedComponentTypes
+    });
+    
+  } catch (error) {
+    console.error('❌ Save floor structural components bulk error:', error);
+    sendErrorResponse(res, 'Failed to save floor structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save multiple non-structural component types for a floor
+ */
+async saveFloorNonStructuralComponentsBulk(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { structures } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    if (!floor.non_structural_rating) {
+      floor.non_structural_rating = {};
+    }
+    
+    const inspectionDate = new Date();
+    let totalComponentsSaved = 0;
+    const savedComponentTypes = [];
+    
+    structures.forEach(({ component_type, components }) => {
+      // ✅ FIXED: Auto-generate component IDs if not provided
+      const formattedComponents = components.map(comp => ({
+        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
+        name: comp.name,
+        rating: parseInt(comp.rating),
+        photo: comp.photo,
+        condition_comment: comp.condition_comment,
+        inspector_notes: comp.inspector_notes || '',
+        inspection_date: inspectionDate
+      }));
+      
+      floor.non_structural_rating[component_type] = formattedComponents;
+      totalComponentsSaved += formattedComponents.length;
+      savedComponentTypes.push({
+        component_type,
+        count: formattedComponents.length,
+        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+      });
+    });
+    
+    this.calculateFloorNonStructuralAverage(floor);
+    this.calculateFloorCombinedRating(floor);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Floor non-structural components saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      total_components_saved: totalComponentsSaved,
+      component_types_saved: savedComponentTypes
+    });
+    
+  } catch (error) {
+    console.error('❌ Save floor non-structural components bulk error:', error);
+    sendErrorResponse(res, 'Failed to save floor non-structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save multiple structural component types for a block
+ */
+async saveBlockStructuralComponentsBulk(req, res) {
+  try {
+    const { id, floorId, blockId } = req.params;
+    const { structures } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const block = floor.blocks?.find(b => b.block_id === blockId);
+    if (!block) {
+      return sendErrorResponse(res, 'Block not found', 404);
+    }
+    
+    if (!block.structural_rating) {
+      block.structural_rating = {};
+    }
+    
+    const inspectionDate = new Date();
+    let totalComponentsSaved = 0;
+    const savedComponentTypes = [];
+    
+    structures.forEach(({ component_type, components }) => {
+      // ✅ FIXED: Auto-generate component IDs if not provided
+      const formattedComponents = components.map(comp => ({
+        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
+        name: comp.name,
+        rating: parseInt(comp.rating),
+        photo: comp.photo,
+        condition_comment: comp.condition_comment,
+        inspector_notes: comp.inspector_notes || '',
+        inspection_date: inspectionDate
+      }));
+      
+      block.structural_rating[component_type] = formattedComponents;
+      totalComponentsSaved += formattedComponents.length;
+      savedComponentTypes.push({
+        component_type,
+        count: formattedComponents.length,
+        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+      });
+    });
+    
+    this.calculateBlockStructuralAverage(block);
+    this.calculateBlockCombinedRating(block);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Block structural components saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      block_id: blockId,
+      total_components_saved: totalComponentsSaved,
+      component_types_saved: savedComponentTypes
+    });
+    
+  } catch (error) {
+    console.error('❌ Save block structural components bulk error:', error);
+    sendErrorResponse(res, 'Failed to save block structural components', 500, error.message);
+  }
+}
+
+/**
+ * Save multiple non-structural component types for a block
+ */
+async saveBlockNonStructuralComponentsBulk(req, res) {
+  try {
+    const { id, floorId, blockId } = req.params;
+    const { structures } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    if (structure.structural_identity?.type_of_structure !== 'industrial') {
+      return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
+    }
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    const block = floor.blocks?.find(b => b.block_id === blockId);
+    if (!block) {
+      return sendErrorResponse(res, 'Block not found', 404);
+    }
+    
+    if (!block.non_structural_rating) {
+      block.non_structural_rating = {};
+    }
+    
+    const inspectionDate = new Date();
+    let totalComponentsSaved = 0;
+    const savedComponentTypes = [];
+    
+    structures.forEach(({ component_type, components }) => {
+      // ✅ FIXED: Auto-generate component IDs if not provided
+      const formattedComponents = components.map(comp => ({
+        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
+        name: comp.name,
+        rating: parseInt(comp.rating),
+        photo: comp.photo,
+        condition_comment: comp.condition_comment,
+        inspector_notes: comp.inspector_notes || '',
+        inspection_date: inspectionDate
+      }));
+      
+      block.non_structural_rating[component_type] = formattedComponents;
+      totalComponentsSaved += formattedComponents.length;
+      savedComponentTypes.push({
+        component_type,
+        count: formattedComponents.length,
+        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+      });
+    });
+    
+    this.calculateBlockNonStructuralAverage(block);
+    this.calculateBlockCombinedRating(block);
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendSuccessResponse(res, 'Block non-structural components saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      block_id: blockId,
+      total_components_saved: totalComponentsSaved,
+      component_types_saved: savedComponentTypes
+    });
+    
+  } catch (error) {
+    console.error('❌ Save block non-structural components bulk error:', error);
+    sendErrorResponse(res, 'Failed to save block non-structural components', 500, error.message);
+  }
+}
+
+// Helper calculation methods for blocks
+calculateBlockStructuralAverage(block) {
+  if (!block.structural_rating) return;
+  
+  const allRatings = [];
+  const types = ['beams', 'columns', 'slab', 'foundation', 'roof_truss'];
+  
+  types.forEach(type => {
+    const components = block.structural_rating[type];
+    if (components && Array.isArray(components)) {
+      components.forEach(comp => {
+        if (comp.rating) allRatings.push(comp.rating);
+      });
+    }
+  });
+  
+  if (allRatings.length > 0) {
+    const average = allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length;
+    block.structural_rating.overall_average = Math.round(average * 10) / 10;
+    block.structural_rating.health_status = this.getHealthStatus(average);
+    block.structural_rating.assessment_date = new Date();
+  }
+}
+
+calculateBlockNonStructuralAverage(block) {
+  if (!block.non_structural_rating) return;
+  
+  const allRatings = [];
+  const types = [
+    'walls_cladding', 'industrial_flooring', 'ventilation', 'electrical_system',
+    'fire_safety', 'drainage', 'overhead_cranes', 'loading_docks'
+  ];
+  
+  types.forEach(type => {
+    const components = block.non_structural_rating[type];
+    if (components && Array.isArray(components)) {
+      components.forEach(comp => {
+        if (comp.rating) allRatings.push(comp.rating);
+      });
+    }
+  });
+  
+  if (allRatings.length > 0) {
+    const average = allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length;
+    block.non_structural_rating.overall_average = Math.round(average * 10) / 10;
+    block.non_structural_rating.assessment_date = new Date();
+  }
+}
+
+calculateBlockCombinedRating(block) {
+  if (block.structural_rating?.overall_average && block.non_structural_rating?.overall_average) {
+    const combinedScore = (block.structural_rating.overall_average * 0.7) + 
+                         (block.non_structural_rating.overall_average * 0.3);
+    
+    block.block_overall_rating = {
+      combined_score: Math.round(combinedScore * 10) / 10,
+      health_status: this.getHealthStatus(combinedScore),
+      priority: this.getPriority(combinedScore),
+      last_assessment_date: new Date()
+    };
+  }
+}
 
 
   // =================== END OF CLASS ===================

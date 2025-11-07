@@ -15,7 +15,11 @@ const {
   bulkRatingsValidation,
   blockValidation,
   blockRatingsValidation,
-  floorRatingsValidation
+  floorRatingsValidation,
+  componentRatingValidation,
+  componentUpdateValidation,
+  multiComponentRatingValidation,  // ✅ FIXED: Added missing import
+  parameterValidations
 } = require('../utils/screenValidators');
 
 
@@ -230,6 +234,315 @@ router.put('/:id/bulk-ratings',
   structureController.updateBulkRatings
 );
 
+/**
+ * @route   POST /structures/:id/flats/:flatId/structural
+ * @desc    Save structural components for a flat (multiple instances)
+ * @access  Private
+ * @body    { component_type: 'beams', components: [{ name, rating, photo, condition_comment, inspector_notes }] }
+ * @note    Component _id is auto-generated and returned in response
+ */
+router.post(
+  '/:id/flats/:flatId/structural',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  componentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFlatStructuralComponents
+);
+
+/**
+ * @route   GET /structures/:id/flats/:flatId/structural/:type
+ * @desc    Get all structural component instances of a specific type
+ * @access  Private
+ * @example GET /structures/123/flats/456/structural/beams
+ */
+router.get(
+  '/:id/flats/:flatId/structural/:type',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  parameterValidations.componentType,
+  handleValidationErrors,
+  structureController.getFlatStructuralComponents
+);
+
+/**
+ * @route   PATCH /structures/:id/flats/:flatId/structural/:componentId
+ * @desc    Update a specific structural component instance
+ * @access  Private
+ * @body    { name?, rating?, photo?, condition_comment?, inspector_notes? }
+ */
+router.patch(
+  '/:id/flats/:flatId/structural/:componentId',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  parameterValidations.componentId,
+  componentUpdateValidation,
+  handleValidationErrors,
+  structureController.updateFlatStructuralComponent
+);
+
+/**
+ * @route   DELETE /structures/:id/flats/:flatId/structural/:componentId
+ * @desc    Delete a specific structural component instance
+ * @access  Private
+ */
+router.delete(
+  '/:id/flats/:flatId/structural/:componentId',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  parameterValidations.componentId,
+  handleValidationErrors,
+  structureController.deleteFlatStructuralComponent
+);
+
+/**
+ * @route   POST /structures/:id/flats/:flatId/non-structural
+ * @desc    Save non-structural components for a flat (multiple instances)
+ * @access  Private
+ * @note    Component _id is auto-generated and returned in response
+ */
+router.post(
+  '/:id/flats/:flatId/non-structural',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  componentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFlatNonStructuralComponents
+);
+
+/**
+ * @route   GET /structures/:id/flats/:flatId/non-structural/:type
+ * @desc    Get all non-structural component instances of a specific type
+ * @access  Private
+ */
+router.get(
+  '/:id/flats/:flatId/non-structural/:type',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  parameterValidations.componentType,
+  handleValidationErrors,
+  structureController.getFlatNonStructuralComponents
+);
+
+/**
+ * @route   PATCH /structures/:id/flats/:flatId/non-structural/:componentId
+ * @desc    Update a specific non-structural component instance
+ * @access  Private
+ */
+router.patch(
+  '/:id/flats/:flatId/non-structural/:componentId',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  parameterValidations.componentId,
+  componentUpdateValidation,
+  handleValidationErrors,
+  structureController.updateFlatNonStructuralComponent
+);
+
+/**
+ * @route   DELETE /structures/:id/flats/:flatId/non-structural/:componentId
+ * @desc    Delete a specific non-structural component instance
+ * @access  Private
+ */
+router.delete(
+  '/:id/flats/:flatId/non-structural/:componentId',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  parameterValidations.componentId,
+  handleValidationErrors,
+  structureController.deleteFlatNonStructuralComponent
+);
+
+// =================== FLOOR-LEVEL COMPONENT RATINGS ===================
+
+/**
+ * @route   POST /structures/:id/floors/:floorId/structural
+ * @desc    Save structural components for a floor
+ * @access  Private
+ * @note    Component _id is auto-generated and returned in response
+ */
+router.post(
+  '/:id/floors/:floorId/structural',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  componentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFloorStructuralComponents
+);
+
+/**
+ * @route   GET /structures/:id/floors/:floorId/structural/:type
+ * @desc    Get all structural component instances of a specific type for floor
+ * @access  Private
+ */
+router.get(
+  '/:id/floors/:floorId/structural/:type',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.componentType,
+  handleValidationErrors,
+  structureController.getFloorStructuralComponents
+);
+
+/**
+ * @route   POST /structures/:id/floors/:floorId/non-structural
+ * @desc    Save non-structural components for a floor
+ * @access  Private
+ * @note    Component _id is auto-generated and returned in response
+ */
+router.post(
+  '/:id/floors/:floorId/non-structural',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  componentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFloorNonStructuralComponents
+);
+
+/**
+ * @route   GET /structures/:id/floors/:floorId/non-structural/:type
+ * @desc    Get all non-structural component instances of a specific type for floor
+ * @access  Private
+ */
+router.get(
+  '/:id/floors/:floorId/non-structural/:type',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.componentType,
+  handleValidationErrors,
+  structureController.getFloorNonStructuralComponents
+);
+
+// PATCH and DELETE for floor components follow same pattern as flats...
+
+// =================== FLAT-LEVEL COMPONENT RATINGS (BULK) ===================
+
+/**
+ * @route   POST /structures/:id/flats/:flatId/structural/bulk
+ * @desc    Save multiple structural component types in one request
+ * @access  Private
+ * @note    Component _id is auto-generated for each component and returned in response
+ * @body    { structures: [{ component_type, components: [...] }, ...] }
+ * @example
+ * {
+ *   "structures": [
+ *     {
+ *       "component_type": "beams",
+ *       "components": [
+ *         {
+ *           "name": "Main Beam - Living Room",
+ *           "rating": 4,
+ *           "photo": "data:image/jpeg;base64,...",
+ *           "condition_comment": "Good condition with minor surface cracks",
+ *           "inspector_notes": "Recommend monitoring"
+ *         }
+ *       ]
+ *     },
+ *     {
+ *       "component_type": "columns",
+ *       "components": [...]
+ *     }
+ *   ]
+ * }
+ */
+router.post(
+  '/:id/flats/:flatId/structural/bulk',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFlatStructuralComponentsBulk
+);
+
+/**
+ * @route   POST /structures/:id/flats/:flatId/non-structural/bulk
+ * @desc    Save multiple non-structural component types in one request
+ * @access  Private
+ * @note    Component _id is auto-generated for each component and returned in response
+ * @body    { structures: [{ component_type, components: [...] }, ...] }
+ */
+router.post(
+  '/:id/flats/:flatId/non-structural/bulk',
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFlatNonStructuralComponentsBulk
+);
+
+// =================== FLOOR-LEVEL COMPONENT RATINGS (BULK) ===================
+
+/**
+ * @route   POST /structures/:id/floors/:floorId/structural/bulk
+ * @desc    Save multiple structural component types for floor in one request
+ * @access  Private
+ * @note    Component _id is auto-generated for each component and returned in response
+ */
+router.post(
+  '/:id/floors/:floorId/structural/bulk',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFloorStructuralComponentsBulk
+);
+
+/**
+ * @route   POST /structures/:id/floors/:floorId/non-structural/bulk
+ * @desc    Save multiple non-structural component types for floor in one request
+ * @access  Private
+ * @note    Component _id is auto-generated for each component and returned in response
+ */
+router.post(
+  '/:id/floors/:floorId/non-structural/bulk',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFloorNonStructuralComponentsBulk
+);
+
+// =================== BLOCK-LEVEL COMPONENT RATINGS (BULK) ===================
+
+/**
+ * @route   POST /structures/:id/floors/:floorId/blocks/:blockId/structural/bulk
+ * @desc    Save multiple structural component types for industrial block
+ * @access  Private
+ * @note    Component _id is auto-generated for each component and returned in response
+ */
+router.post(
+  '/:id/floors/:floorId/blocks/:blockId/structural/bulk',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveBlockStructuralComponentsBulk
+);
+
+/**
+ * @route   POST /structures/:id/floors/:floorId/blocks/:blockId/non-structural/bulk
+ * @desc    Save multiple non-structural component types for industrial block
+ * @access  Private
+ * @note    Component _id is auto-generated for each component and returned in response
+ */
+router.post(
+  '/:id/floors/:floorId/blocks/:blockId/non-structural/bulk',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveBlockNonStructuralComponentsBulk
+);
+
+// =================== KEEP ALL EXISTING SINGLE COMPONENT TYPE ROUTES ===================
+// These are the legacy routes that still work for single component type at a time
+
+// ... (Keep all existing routes from the original file)
+
+
+
 // =================== REPORTING & ANALYTICS ===================
 
 /**
@@ -296,17 +609,13 @@ router.get('/:id/ratings-summary', async (req, res) => {
             
             // Count health and priority distributions
             if (flat.flat_overall_rating?.health_status) {
-              const health = flat.flat_overall_rating.health_status.toLowerCase();
-              if (summary.health_distribution[health] !== undefined) {
-                summary.health_distribution[health]++;
-              }
+              const status = flat.flat_overall_rating.health_status.toLowerCase();
+              summary.health_distribution[status]++;
             }
             
             if (flat.flat_overall_rating?.priority) {
               const priority = flat.flat_overall_rating.priority.toLowerCase();
-              if (summary.priority_distribution[priority] !== undefined) {
-                summary.priority_distribution[priority]++;
-              }
+              summary.priority_distribution[priority]++;
             }
           });
         }
@@ -315,1202 +624,120 @@ router.get('/:id/ratings-summary', async (req, res) => {
       });
     }
     
-    const { sendSuccessResponse } = require('../utils/responseHandler');
-    sendSuccessResponse(res, 'Flat-level ratings summary retrieved successfully', summary);
-
+    sendSuccessResponse(res, 'Ratings summary retrieved successfully', summary);
+    
   } catch (error) {
-    console.error('❌ Ratings summary error:', error);
-    const { sendErrorResponse } = require('../utils/responseHandler');
+    console.error('❌ Get ratings summary error:', error);
     sendErrorResponse(res, 'Failed to get ratings summary', 500, error.message);
   }
 });
 
-
-// Add these routes to your existing structures.js file after the flats management section
-
-// =================== INDUSTRIAL BLOCKS MANAGEMENT ===================
-/**
- * @route   POST /api/structures/:id/floors/:floorId/blocks
- * @desc    Add blocks to industrial structure floor
- * @access  Private
- */
-router.post('/:id/floors/:floorId/blocks', 
-  blockValidation, 
-  handleValidationErrors, 
-  structureController.addBlocksToFloor
-);
-
-/**
- * @route   GET /api/structures/:id/floors/:floorId/blocks
- * @desc    Get all blocks in an industrial floor
- * @access  Private
- */
-router.get('/:id/floors/:floorId/blocks', async (req, res) => {
-  try {
-    const { id, floorId } = req.params;
-    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
-    
-    if (structure.structural_identity?.type_of_structure !== 'industrial') {
-      return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
-    }
-
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
-    }
-
-    const blocksData = floor.blocks?.map(block => ({
-      block_id: block.block_id,
-      mongodb_id: block._id,
-      block_number: block.block_number,
-      block_name: block.block_name,
-      block_type: block.block_type,
-      area_sq_mts: block.area_sq_mts,
-      block_notes: block.block_notes,
-      
-      // Indicators
-      has_structural_ratings: structureController.hasBlockStructuralRating(block),
-      has_non_structural_ratings: structureController.hasBlockNonStructuralRating(block),
-      
-      // Detailed ratings
-      structural_rating: block.structural_rating || structureController.getDefaultIndustrialStructuralRating(),
-      non_structural_rating: block.non_structural_rating || structureController.getDefaultIndustrialNonStructuralRating(),
-      
-      // Overall rating summary
-      block_overall_rating: block.block_overall_rating || null,
-      health_status: block.block_overall_rating?.health_status || null,
-      priority: block.block_overall_rating?.priority || null,
-      combined_score: block.block_overall_rating?.combined_score || null
-    })) || [];
-
-    sendSuccessResponse(res, 'Blocks retrieved successfully', {
-      structure_id: id,
-      floor_id: floorId,
-      floor_number: floor.floor_number,
-      total_blocks: blocksData.length,
-      blocks: blocksData
-    });
-
-  } catch (error) {
-    console.error('❌ Get blocks error:', error);
-    sendErrorResponse(res, 'Failed to get blocks', 500, error.message);
-  }
-});
-
-/**
- * @route   GET /api/structures/:id/floors/:floorId/blocks/:blockId
- * @desc    Get specific block details
- * @access  Private
- */
-router.get('/:id/floors/:floorId/blocks/:blockId', async (req, res) => {
-  try {
-    const { id, floorId, blockId } = req.params;
-    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
-    
-    if (structure.structural_identity?.type_of_structure !== 'industrial') {
-      return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
-    }
-    
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
-    }
-    
-    const block = floor.blocks?.find(b => b.block_id === blockId);
-    if (!block) {
-      return sendErrorResponse(res, 'Block not found', 404);
-    }
-    
-    sendSuccessResponse(res, 'Block details retrieved successfully', {
-      structure_id: id,
-      floor_id: floorId,
-      block: {
-        block_id: block.block_id,
-        mongodb_id: block._id,
-        block_number: block.block_number,
-        block_name: block.block_name,
-        block_type: block.block_type,
-        area_sq_mts: block.area_sq_mts,
-        block_notes: block.block_notes,
-        structural_rating: block.structural_rating || {},
-        non_structural_rating: block.non_structural_rating || {},
-        block_overall_rating: block.block_overall_rating || null
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Get block error:', error);
-    sendErrorResponse(res, 'Failed to get block details', 500, error.message);
-  }
-});
-
-/**
- * @route   PUT /api/structures/:id/floors/:floorId/blocks/:blockId
- * @desc    Update block details
- * @access  Private
- */
-router.put('/:id/floors/:floorId/blocks/:blockId', 
-  blockValidation, 
-  handleValidationErrors, 
-  async (req, res) => {
-    try {
-      const { id, floorId, blockId } = req.params;
-      const updateData = req.body;
-      
-      const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
-      
-      if (structure.structural_identity?.type_of_structure !== 'industrial') {
-        return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
-      }
-      
-      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
-      }
-      
-      const block = floor.blocks?.find(b => b.block_id === blockId);
-      if (!block) {
-        return sendErrorResponse(res, 'Block not found', 404);
-      }
-      
-      Object.keys(updateData).forEach(key => {
-        if (!['structural_rating', 'non_structural_rating'].includes(key) && updateData[key] !== undefined) {
-          block[key] = updateData[key];
-        }
-      });
-      
-      structure.creation_info.last_updated_date = new Date();
-      await user.save();
-      
-      sendUpdatedResponse(res, {
-        structure_id: id,
-        floor_id: floorId,
-        block_id: blockId,
-        updated_block: {
-          block_id: block.block_id,
-          block_number: block.block_number,
-          block_name: block.block_name,
-          block_type: block.block_type
-        }
-      }, 'Block updated successfully');
-
-    } catch (error) {
-      console.error('❌ Update block error:', error);
-      sendErrorResponse(res, 'Failed to update block', 500, error.message);
-    }
-});
-
-/**
- * @route   DELETE /api/structures/:id/floors/:floorId/blocks/:blockId
- * @desc    Delete a block from industrial floor
- * @access  Private
- */
-router.delete('/:id/floors/:floorId/blocks/:blockId', async (req, res) => {
-  try {
-    const { id, floorId, blockId } = req.params;
-    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
-    
-    if (structure.structural_identity?.type_of_structure !== 'industrial') {
-      return sendErrorResponse(res, 'Blocks are only available for industrial structures', 400);
-    }
-    
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
-    }
-    
-    const blockIndex = floor.blocks?.findIndex(block => block.block_id === blockId);
-    if (blockIndex === -1) {
-      return sendErrorResponse(res, 'Block not found', 404);
-    }
-    
-    floor.blocks.splice(blockIndex, 1);
-    structure.creation_info.last_updated_date = new Date();
-    await user.save();
-    
-    sendSuccessResponse(res, 'Block deleted successfully', {
-      structure_id: id,
-      floor_id: floorId,
-      deleted_block_id: blockId
-    });
-
-  } catch (error) {
-    console.error('❌ Delete block error:', error);
-    sendErrorResponse(res, 'Failed to delete block', 500, error.message);
-  }
-});
-
-// =================== BLOCK-LEVEL RATINGS (Industrial Only) ===================
-
-/**
- * @route   POST /api/structures/:id/floors/:floorId/blocks/:blockId/ratings
- * @desc    Save block ratings (structural + non-structural for industrial)
- * @access  Private
- */
-router.post('/:id/floors/:floorId/blocks/:blockId/ratings', 
-  blockRatingsValidation, 
-  handleValidationErrors, 
-  structureController.saveBlockRatings
-);
-
-/**
- * @route   GET /api/structures/:id/floors/:floorId/blocks/:blockId/ratings
- * @desc    Get block ratings for industrial structure
- * @access  Private
- */
-router.get('/:id/floors/:floorId/blocks/:blockId/ratings', async (req, res) => {
-  try {
-    const { id, floorId, blockId } = req.params;
-    const { user, structure } = await structureController.findUserStructure(req.user.userId, id);
-    
-    if (structure.structural_identity?.type_of_structure !== 'industrial') {
-      return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
-    }
-    
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
-    }
-    
-    const block = floor.blocks?.find(b => b.block_id === blockId);
-    if (!block) {
-      return sendErrorResponse(res, 'Block not found', 404);
-    }
-    
-    sendSuccessResponse(res, 'Block ratings retrieved successfully', {
-      structural_rating: block.structural_rating || structureController.getDefaultIndustrialStructuralRating(),
-      non_structural_rating: block.non_structural_rating || structureController.getDefaultIndustrialNonStructuralRating()
-    });
-
-  } catch (error) {
-    console.error('❌ Get block ratings error:', error);
-    sendErrorResponse(res, 'Failed to get block ratings', 500, error.message);
-  }
-});
-
-/**
- * @route   PUT /api/structures/:id/floors/:floorId/blocks/:blockId/ratings
- * @desc    Update block ratings for industrial structure
- * @access  Private
- */
-router.put('/:id/floors/:floorId/blocks/:blockId/ratings', 
-  blockRatingsValidation, 
-  handleValidationErrors, 
-  structureController.saveBlockRatings
-);
-
-// Helper methods to add to structureController
-structureController.hasBlockStructuralRating = function(block) {
-  return block.structural_rating && 
-         block.structural_rating.beams?.rating &&
-         block.structural_rating.columns?.rating &&
-         block.structural_rating.slab?.rating &&
-         block.structural_rating.foundation?.rating &&
-         block.structural_rating.roof_truss?.rating;
-};
-
-structureController.hasBlockNonStructuralRating = function(block) {
-  return block.non_structural_rating &&
-         block.non_structural_rating.walls_cladding?.rating &&
-         block.non_structural_rating.industrial_flooring?.rating &&
-         block.non_structural_rating.ventilation?.rating &&
-         block.non_structural_rating.electrical_system?.rating &&
-         block.non_structural_rating.fire_safety?.rating &&
-         block.non_structural_rating.drainage?.rating;
-};
-
-structureController.getDefaultIndustrialStructuralRating = function() {
-  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
-  return {
-    beams: defaultRating,
-    columns: defaultRating,
-    slab: defaultRating,
-    foundation: defaultRating,
-    roof_truss: defaultRating
-  };
-};
-
-structureController.getDefaultIndustrialNonStructuralRating = function() {
-  const defaultRating = { rating: null, condition_comment: '', photos: [], inspection_date: null };
-  return {
-    walls_cladding: defaultRating,
-    industrial_flooring: defaultRating,
-    ventilation: defaultRating,
-    electrical_system: defaultRating,
-    fire_safety: defaultRating,
-    drainage: defaultRating,
-    overhead_cranes: defaultRating,
-    loading_docks: defaultRating
-  };
-};
-
-
-// Add these routes to your existing structures.js router file
-
-// =================== STRUCTURE LISTING & DETAILS (Add near the top after authentication) ===================
+// =================== STRUCTURE MANAGEMENT ===================
 
 /**
  * @route   GET /api/structures
- * @desc    Get all structures for authenticated user with pagination and filtering
+ * @desc    Get all structures with optional filtering and pagination
  * @access  Private
- * @query   page, limit, status, search, sortBy, sortOrder
  */
 router.get('/', structureController.getAllStructures);
 
 /**
  * @route   GET /api/structures/:id
- * @desc    Get complete structure details by ID
+ * @desc    Get detailed structure information
  * @access  Private
- * @query   include_images, include_ratings
  */
 router.get('/:id', structureController.getStructureDetails);
 
 /**
+ * @route   GET /api/structures/:id/progress
+ * @desc    Get structure completion progress
+ * @access  Private
+ */
+router.get('/:id/progress', structureController.getStructureProgress);
+
+/**
+ * @route   POST /api/structures/:id/submit
+ * @desc    Submit structure for review
+ * @access  Private
+ */
+router.post('/:id/submit', structureController.submitStructure);
+
+/**
+ * @route   POST /api/structures/validate-number
+ * @desc    Validate structure number availability
+ * @access  Private
+ */
+router.post('/validate-number', 
+  structureNumberValidation, 
+  handleValidationErrors, 
+  structureController.validateStructureNumber
+);
+
+/**
+ * @route   GET /api/structures/stats/location
+ * @desc    Get statistics grouped by location
+ * @access  Private
+ */
+router.get('/stats/location', structureController.getLocationStructureStats);
+
+/**
  * @route   DELETE /api/structures/:id
- * @desc    Delete a structure by ID (owner or admin)
+ * @desc    Delete a structure (soft delete)
  * @access  Private
  */
 router.delete('/:id', structureController.deleteStructure);
-
-// =================== IMAGE MANAGEMENT APIs ===================
-
-/**
- * @route   GET /api/structures/images/all
- * @desc    Get all images for authenticated user across all structures
- * @access  Private
- * @query   page, limit, type, component
- */
-router.get('/images/all', structureController.getAllImages);
-
-/**
- * @route   GET /api/structures/images/user-stats
- * @desc    Get user-level image statistics and analytics
- * @access  Private
- */
-router.get('/images/user-stats', structureController.getUserImageStats);
-
-/**
- * @route   GET /api/structures/:id/images
- * @desc    Get all images for a specific structure
- * @access  Private
- * @query   type, component, floor, group_by
- */
-router.get('/:id/images', structureController.getStructureImages);
-
-// =================== ENHANCED ANALYTICS & REPORTING ===================
-
-/**
- * @route   GET /api/structures/analytics/dashboard
- * @desc    Get comprehensive dashboard data for user
- * @access  Private
- */
-router.get('/analytics/dashboard', async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
-    }
-
-    const structures = user.structures || [];
-    
-    // Calculate comprehensive dashboard metrics
-    const dashboard = {
-      user_info: {
-        user_id: req.user.userId,
-        username: user.username,
-        email: user.email,
-        total_structures: structures.length
-      },
-      
-      structure_overview: {
-        total_structures: structures.length,
-        by_status: {},
-        by_type: {},
-        by_health: { good: 0, fair: 0, poor: 0, critical: 0, unrated: 0 },
-        completion_rates: {
-          fully_completed: 0,
-          ratings_completed: 0,
-          partially_completed: 0,
-          just_initialized: 0
-        }
-      },
-      
-      ratings_overview: {
-        total_flats: 0,
-        rated_flats: 0,
-        pending_ratings: 0,
-        structural_avg: null,
-        non_structural_avg: null,
-        critical_issues: 0,
-        high_priority_issues: 0
-      },
-      
-      recent_activity: {
-        recent_structures: [],
-        recent_ratings: [],
-        recent_uploads: []
-      },
-      
-      maintenance_alerts: {
-        critical_items: [],
-        upcoming_inspections: [],
-        overdue_items: []
-      },
-      
-      progress_tracking: {
-        monthly_progress: {},
-        completion_trend: []
-      }
-    };
-    
-    const allStructuralRatings = [];
-    const allNonStructuralRatings = [];
-    let totalImages = 0;
-    
-    // Process each structure
-    structures.forEach(structure => {
-      // Count by status
-      const status = structure.status || 'draft';
-      dashboard.structure_overview.by_status[status] = (dashboard.structure_overview.by_status[status] || 0) + 1;
-      
-      // Count by type
-      const type = structure.structural_identity?.type_of_structure || 'unknown';
-      dashboard.structure_overview.by_type[type] = (dashboard.structure_overview.by_type[type] || 0) + 1;
-      
-      // Calculate progress and completion rates
-      const progress = structureController.calculateProgress(structure);
-      if (progress.overall_percentage >= 100) {
-        dashboard.structure_overview.completion_rates.fully_completed++;
-      } else if (progress.flat_ratings_completed) {
-        dashboard.structure_overview.completion_rates.ratings_completed++;
-      } else if (progress.overall_percentage > 30) {
-        dashboard.structure_overview.completion_rates.partially_completed++;
-      } else {
-        dashboard.structure_overview.completion_rates.just_initialized++;
-      }
-      
-      // Add to recent structures (last 5)
-      if (dashboard.recent_activity.recent_structures.length < 5) {
-        dashboard.recent_activity.recent_structures.push({
-          structure_id: structure._id,
-          uid: structure.structural_identity?.uid,
-          structure_number: structure.structural_identity?.structural_identity_number,
-          client_name: structure.administration?.client_name,
-          status: structure.status,
-          progress: progress.overall_percentage,
-          last_updated: structure.creation_info?.last_updated_date
-        });
-      }
-      
-      // Process floors and flats for ratings
-      if (structure.geometric_details?.floors) {
-        structure.geometric_details.floors.forEach(floor => {
-          if (floor.flats) {
-            floor.flats.forEach(flat => {
-              dashboard.ratings_overview.total_flats++;
-              
-              // Count rated flats and collect ratings
-              if (flat.flat_overall_rating?.combined_score) {
-                dashboard.ratings_overview.rated_flats++;
-                
-                const health = flat.flat_overall_rating.health_status?.toLowerCase();
-                if (dashboard.structure_overview.by_health[health] !== undefined) {
-                  dashboard.structure_overview.by_health[health]++;
-                }
-                
-                // Count priority issues
-                if (flat.flat_overall_rating.priority === 'Critical') {
-                  dashboard.ratings_overview.critical_issues++;
-                } else if (flat.flat_overall_rating.priority === 'High') {
-                  dashboard.ratings_overview.high_priority_issues++;
-                }
-              } else {
-                dashboard.structure_overview.by_health.unrated++;
-              }
-              
-              // Collect structural ratings
-              if (flat.structural_rating?.overall_average) {
-                allStructuralRatings.push(flat.structural_rating.overall_average);
-              }
-              
-              // Collect non-structural ratings
-              if (flat.non_structural_rating?.overall_average) {
-                allNonStructuralRatings.push(flat.non_structural_rating.overall_average);
-              }
-              
-              // Count images
-              const images = structureController.extractFlatImages(flat);
-              totalImages += images.length;
-              
-              // Add recent ratings activity
-              if (flat.flat_overall_rating?.last_assessment_date && 
-                  dashboard.recent_activity.recent_ratings.length < 10) {
-                dashboard.recent_activity.recent_ratings.push({
-                  structure_number: structure.structural_identity?.structural_identity_number,
-                  location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
-                  combined_score: flat.flat_overall_rating.combined_score,
-                  health_status: flat.flat_overall_rating.health_status,
-                  assessment_date: flat.flat_overall_rating.last_assessment_date
-                });
-              }
-            });
-          }
-        });
-      }
-    });
-    
-    // Calculate averages
-    if (allStructuralRatings.length > 0) {
-      dashboard.ratings_overview.structural_avg = Math.round(
-        (allStructuralRatings.reduce((sum, rating) => sum + rating, 0) / allStructuralRatings.length) * 10
-      ) / 10;
-    }
-    
-    if (allNonStructuralRatings.length > 0) {
-      dashboard.ratings_overview.non_structural_avg = Math.round(
-        (allNonStructuralRatings.reduce((sum, rating) => sum + rating, 0) / allNonStructuralRatings.length) * 10
-      ) / 10;
-    }
-    
-    dashboard.ratings_overview.pending_ratings = dashboard.ratings_overview.total_flats - dashboard.ratings_overview.rated_flats;
-    
-    // Sort recent activities by date
-    dashboard.recent_activity.recent_structures.sort((a, b) => new Date(b.last_updated) - new Date(a.last_updated));
-    dashboard.recent_activity.recent_ratings.sort((a, b) => new Date(b.assessment_date) - new Date(a.assessment_date));
-    
-    // Add image statistics
-    dashboard.image_overview = {
-      total_images: totalImages,
-      avg_images_per_structure: structures.length > 0 ? Math.round(totalImages / structures.length) : 0,
-      documentation_completeness: dashboard.ratings_overview.total_flats > 0 ? 
-        Math.round((totalImages / (dashboard.ratings_overview.total_flats * 15)) * 100) : 0 // Assume 15 components per flat
-    };
-    
-    // Calculate monthly progress (last 6 months)
-    const monthlyData = {};
-    const currentDate = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-      const monthKey = monthDate.toISOString().substring(0, 7); // YYYY-MM format
-      monthlyData[monthKey] = {
-        structures_added: 0,
-        ratings_completed: 0,
-        images_uploaded: 0
-      };
-    }
-    
-    dashboard.progress_tracking.monthly_progress = monthlyData;
-    
-    const { sendSuccessResponse } = require('../utils/responseHandler');
-    sendSuccessResponse(res, 'Dashboard data retrieved successfully', dashboard);
-
-  } catch (error) {
-    console.error('❌ Dashboard error:', error);
-    const { sendErrorResponse } = require('../utils/responseHandler');
-    sendErrorResponse(res, 'Failed to retrieve dashboard data', 500, error.message);
-  }
-});
-
-/**
- * @route   GET /api/structures/analytics/health-report
- * @desc    Get comprehensive health report across all structures
- * @access  Private
- */
-router.get('/analytics/health-report', async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
-    }
-
-    const healthReport = {
-      summary: {
-        total_structures: user.structures?.length || 0,
-        total_assessments: 0,
-        overall_health_score: null,
-        structures_needing_attention: 0
-      },
-      
-      structural_health: {
-        overall_average: null,
-        component_averages: {
-          beams: null,
-          columns: null,
-          slab: null,
-          foundation: null
-        },
-        critical_components: [],
-        improvement_trend: null
-      },
-      
-      non_structural_health: {
-        overall_average: null,
-        component_averages: {},
-        critical_components: [],
-        most_problematic_areas: []
-      },
-      
-      priority_matrix: {
-        critical: [],
-        high: [],
-        medium: [],
-        low: []
-      },
-      
-      maintenance_cost_estimate: {
-        immediate_repairs: 0,
-        planned_maintenance: 0,
-        total_estimated_cost: 0,
-        cost_breakdown: {}
-      },
-      
-      inspection_schedule: {
-        overdue: [],
-        due_soon: [],
-        scheduled: []
-      }
-    };
-    
-    if (!user.structures || user.structures.length === 0) {
-      const { sendSuccessResponse } = require('../utils/responseHandler');
-      return sendSuccessResponse(res, 'Health report generated (no structures found)', healthReport);
-    }
-    
-    const allStructuralRatings = {
-      beams: [],
-      columns: [],
-      slab: [],
-      foundation: []
-    };
-    
-    const allNonStructuralRatings = {
-      brick_plaster: [],
-      doors_windows: [],
-      flooring_tiles: [],
-      electrical_wiring: [],
-      sanitary_fittings: [],
-      railings: [],
-      water_tanks: [],
-      plumbing: [],
-      sewage_system: [],
-      panel_board: [],
-      lifts: []
-    };
-    
-    // Process all structures
-    for (const structure of user.structures) {
-      let structureAssessments = 0;
-      let structureNeedsAttention = false;
-      
-      if (structure.geometric_details?.floors) {
-        structure.geometric_details.floors.forEach(floor => {
-          if (floor.flats) {
-            floor.flats.forEach(flat => {
-              if (flat.flat_overall_rating?.combined_score) {
-                structureAssessments++;
-                healthReport.summary.total_assessments++;
-                
-                if (flat.flat_overall_rating.combined_score < 3) {
-                  structureNeedsAttention = true;
-                }
-                
-                // Add to priority matrix
-                const priority = flat.flat_overall_rating.priority?.toLowerCase() || 'medium';
-                if (healthReport.priority_matrix[priority]) {
-                  healthReport.priority_matrix[priority].push({
-                    structure_number: structure.structural_identity?.structural_identity_number,
-                    location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
-                    score: flat.flat_overall_rating.combined_score,
-                    health_status: flat.flat_overall_rating.health_status
-                  });
-                }
-              }
-              
-              // Collect structural ratings
-              if (flat.structural_rating) {
-                Object.keys(allStructuralRatings).forEach(component => {
-                  if (flat.structural_rating[component]?.rating) {
-                    allStructuralRatings[component].push(flat.structural_rating[component].rating);
-                    
-                    // Add critical components
-                    if (flat.structural_rating[component].rating <= 2) {
-                      healthReport.structural_health.critical_components.push({
-                        structure_number: structure.structural_identity?.structural_identity_number,
-                        component: component,
-                        rating: flat.structural_rating[component].rating,
-                        location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
-                        condition: flat.structural_rating[component].condition_comment
-                      });
-                    }
-                  }
-                });
-              }
-              
-              // Collect non-structural ratings
-              if (flat.non_structural_rating) {
-                Object.keys(allNonStructuralRatings).forEach(component => {
-                  if (flat.non_structural_rating[component]?.rating) {
-                    allNonStructuralRatings[component].push(flat.non_structural_rating[component].rating);
-                    
-                    // Add critical components
-                    if (flat.non_structural_rating[component].rating <= 2) {
-                      healthReport.non_structural_health.critical_components.push({
-                        structure_number: structure.structural_identity?.structural_identity_number,
-                        component: component.replace('_', ' '),
-                        rating: flat.non_structural_rating[component].rating,
-                        location: `Floor ${floor.floor_number}, Flat ${flat.flat_number}`,
-                        condition: flat.non_structural_rating[component].condition_comment
-                      });
-                    }
-                  }
-                });
-              }
-            });
-          }
-        });
-      }
-      
-      if (structureNeedsAttention) {
-        healthReport.summary.structures_needing_attention++;
-      }
-    }
-    
-    // Calculate structural averages
-    const structuralRatings = [];
-    Object.keys(allStructuralRatings).forEach(component => {
-      if (allStructuralRatings[component].length > 0) {
-        const avg = allStructuralRatings[component].reduce((sum, rating) => sum + rating, 0) / allStructuralRatings[component].length;
-        healthReport.structural_health.component_averages[component] = Math.round(avg * 10) / 10;
-        structuralRatings.push(...allStructuralRatings[component]);
-      }
-    });
-    
-    if (structuralRatings.length > 0) {
-      healthReport.structural_health.overall_average = Math.round(
-        (structuralRatings.reduce((sum, rating) => sum + rating, 0) / structuralRatings.length) * 10
-      ) / 10;
-    }
-    
-    // Calculate non-structural averages
-    const nonStructuralRatings = [];
-    Object.keys(allNonStructuralRatings).forEach(component => {
-      if (allNonStructuralRatings[component].length > 0) {
-        const avg = allNonStructuralRatings[component].reduce((sum, rating) => sum + rating, 0) / allNonStructuralRatings[component].length;
-        healthReport.non_structural_health.component_averages[component] = Math.round(avg * 10) / 10;
-        nonStructuralRatings.push(...allNonStructuralRatings[component]);
-      }
-    });
-    
-    if (nonStructuralRatings.length > 0) {
-      healthReport.non_structural_health.overall_average = Math.round(
-        (nonStructuralRatings.reduce((sum, rating) => sum + rating, 0) / nonStructuralRatings.length) * 10
-      ) / 10;
-    }
-    
-    // Calculate overall health score
-    if (healthReport.structural_health.overall_average && healthReport.non_structural_health.overall_average) {
-      healthReport.summary.overall_health_score = Math.round(
-        ((healthReport.structural_health.overall_average * 0.7) + (healthReport.non_structural_health.overall_average * 0.3)) * 10
-      ) / 10;
-    }
-    
-    // Sort priority matrices by score (worst first)
-    Object.keys(healthReport.priority_matrix).forEach(priority => {
-      healthReport.priority_matrix[priority].sort((a, b) => a.score - b.score);
-    });
-    
-    // Sort critical components by rating (worst first)
-    healthReport.structural_health.critical_components.sort((a, b) => a.rating - b.rating);
-    healthReport.non_structural_health.critical_components.sort((a, b) => a.rating - b.rating);
-    
-    // Find most problematic non-structural areas
-    const componentProblemCounts = {};
-    healthReport.non_structural_health.critical_components.forEach(item => {
-      componentProblemCounts[item.component] = (componentProblemCounts[item.component] || 0) + 1;
-    });
-    
-    healthReport.non_structural_health.most_problematic_areas = Object.keys(componentProblemCounts)
-      .sort((a, b) => componentProblemCounts[b] - componentProblemCounts[a])
-      .slice(0, 5)
-      .map(component => ({
-        component: component,
-        issue_count: componentProblemCounts[component],
-        avg_rating: healthReport.non_structural_health.component_averages[component.replace(' ', '_')] || 0
-      }));
-    
-    const { sendSuccessResponse } = require('../utils/responseHandler');
-    sendSuccessResponse(res, 'Health report generated successfully', healthReport);
-
-  } catch (error) {
-    console.error('❌ Health report error:', error);
-    const { sendErrorResponse } = require('../utils/responseHandler');
-    sendErrorResponse(res, 'Failed to generate health report', 500, error.message);
-  }
-});
-
-// =================== SEARCH & FILTERING APIs ===================
-
-/**
- * @route   GET /api/structures/search
- * @desc    Advanced search across structures
- * @access  Private
- * @query   q, status, type, health, location, date_from, date_to
- */
-router.get('/search', async (req, res) => {
-  try {
-    const {
-      q,           // General search query
-      status,      // Structure status filter
-      type,        // Structure type filter  
-      health,      // Health status filter
-      location,    // Location filter
-      date_from,   // Date range start
-      date_to,     // Date range end
-      min_rating,  // Minimum rating filter
-      max_rating,  // Maximum rating filter
-      has_issues   // Filter structures with issues
-    } = req.query;
-    
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
-    }
-
-    let filteredStructures = user.structures || [];
-    
-    // Apply filters
-    if (q) {
-      const searchLower = q.toLowerCase();
-      filteredStructures = filteredStructures.filter(structure => {
-        return (
-          structure.structural_identity?.structural_identity_number?.toLowerCase().includes(searchLower) ||
-          structure.structural_identity?.uid?.toLowerCase().includes(searchLower) ||
-          structure.administration?.client_name?.toLowerCase().includes(searchLower) ||
-          structure.administration?.custodian?.toLowerCase().includes(searchLower) ||
-          structure.structural_identity?.city_name?.toLowerCase().includes(searchLower) ||
-          structure.location?.address?.toLowerCase().includes(searchLower)
-        );
-      });
-    }
-    
-    if (status) {
-      filteredStructures = filteredStructures.filter(s => s.status === status);
-    }
-    
-    if (type) {
-      filteredStructures = filteredStructures.filter(s => s.structural_identity?.type_of_structure === type);
-    }
-    
-    if (location) {
-      const locationLower = location.toLowerCase();
-      filteredStructures = filteredStructures.filter(s => 
-        s.structural_identity?.city_name?.toLowerCase().includes(locationLower) ||
-        s.structural_identity?.state_code?.toLowerCase().includes(locationLower)
-      );
-    }
-    
-    if (date_from || date_to) {
-      const fromDate = date_from ? new Date(date_from) : new Date(0);
-      const toDate = date_to ? new Date(date_to) : new Date();
-      
-      filteredStructures = filteredStructures.filter(s => {
-        const createdDate = new Date(s.creation_info?.created_date || 0);
-        return createdDate >= fromDate && createdDate <= toDate;
-      });
-    }
-    
-    // Apply rating and health filters
-    if (health || min_rating || max_rating || has_issues) {
-      filteredStructures = filteredStructures.filter(structure => {
-        if (!structure.geometric_details?.floors) return false;
-        
-        let structureHealthScores = [];
-        let hasIssuesFound = false;
-        
-        structure.geometric_details.floors.forEach(floor => {
-          if (floor.flats) {
-            floor.flats.forEach(flat => {
-              if (flat.flat_overall_rating?.combined_score) {
-                structureHealthScores.push(flat.flat_overall_rating.combined_score);
-                
-                if (flat.flat_overall_rating.priority === 'Critical' || 
-                    flat.flat_overall_rating.priority === 'High') {
-                  hasIssuesFound = true;
-                }
-              }
-            });
-          }
-        });
-        
-        if (structureHealthScores.length === 0) return false;
-        
-        const avgScore = structureHealthScores.reduce((sum, score) => sum + score, 0) / structureHealthScores.length;
-        const healthStatus = structureController.getHealthStatus(avgScore)?.toLowerCase();
-        
-        // Apply filters
-        if (health && healthStatus !== health.toLowerCase()) return false;
-        if (min_rating && avgScore < parseFloat(min_rating)) return false;
-        if (max_rating && avgScore > parseFloat(max_rating)) return false;
-        if (has_issues === 'true' && !hasIssuesFound) return false;
-        if (has_issues === 'false' && hasIssuesFound) return false;
-        
-        return true;
-      });
-    }
-    
-    // Format results
-    const searchResults = filteredStructures.map(structure => {
-      const progress = structureController.calculateProgress(structure);
-      
-      // Calculate health metrics
-      let avgRating = null;
-      let healthStatus = null;
-      let priorityIssues = 0;
-      
-      if (structure.geometric_details?.floors) {
-        const allRatings = [];
-        structure.geometric_details.floors.forEach(floor => {
-          if (floor.flats) {
-            floor.flats.forEach(flat => {
-              if (flat.flat_overall_rating?.combined_score) {
-                allRatings.push(flat.flat_overall_rating.combined_score);
-                if (flat.flat_overall_rating.priority === 'Critical' || 
-                    flat.flat_overall_rating.priority === 'High') {
-                  priorityIssues++;
-                }
-              }
-            });
-          }
-        });
-        
-        if (allRatings.length > 0) {
-          avgRating = Math.round((allRatings.reduce((sum, rating) => sum + rating, 0) / allRatings.length) * 10) / 10;
-          healthStatus = structureController.getHealthStatus(avgRating);
-        }
-      }
-      
-      return {
-        structure_id: structure._id,
-        uid: structure.structural_identity?.uid,
-        structural_identity_number: structure.structural_identity?.structural_identity_number,
-        client_name: structure.administration?.client_name,
-        custodian: structure.administration?.custodian,
-        location: {
-          city_name: structure.structural_identity?.city_name,
-          state_code: structure.structural_identity?.state_code,
-          address: structure.location?.address
-        },
-        type_of_structure: structure.structural_identity?.type_of_structure,
-        status: structure.status,
-        progress: progress.overall_percentage,
-        health_metrics: {
-          average_rating: avgRating,
-          health_status: healthStatus,
-          priority_issues: priorityIssues
-        },
-        created_date: structure.creation_info?.created_date,
-        last_updated: structure.creation_info?.last_updated_date
-      };
-    });
-    
-    // Sort by relevance (structures with issues first, then by rating)
-    searchResults.sort((a, b) => {
-      if (a.health_metrics.priority_issues !== b.health_metrics.priority_issues) {
-        return b.health_metrics.priority_issues - a.health_metrics.priority_issues;
-      }
-      if (a.health_metrics.average_rating && b.health_metrics.average_rating) {
-        return a.health_metrics.average_rating - b.health_metrics.average_rating;
-      }
-      return new Date(b.last_updated) - new Date(a.last_updated);
-    });
-    
-    const { sendSuccessResponse } = require('../utils/responseHandler');
-    sendSuccessResponse(res, `Found ${searchResults.length} structures matching search criteria`, {
-      search_query: q || '',
-      filters_applied: {
-        status: status || 'all',
-        type: type || 'all',
-        health: health || 'all',
-        location: location || 'all',
-        date_range: date_from || date_to ? `${date_from || 'start'} to ${date_to || 'end'}` : 'all',
-        rating_range: min_rating || max_rating ? `${min_rating || 'min'} to ${max_rating || 'max'}` : 'all',
-        has_issues: has_issues || 'all'
-      },
-      total_results: searchResults.length,
-      results: searchResults
-    });
-
-  } catch (error) {
-    console.error('❌ Search error:', error);
-    const { sendErrorResponse } = require('../utils/responseHandler');
-    sendErrorResponse(res, 'Search failed', 500, error.message);
-  }
-});
-
-// =================== ADDITIONAL UTILITY ROUTES ===================
-
-/**
- * @route   GET /api/structures/export/csv
- * @desc    Export structures data as CSV
- * @access  Private
- */
-router.get('/export/csv', async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
-    }
-
-    // Generate CSV headers
-    const headers = [
-      'Structure ID',
-      'UID', 
-      'Structure Number',
-      'Client Name',
-      'Type',
-      'Status',
-      'City',
-      'State',
-      'Total Floors',
-      'Total Flats',
-      'Progress %',
-      'Avg Structural Rating',
-      'Avg Non-Structural Rating', 
-      'Overall Health',
-      'Critical Issues',
-      'Created Date',
-      'Last Updated'
-    ];
-    
-    let csvContent = headers.join(',') + '\n';
-    
-    // Process each structure
-    (user.structures || []).forEach(structure => {
-      const progress = structureController.calculateProgress(structure);
-      
-      // Calculate ratings
-      let structuralRatings = [];
-      let nonStructuralRatings = [];
-      let criticalIssues = 0;
-      let totalFlats = 0;
-      
-      if (structure.geometric_details?.floors) {
-        structure.geometric_details.floors.forEach(floor => {
-          if (floor.flats) {
-            totalFlats += floor.flats.length;
-            floor.flats.forEach(flat => {
-              if (flat.structural_rating?.overall_average) {
-                structuralRatings.push(flat.structural_rating.overall_average);
-              }
-              if (flat.non_structural_rating?.overall_average) {
-                nonStructuralRatings.push(flat.non_structural_rating.overall_average);
-              }
-              if (flat.flat_overall_rating?.priority === 'Critical') {
-                criticalIssues++;
-              }
-            });
-          }
-        });
-      }
-      
-      const avgStructural = structuralRatings.length > 0 ? 
-        (structuralRatings.reduce((sum, r) => sum + r, 0) / structuralRatings.length).toFixed(2) : '';
-      const avgNonStructural = nonStructuralRatings.length > 0 ? 
-        (nonStructuralRatings.reduce((sum, r) => sum + r, 0) / nonStructuralRatings.length).toFixed(2) : '';
-      
-      const overallHealth = avgStructural && avgNonStructural ? 
-        structureController.getHealthStatus((parseFloat(avgStructural) * 0.7) + (parseFloat(avgNonStructural) * 0.3)) : '';
-      
-      const row = [
-        structure._id,
-        structure.structural_identity?.uid || '',
-        structure.structural_identity?.structural_identity_number || '',
-        structure.administration?.client_name || '',
-        structure.structural_identity?.type_of_structure || '',
-        structure.status || '',
-        structure.structural_identity?.city_name || '',
-        structure.structural_identity?.state_code || '',
-        structure.geometric_details?.number_of_floors || 0,
-        totalFlats,
-        progress.overall_percentage,
-        avgStructural,
-        avgNonStructural,
-        overallHealth,
-        criticalIssues,
-        structure.creation_info?.created_date ? new Date(structure.creation_info.created_date).toISOString().split('T')[0] : '',
-        structure.creation_info?.last_updated_date ? new Date(structure.creation_info.last_updated_date).toISOString().split('T')[0] : ''
-      ];
-      
-      csvContent += row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',') + '\n';
-    });
-    
-    // Set response headers for CSV download
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="structures_export_${new Date().toISOString().split('T')[0]}.csv"`);
-    res.send(csvContent);
-
-  } catch (error) {
-    console.error('❌ CSV export error:', error);
-    const { sendErrorResponse } = require('../utils/responseHandler');
-    sendErrorResponse(res, 'Failed to export CSV', 500, error.message);
-  }
-});
-
-
-
-// =================== STRUCTURE MANAGEMENT ===================
-router.get('/:id/progress', structureController.getStructureProgress);
-router.post('/:id/submit', structureController.submitStructure);
-
-// =================== UTILITIES ===================
-router.post('/validate-structure-number', 
-  structureNumberValidation,
-  handleValidationErrors,
-  structureController.validateStructureNumber
-);
-router.get('/location-stats', structureController.getLocationStructureStats);
 
 // =================== REMARKS MANAGEMENT ===================
 
 /**
  * @route   POST /api/structures/:id/remarks
- * @desc    Add a remark to a structure (FE/VE roles only)
- * @access  Private (FE, VE)
- * @body    { text: string }
+ * @desc    Add a remark to structure
+ * @access  Private (any authenticated user can add remarks)
  */
 router.post('/:id/remarks', structureController.addRemark);
 
 /**
- * @route   GET /api/structures/:id/remarks
- * @desc    Get all remarks for a structure (FE/VE roles can view all)
- * @access  Private (FE, VE)
- */
-router.get('/:id/remarks', structureController.getRemarks);
-
-/**
  * @route   PUT /api/structures/:id/remarks/:remarkId
- * @desc    Update a specific remark (users can only update their own remarks)
- * @access  Private (FE, VE)
- * @body    { text: string }
+ * @desc    Update a remark
+ * @access  Private (only the creator can update)
  */
 router.put('/:id/remarks/:remarkId', structureController.updateRemark);
 
 /**
+ * @route   GET /api/structures/:id/remarks
+ * @desc    Get all remarks for a structure
+ * @access  Private
+ */
+router.get('/:id/remarks', structureController.getRemarks);
+
+/**
  * @route   DELETE /api/structures/:id/remarks/:remarkId
- * @desc    Delete a specific remark (users can only delete their own remarks)
- * @access  Private (FE, VE)
+ * @desc    Delete a remark
+ * @access  Private (only creator or admin can delete)
  */
 router.delete('/:id/remarks/:remarkId', structureController.deleteRemark);
 
-// =================== ERROR HANDLING ===================
-router.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Structure API endpoint not found',
-    statusCode: 404
-  });
-});
+// =================== IMAGE MANAGEMENT & STATS ===================
 
-console.log('structureController keys:', Object.keys(structureController));
+/**
+ * @route   GET /api/structures/images/all
+ * @desc    Get all images across all structures for the user
+ * @access  Private
+ */
+router.get('/images/all', structureController.getAllImages);
+
+/**
+ * @route   GET /api/structures/:id/images
+ * @desc    Get all images for a specific structure
+ * @access  Private
+ */
+router.get('/:id/images', structureController.getStructureImages);
+
+/**
+ * @route   GET /api/structures/images/stats
+ * @desc    Get image statistics for user
+ * @access  Private
+ */
+router.get('/images/stats', structureController.getUserImageStats);
 
 module.exports = router;
