@@ -82,11 +82,11 @@ const industrialBlockSchema = {
   
   // BLOCK-LEVEL STRUCTURAL RATINGS (Array of instances)
   structural_rating: {
-    beams: [componentInstanceSchema],
-    columns: [componentInstanceSchema],
-    slab: [componentInstanceSchema],
-    foundation: [componentInstanceSchema],
-    roof_truss: [componentInstanceSchema],
+    beams:{ type: [componentInstanceSchema], default: undefined },
+    columns: { type: [componentInstanceSchema], default: undefined },
+    slab: { type: [componentInstanceSchema], default: undefined },
+    foundation: {type: [componentInstanceSchema], default: undefined},
+    roof_truss: {type: [componentInstanceSchema], default: undefined},
     
     overall_average: {
       type: Number,
@@ -105,14 +105,14 @@ const industrialBlockSchema = {
   
   // BLOCK-LEVEL NON-STRUCTURAL RATINGS (Array of instances)
   non_structural_rating: {
-    walls_cladding: [componentInstanceSchema],
-    industrial_flooring: [componentInstanceSchema],
-    ventilation: [componentInstanceSchema],
-    electrical_system: [componentInstanceSchema],
-    fire_safety: [componentInstanceSchema],
-    drainage: [componentInstanceSchema],
-    overhead_cranes: [componentInstanceSchema],
-    loading_docks: [componentInstanceSchema],
+    walls_cladding:{type: [componentInstanceSchema], default: undefined},
+    industrial_flooring: {type: [componentInstanceSchema], default: undefined},
+    ventilation:{type: [componentInstanceSchema], default: undefined},
+    electrical_system: {type: [componentInstanceSchema], default: undefined},
+    fire_safety: {type: [componentInstanceSchema], default: undefined},
+    drainage: {type: [componentInstanceSchema], default: undefined},
+    overhead_cranes: {type: [componentInstanceSchema], default: undefined},
+    loading_docks: {type: [componentInstanceSchema], default: undefined},
     
     overall_average: {
       type: Number,
@@ -190,10 +190,10 @@ const flatSchema = {
   
   // FLAT-LEVEL STRUCTURAL RATINGS (Array of instances)
   structural_rating: {
-    beams: [componentInstanceSchema],
-    columns: [componentInstanceSchema],
-    slab: [componentInstanceSchema],
-    foundation: [componentInstanceSchema],
+    beams: { type: [componentInstanceSchema], default: undefined },
+    columns: { type: [componentInstanceSchema], default: undefined },
+    slab: { type: [componentInstanceSchema], default: undefined },
+    foundation:{ type: [componentInstanceSchema], default: undefined },
     
     overall_average: {
       type: Number,
@@ -212,17 +212,17 @@ const flatSchema = {
   
   // FLAT-LEVEL NON-STRUCTURAL RATINGS (Array of instances)
   non_structural_rating: {
-    brick_plaster: [componentInstanceSchema],
-    doors_windows: [componentInstanceSchema],
-    flooring_tiles: [componentInstanceSchema],
-    electrical_wiring: [componentInstanceSchema],
-    sanitary_fittings: [componentInstanceSchema],
-    railings: [componentInstanceSchema],
-    water_tanks: [componentInstanceSchema],
-    plumbing: [componentInstanceSchema],
-    sewage_system: [componentInstanceSchema],
-    panel_board: [componentInstanceSchema],
-    lifts: [componentInstanceSchema],
+    brick_plaster: { type: [componentInstanceSchema], default: undefined },
+    doors_windows: { type: [componentInstanceSchema], default: undefined },
+    flooring_tiles:{ type: [componentInstanceSchema], default: undefined },
+    electrical_wiring: { type: [componentInstanceSchema], default: undefined },
+    sanitary_fittings: { type: [componentInstanceSchema], default: undefined },
+    railings: { type: [componentInstanceSchema], default: undefined },
+    water_tanks: { type: [componentInstanceSchema], default: undefined },
+    plumbing:{ type: [componentInstanceSchema], default: undefined },
+    sewage_system:{ type: [componentInstanceSchema], default: undefined },
+    panel_board:{ type: [componentInstanceSchema], default: undefined },
+    lifts: { type: [componentInstanceSchema], default: undefined },
     
     overall_average: {
       type: Number,
@@ -318,10 +318,10 @@ const floorSchema = {
   
   // FLOOR-LEVEL STRUCTURAL RATINGS (Array of instances) - For commercial/industrial
   structural_rating: {
-    beams: [componentInstanceSchema],
-    columns: [componentInstanceSchema],
-    slab: [componentInstanceSchema],
-    foundation: [componentInstanceSchema],
+    beams:{ type: [componentInstanceSchema], default: undefined },
+    columns: { type: [componentInstanceSchema], default: undefined },
+    slab: { type: [componentInstanceSchema], default: undefined },
+    foundation:{ type: [componentInstanceSchema], default: undefined },
     
     overall_average: {
       type: Number,
@@ -340,10 +340,10 @@ const floorSchema = {
   
   // FLOOR-LEVEL NON-STRUCTURAL RATINGS (Array of instances)
   non_structural_rating: {
-    walls: [componentInstanceSchema],
-    flooring: [componentInstanceSchema],
-    electrical_system: [componentInstanceSchema],
-    fire_safety: [componentInstanceSchema],
+    walls: { type: [componentInstanceSchema], default: undefined },
+    flooring: { type: [componentInstanceSchema], default: undefined },
+    electrical_system:{ type: [componentInstanceSchema], default: undefined },
+    fire_safety:{ type: [componentInstanceSchema], default: undefined },
     
     overall_average: {
       type: Number,

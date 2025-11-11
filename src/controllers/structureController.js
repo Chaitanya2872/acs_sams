@@ -885,76 +885,58 @@ async saveBlockRatings(req, res) {
   }
 
   // =================== FLATS MANAGEMENT ===================
-  async addFlatsToFloor(req, res) {
-    try {
-      const { id, floorId } = req.params;
-      const { flats } = req.body;
-      
-      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-      
-      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
-      }
-
-      const createdFlats = [];
-      
-      flats.forEach((flatData, index) => {
-        const flatId = this.generateFlatId();
-        const newFlat = {
-          flat_id: flatId,
-          flat_number: flatData.flat_number || `F${floor.floor_number}-${String(index + 1).padStart(2, '0')}`,
-          flat_type: flatData.flat_type || '2bhk',
-          area_sq_mts: flatData.area_sq_mts || null,
-          direction_facing: flatData.direction_facing || 'north',
-          occupancy_status: flatData.occupancy_status || 'occupied',
-          // Initialize empty rating structures
-          structural_rating: {
-            beams: { rating: null, condition_comment: '', photos: [] },
-            columns: { rating: null, condition_comment: '', photos: [] },
-            slab: { rating: null, condition_comment: '', photos: [] },
-            foundation: { rating: null, condition_comment: '', photos: [] }
-          },
-          non_structural_rating: {
-            brick_plaster: { rating: null, condition_comment: '', photos: [] },
-            doors_windows: { rating: null, condition_comment: '', photos: [] },
-            flooring_tiles: { rating: null, condition_comment: '', photos: [] },
-            electrical_wiring: { rating: null, condition_comment: '', photos: [] },
-            sanitary_fittings: { rating: null, condition_comment: '', photos: [] },
-            railings: { rating: null, condition_comment: '', photos: [] },
-            water_tanks: { rating: null, condition_comment: '', photos: [] },
-            plumbing: { rating: null, condition_comment: '', photos: [] },
-            sewage_system: { rating: null, condition_comment: '', photos: [] },
-            panel_board: { rating: null, condition_comment: '', photos: [] },
-            lifts: { rating: null, condition_comment: '', photos: [] }
-          },
-          flat_notes: flatData.flat_notes || ''
-        };
-        
-        floor.flats.push(newFlat);
-        createdFlats.push({
-          flat_id: flatId,
-          flat_number: newFlat.flat_number,
-          flat_type: newFlat.flat_type,
-          area_sq_mts: newFlat.area_sq_mts
-        });
-      });
-      
-      structure.creation_info.last_updated_date = new Date();
-      await user.save();
-      
-      sendCreatedResponse(res, {
-        structure_id: id,
-        floor_id: floorId,
-        flats_added: createdFlats.length,
-        flats: createdFlats
-      }, `${createdFlats.length} flat(s) added successfully`);
-
-    } catch (error) {
-      console.error('❌ Add flats error:', error);
-      sendErrorResponse(res, 'Failed to add flats', 500, error.message);
+async addFlatsToFloor(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const { flats } = req.body;
+    
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
     }
+
+    const createdFlats = [];
+    
+    flats.forEach((flatData, index) => {
+      const flatId = this.generateFlatId();
+      const newFlat = {
+        flat_id: flatId,
+        flat_number: flatData.flat_number || `F${floor.floor_number}-${String(index + 1).padStart(2, '0')}`,
+        flat_type: flatData.flat_type || '2bhk',
+        area_sq_mts: flatData.area_sq_mts || null,
+        direction_facing: flatData.direction_facing || 'north',
+        occupancy_status: flatData.occupancy_status || 'occupied',
+        flat_notes: flatData.flat_notes || ''
+        // ✅ REMOVED: Don't initialize rating structures!
+        // Let the schema handle it with default: undefined
+      };
+      
+      floor.flats.push(newFlat);
+      createdFlats.push({
+        flat_id: flatId,
+        flat_number: newFlat.flat_number,
+        flat_type: newFlat.flat_type,
+        area_sq_mts: newFlat.area_sq_mts
+      });
+    });
+    
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+    
+    sendCreatedResponse(res, {
+      structure_id: id,
+      floor_id: floorId,
+      flats_added: createdFlats.length,
+      flats: createdFlats
+    }, `${createdFlats.length} flat(s) added successfully`);
+
+  } catch (error) {
+    console.error('❌ Add flats error:', error);
+    sendErrorResponse(res, 'Failed to add flats', 500, error.message);
   }
+}
 
  async getFlatsInFloor(req, res) {
   try {
