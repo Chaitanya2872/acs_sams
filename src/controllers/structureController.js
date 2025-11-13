@@ -102,6 +102,16 @@ class StructureController {
     this.getRemarks = this.getRemarks.bind(this);
     this.deleteRemark = this.deleteRemark.bind(this);
     this.deleteStructure = this.deleteStructure.bind(this);
+
+this.submitForTesting = this.submitForTesting.bind(this);
+ this.startTesting = this.startTesting.bind(this);
+ this.completeTesting = this.completeTesting.bind(this);
+ this.startValidation = this.startValidation.bind(this);
+ this.completeValidation = this.completeValidation.bind(this);
+ this.approveStructure = this.approveStructure.bind(this);
+ this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
+ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
+ this.buildStatusDisplay = this.buildStatusDisplay.bind(this);
   }
 
   // =================== UTILITY METHODS ===================
@@ -1126,20 +1136,22 @@ async saveFlatCombinedRatings(req, res) {
     ) {
       const inspectionDate = new Date();
 
-      // ✅ FIXED: Structural ratings with component IDs and names
+      // ✅ FIXED: Create arrays of component instances
       if (structural_rating) {
         flat.structural_rating = {
-          beams: this.createRatingComponent(structural_rating.beams, inspectionDate, 'beams'),
-          columns: this.createRatingComponent(structural_rating.columns, inspectionDate, 'columns'),
-          slab: this.createRatingComponent(structural_rating.slab, inspectionDate, 'slab'),
-          foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate, 'foundation'),
+          // Wrap each component in an array
+          beams: structural_rating.beams ? [this.createRatingComponent(structural_rating.beams, inspectionDate, 'beams')].filter(Boolean) : [],
+          columns: structural_rating.columns ? [this.createRatingComponent(structural_rating.columns, inspectionDate, 'columns')].filter(Boolean) : [],
+          slab: structural_rating.slab ? [this.createRatingComponent(structural_rating.slab, inspectionDate, 'slab')].filter(Boolean) : [],
+          foundation: structural_rating.foundation ? [this.createRatingComponent(structural_rating.foundation, inspectionDate, 'foundation')].filter(Boolean) : [],
         };
 
+        // Calculate average from all components
         const ratings = [
-          flat.structural_rating.beams?.rating,
-          flat.structural_rating.columns?.rating,
-          flat.structural_rating.slab?.rating,
-          flat.structural_rating.foundation?.rating
+          structural_rating.beams?.rating,
+          structural_rating.columns?.rating,
+          structural_rating.slab?.rating,
+          structural_rating.foundation?.rating
         ].filter(r => r);
 
         if (ratings.length > 0) {
@@ -1149,34 +1161,34 @@ async saveFlatCombinedRatings(req, res) {
         }
       }
 
-      // ✅ FIXED: Non-structural ratings with component IDs and names
+      // ✅ FIXED: Create arrays of component instances
       if (non_structural_rating) {
         flat.non_structural_rating = {
-          brick_plaster: this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate, 'brick_plaster'),
-          doors_windows: this.createRatingComponent(non_structural_rating.doors_windows, inspectionDate, 'doors_windows'),
-          flooring_tiles: this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate, 'flooring_tiles'),
-          electrical_wiring: this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate, 'electrical_wiring'),
-          sanitary_fittings: this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate, 'sanitary_fittings'),
-          railings: this.createRatingComponent(non_structural_rating.railings, inspectionDate, 'railings'),
-          water_tanks: this.createRatingComponent(non_structural_rating.water_tanks, inspectionDate, 'water_tanks'),
-          plumbing: this.createRatingComponent(non_structural_rating.plumbing, inspectionDate, 'plumbing'),
-          sewage_system: this.createRatingComponent(non_structural_rating.sewage_system, inspectionDate, 'sewage_system'),
-          panel_board: this.createRatingComponent(non_structural_rating.panel_board, inspectionDate, 'panel_board'),
-          lifts: this.createRatingComponent(non_structural_rating.lifts, inspectionDate, 'lifts')
+          brick_plaster: non_structural_rating.brick_plaster ? [this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate, 'brick_plaster')].filter(Boolean) : [],
+          doors_windows: non_structural_rating.doors_windows ? [this.createRatingComponent(non_structural_rating.doors_windows, inspectionDate, 'doors_windows')].filter(Boolean) : [],
+          flooring_tiles: non_structural_rating.flooring_tiles ? [this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate, 'flooring_tiles')].filter(Boolean) : [],
+          electrical_wiring: non_structural_rating.electrical_wiring ? [this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate, 'electrical_wiring')].filter(Boolean) : [],
+          sanitary_fittings: non_structural_rating.sanitary_fittings ? [this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate, 'sanitary_fittings')].filter(Boolean) : [],
+          railings: non_structural_rating.railings ? [this.createRatingComponent(non_structural_rating.railings, inspectionDate, 'railings')].filter(Boolean) : [],
+          water_tanks: non_structural_rating.water_tanks ? [this.createRatingComponent(non_structural_rating.water_tanks, inspectionDate, 'water_tanks')].filter(Boolean) : [],
+          plumbing: non_structural_rating.plumbing ? [this.createRatingComponent(non_structural_rating.plumbing, inspectionDate, 'plumbing')].filter(Boolean) : [],
+          sewage_system: non_structural_rating.sewage_system ? [this.createRatingComponent(non_structural_rating.sewage_system, inspectionDate, 'sewage_system')].filter(Boolean) : [],
+          panel_board: non_structural_rating.panel_board ? [this.createRatingComponent(non_structural_rating.panel_board, inspectionDate, 'panel_board')].filter(Boolean) : [],
+          lifts: non_structural_rating.lifts ? [this.createRatingComponent(non_structural_rating.lifts, inspectionDate, 'lifts')].filter(Boolean) : []
         };
 
         const ratings = [
-          flat.non_structural_rating.brick_plaster?.rating,
-          flat.non_structural_rating.doors_windows?.rating,
-          flat.non_structural_rating.flooring_tiles?.rating,
-          flat.non_structural_rating.electrical_wiring?.rating,
-          flat.non_structural_rating.sanitary_fittings?.rating,
-          flat.non_structural_rating.railings?.rating,
-          flat.non_structural_rating.water_tanks?.rating,
-          flat.non_structural_rating.plumbing?.rating,
-          flat.non_structural_rating.sewage_system?.rating,
-          flat.non_structural_rating.panel_board?.rating,
-          flat.non_structural_rating.lifts?.rating
+          non_structural_rating.brick_plaster?.rating,
+          non_structural_rating.doors_windows?.rating,
+          non_structural_rating.flooring_tiles?.rating,
+          non_structural_rating.electrical_wiring?.rating,
+          non_structural_rating.sanitary_fittings?.rating,
+          non_structural_rating.railings?.rating,
+          non_structural_rating.water_tanks?.rating,
+          non_structural_rating.plumbing?.rating,
+          non_structural_rating.sewage_system?.rating,
+          non_structural_rating.panel_board?.rating,
+          non_structural_rating.lifts?.rating
         ].filter(r => r);
 
         if (ratings.length > 0) {
@@ -1224,7 +1236,7 @@ async saveFlatCombinedRatings(req, res) {
 }
 
 
-  async getFlatCombinedRatings(req, res) {
+async getFlatCombinedRatings(req, res) {
   try {
     const { id, floorId, flatId } = req.params;
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
@@ -1239,15 +1251,147 @@ async saveFlatCombinedRatings(req, res) {
       return sendErrorResponse(res, 'Flat not found', 404);
     }
     
+    // ✅ Helper function to convert array format to single object (backward compatible)
+    const convertArrayToSingle = (componentArray) => {
+      if (!componentArray || !Array.isArray(componentArray) || componentArray.length === 0) {
+        return { rating: null, condition_comment: '', photo: '', inspection_date: null };
+      }
+      // Return first item for backward compatibility
+      const component = componentArray[0];
+      return {
+        rating: component.rating || null,
+        condition_comment: component.condition_comment || '',
+        photo: component.photo || '',
+        photos: [component.photo].filter(Boolean),
+        inspection_date: component.inspection_date || null,
+        inspector_notes: component.inspector_notes || '',
+        _id: component._id,
+        name: component.name
+      };
+    };
+    
+    // Convert structural ratings
+    const structuralRating = {
+      beams: convertArrayToSingle(flat.structural_rating?.beams),
+      columns: convertArrayToSingle(flat.structural_rating?.columns),
+      slab: convertArrayToSingle(flat.structural_rating?.slab),
+      foundation: convertArrayToSingle(flat.structural_rating?.foundation),
+      overall_average: flat.structural_rating?.overall_average || null,
+      health_status: flat.structural_rating?.health_status || null,
+      assessment_date: flat.structural_rating?.assessment_date || null
+    };
+    
+    // Convert non-structural ratings
+    const nonStructuralRating = {
+      brick_plaster: convertArrayToSingle(flat.non_structural_rating?.brick_plaster),
+      doors_windows: convertArrayToSingle(flat.non_structural_rating?.doors_windows),
+      flooring_tiles: convertArrayToSingle(flat.non_structural_rating?.flooring_tiles),
+      electrical_wiring: convertArrayToSingle(flat.non_structural_rating?.electrical_wiring),
+      sanitary_fittings: convertArrayToSingle(flat.non_structural_rating?.sanitary_fittings),
+      railings: convertArrayToSingle(flat.non_structural_rating?.railings),
+      water_tanks: convertArrayToSingle(flat.non_structural_rating?.water_tanks),
+      plumbing: convertArrayToSingle(flat.non_structural_rating?.plumbing),
+      sewage_system: convertArrayToSingle(flat.non_structural_rating?.sewage_system),
+      panel_board: convertArrayToSingle(flat.non_structural_rating?.panel_board),
+      lifts: convertArrayToSingle(flat.non_structural_rating?.lifts),
+      overall_average: flat.non_structural_rating?.overall_average || null,
+      assessment_date: flat.non_structural_rating?.assessment_date || null
+    };
+    
     sendSuccessResponse(res, 'Flat ratings retrieved successfully', {
-      structural_rating: flat.structural_rating || this.getDefaultStructuralRating(),
-      non_structural_rating: flat.non_structural_rating || this.getDefaultNonStructuralRating()
+      structural_rating: structuralRating,
+      non_structural_rating: nonStructuralRating,
+      flat_overall_rating: flat.flat_overall_rating || null
     });
 
   } catch (error) {
     console.error('❌ Get flat combined ratings error:', error);
     sendErrorResponse(res, 'Failed to get flat ratings', 500, error.message);
   }
+}
+
+// =================== HELPER METHOD ===================
+// ✅ Updated to handle optional fields
+createRatingComponent(ratingData, inspectionDate, componentName) {
+  // Validate input - return null if no rating provided
+  if (!ratingData || !ratingData.rating) {
+    console.log(`⚠️  No rating data provided for component: ${componentName}`);
+    return null;
+  }
+
+  // Validate rating value
+  const rating = parseInt(ratingData.rating);
+  if (isNaN(rating) || rating < 1 || rating > 5) {
+    console.error(`❌ Invalid rating value for ${componentName}: ${ratingData.rating}`);
+    return null;
+  }
+
+  // ✅ Generate component ID if not provided
+  let componentId;
+  if (ratingData.component_id && ratingData.component_id.trim() !== '') {
+    componentId = ratingData.component_id.trim().substring(0, 100);
+  } else {
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substr(2, 9);
+    componentId = `${componentName}_${timestamp}_${randomString}`;
+  }
+
+  // ✅ Generate display name if not provided
+  let displayName;
+  if (ratingData.component_name && ratingData.component_name.trim() !== '') {
+    displayName = ratingData.component_name.trim().substring(0, 100);
+  } else if (ratingData.name && ratingData.name.trim() !== '') {
+    displayName = ratingData.name.trim().substring(0, 100);
+  } else {
+    displayName = componentName
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  // ✅ Process photos (optional now)
+  let photos = [];
+  if (Array.isArray(ratingData.photos)) {
+    photos = ratingData.photos
+      .filter(photo => photo && typeof photo === 'string' && photo.trim() !== '')
+      .map(photo => photo.trim())
+      .slice(0, 50);
+  }
+
+  // ✅ Get photo string (backward compatibility with single photo field)
+  let photoUrl = '';
+  if (ratingData.photo && typeof ratingData.photo === 'string') {
+    photoUrl = ratingData.photo.trim();
+  } else if (photos.length > 0) {
+    photoUrl = photos[0];
+  }
+
+  const conditionComment = ratingData.condition_comment 
+    ? ratingData.condition_comment.trim().substring(0, 1000) 
+    : '';
+
+  const inspectorNotes = ratingData.inspector_notes 
+    ? ratingData.inspector_notes.trim().substring(0, 2000) 
+    : '';
+
+  // ✅ Create the rating component object
+  const ratingComponent = {
+    _id: componentId,
+    name: displayName,
+    rating: rating,
+    photo: photoUrl,  // Can be empty string now
+    condition_comment: conditionComment,
+    inspection_date: inspectionDate || new Date(),
+    inspector_notes: inspectorNotes
+  };
+
+  console.log(`✅ Created rating component for ${componentName}:`, {
+    _id: componentId,
+    name: displayName,
+    rating: rating,
+    has_photo: !!photoUrl
+  });
+
+  return ratingComponent;
 }
 
   async updateFlatCombinedRatings(req, res) {
@@ -2524,6 +2668,10 @@ generateBlockId() {
  * Get all structures for the authenticated user
  * @route GET /api/structures
  */
+/**
+ * Enhanced getAllStructures with workflow information
+ * Replace the existing getAllStructures method in structureController.js
+ */
 async getAllStructures(req, res) {
   try {
     console.log('📋 Getting all structures for user:', req.user.userId);
@@ -2618,7 +2766,7 @@ async getAllStructures(req, res) {
           aValue = a.administration?.client_name || '';
           bValue = b.administration?.client_name || '';
           break;
-        case 'owner': // New sort option for privileged users
+        case 'owner':
           if (isPrivileged) {
             aValue = a._ownerUsername || '';
             bValue = b._ownerUsername || '';
@@ -2642,7 +2790,7 @@ async getAllStructures(req, res) {
     const endIndex = startIndex + limit;
     const paginatedStructures = structures.slice(startIndex, endIndex);
     
-    // Format response data
+    // Format response data WITH WORKFLOW INFORMATION
     const structuresData = paginatedStructures.map(structure => {
       const progress = this.calculateProgress(structure);
       const totalFlats = structure.geometric_details?.floors?.reduce(
@@ -2682,6 +2830,61 @@ async getAllStructures(req, res) {
         }
       }
       
+      // ✅ BUILD WORKFLOW STATUS DISPLAY
+      const workflow = structure.workflow || {};
+      let statusDisplay = structure.status;
+      let workflowInfo = {};
+      
+      if (workflow.submitted_by) {
+        workflowInfo.submitted_by = {
+          name: workflow.submitted_by.name,
+          role: workflow.submitted_by.role,
+          date: workflow.submitted_by.date,
+          display: `Submitted by ${workflow.submitted_by.name} (${workflow.submitted_by.role})`
+        };
+      }
+      
+      if (workflow.tested_by) {
+        workflowInfo.tested_by = {
+          name: workflow.tested_by.name,
+          role: workflow.tested_by.role,
+          date: workflow.tested_by.date,
+          display: `Tested by ${workflow.tested_by.name} (${workflow.tested_by.role})`,
+          notes: workflow.tested_by.test_notes
+        };
+      }
+      
+      if (workflow.validated_by) {
+        workflowInfo.validated_by = {
+          name: workflow.validated_by.name,
+          role: workflow.validated_by.role,
+          date: workflow.validated_by.date,
+          display: `Validated by ${workflow.validated_by.name} (${workflow.validated_by.role})`,
+          notes: workflow.validated_by.validation_notes
+        };
+      }
+      
+      if (workflow.approved_by) {
+        workflowInfo.approved_by = {
+          name: workflow.approved_by.name,
+          role: workflow.approved_by.role,
+          date: workflow.approved_by.date,
+          display: `Approved by ${workflow.approved_by.name} (${workflow.approved_by.role})`,
+          notes: workflow.approved_by.approval_notes
+        };
+      }
+      
+      if (workflow.rejected_by) {
+        workflowInfo.rejected_by = {
+          name: workflow.rejected_by.name,
+          role: workflow.rejected_by.role,
+          date: workflow.rejected_by.date,
+          display: `Rejected by ${workflow.rejected_by.name} (${workflow.rejected_by.role})`,
+          reason: workflow.rejected_by.rejection_reason,
+          stage: workflow.rejected_by.rejection_stage
+        };
+      }
+      
       const structureData = {
         structure_id: structure._id,
         uid: structure.structural_identity?.uid,
@@ -2701,6 +2904,13 @@ async getAllStructures(req, res) {
         },
         status: structure.status,
         progress: progress,
+        
+        // ✅ WORKFLOW INFORMATION FOR DISPLAY
+        workflow: workflowInfo,
+        
+        // Helper for frontend to quickly display status
+        status_display: this.buildStatusDisplay(structure.status, workflowInfo),
+        
         ratings_summary: {
           total_flats: totalFlats,
           rated_flats: ratedFlats,
@@ -2734,6 +2944,39 @@ async getAllStructures(req, res) {
     sendErrorResponse(res, 'Failed to retrieve structures', 500, error.message);
   }
 }
+
+/**
+ * Helper: Build human-readable status display
+ * This creates a summary like: "Status: Tested | Submitted by John (FE) | Tested by Sarah (TE)"
+ */
+buildStatusDisplay(status, workflowInfo) {
+  const parts = [];
+  
+  // Add current status
+  parts.push(`Status: ${status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}`);
+  
+  // Add workflow stages
+  if (workflowInfo.submitted_by) {
+    parts.push(workflowInfo.submitted_by.display);
+  }
+  if (workflowInfo.tested_by) {
+    parts.push(workflowInfo.tested_by.display);
+  }
+  if (workflowInfo.validated_by) {
+    parts.push(workflowInfo.validated_by.display);
+  }
+  if (workflowInfo.approved_by) {
+    parts.push(workflowInfo.approved_by.display);
+  }
+  if (workflowInfo.rejected_by) {
+    parts.push(workflowInfo.rejected_by.display);
+  }
+  
+  return parts.join(' | ');
+}
+
+// Don't forget to bind this in the constructor:
+// this.buildStatusDisplay = this.buildStatusDisplay.bind(this);
 
 /**
  * Get complete structure details by ID
@@ -5174,6 +5417,516 @@ calculateBlockCombinedRating(block) {
     };
   }
 }
+
+// Add these methods to your StructureController class in structureController.js
+
+// =================== WORKFLOW STATUS METHODS ===================
+
+/**
+ * Submit structure for testing (FE only)
+ * @route POST /api/structures/:id/submit-for-testing
+ * @access Private (FE only)
+ */
+async submitForTesting(req, res) {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+    
+    // Only FE can submit
+    if (!this.hasRoleFromRequest(req, 'FE')) {
+      return sendErrorResponse(res, 'Only Field Engineers can submit structures for testing', 403);
+    }
+    
+    const { user: structureOwner, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // Check if structure is complete enough to submit
+    const progress = this.calculateProgress(structure);
+    if (progress.overall_percentage < 100) {
+      return sendErrorResponse(res, `Structure is only ${progress.overall_percentage}% complete. Complete all sections before submitting.`, 400);
+    }
+    
+    // Update status and workflow
+    structure.status = 'submitted';
+    structure.workflow = structure.workflow || {};
+    structure.workflow.submitted_by = {
+      user_id: user._id,
+      name: this.getUserFullName(user),
+      email: user.email,
+      role: 'FE',
+      date: new Date()
+    };
+    
+    if (notes) {
+      structure.general_notes = notes;
+    }
+    
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+    
+    console.log(`✅ Structure ${id} submitted for testing by ${user.username}`);
+    
+    sendSuccessResponse(res, 'Structure submitted for testing successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      status: structure.status,
+      submitted_by: structure.workflow.submitted_by,
+      submitted_at: structure.workflow.submitted_by.date
+    });
+    
+  } catch (error) {
+    console.error('❌ Submit for testing error:', error);
+    sendErrorResponse(res, 'Failed to submit structure for testing', 500, error.message);
+  }
+}
+
+/**
+ * Start testing a structure (TE only)
+ * @route POST /api/structures/:id/start-testing
+ * @access Private (TE only)
+ */
+async startTesting(req, res) {
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+    
+    // Only TE can start testing
+    if (!this.hasRoleFromRequest(req, 'TE')) {
+      return sendErrorResponse(res, 'Only Test Engineers can start testing', 403);
+    }
+    
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    
+    // Check if structure is in submitted status
+    if (structure.status !== 'submitted') {
+      return sendErrorResponse(res, `Structure must be in 'submitted' status to start testing. Current status: ${structure.status}`, 400);
+    }
+    
+    // Update status
+    structure.status = 'under_testing';
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+    
+    console.log(`✅ TE ${user.username} started testing structure ${id}`);
+    
+    sendSuccessResponse(res, 'Testing started successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      status: structure.status,
+      testing_started_by: this.getUserFullName(user)
+    });
+    
+  } catch (error) {
+    console.error('❌ Start testing error:', error);
+    sendErrorResponse(res, 'Failed to start testing', 500, error.message);
+  }
+}
+
+/**
+ * Complete testing and mark as tested (TE only)
+ * @route POST /api/structures/:id/complete-testing
+ * @access Private (TE only)
+ */
+async completeTesting(req, res) {
+  try {
+    const { id } = req.params;
+    const { test_notes, status } = req.body; // status can be 'tested' or 'rejected'
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+    
+    // Only TE can complete testing
+    if (!this.hasRoleFromRequest(req, 'TE')) {
+      return sendErrorResponse(res, 'Only Test Engineers can complete testing', 403);
+    }
+    
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    
+    // Check if structure is under testing
+    if (structure.status !== 'under_testing' && structure.status !== 'submitted') {
+      return sendErrorResponse(res, `Structure must be under testing. Current status: ${structure.status}`, 400);
+    }
+    
+    structure.workflow = structure.workflow || {};
+    
+    if (status === 'rejected') {
+      // Reject the structure
+      if (!req.body.rejection_reason) {
+        return sendErrorResponse(res, 'Rejection reason is required', 400);
+      }
+      
+      structure.status = 'rejected';
+      structure.workflow.rejected_by = {
+        user_id: user._id,
+        name: this.getUserFullName(user),
+        email: user.email,
+        role: 'TE',
+        date: new Date(),
+        rejection_reason: req.body.rejection_reason,
+        rejection_stage: 'testing'
+      };
+      
+      console.log(`❌ Structure ${id} rejected by TE ${user.username}`);
+    } else {
+      // Mark as tested and ready for validation
+      structure.status = 'tested';
+      structure.workflow.tested_by = {
+        user_id: user._id,
+        name: this.getUserFullName(user),
+        email: user.email,
+        role: 'TE',
+        date: new Date(),
+        test_notes: test_notes || ''
+      };
+      
+      console.log(`✅ Structure ${id} marked as tested by TE ${user.username}`);
+    }
+    
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+    
+    sendSuccessResponse(res, status === 'rejected' ? 'Structure rejected' : 'Testing completed successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      status: structure.status,
+      tested_by: structure.workflow.tested_by,
+      rejected_by: structure.workflow.rejected_by
+    });
+    
+  } catch (error) {
+    console.error('❌ Complete testing error:', error);
+    sendErrorResponse(res, 'Failed to complete testing', 500, error.message);
+  }
+}
+
+/**
+ * Start validation (VE only)
+ * @route POST /api/structures/:id/start-validation
+ * @access Private (VE only)
+ */
+async startValidation(req, res) {
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+    
+    // Only VE can start validation
+    if (!this.hasRoleFromRequest(req, 'VE')) {
+      return sendErrorResponse(res, 'Only Verification Engineers can start validation', 403);
+    }
+    
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    
+    // Check if structure is tested
+    if (structure.status !== 'tested') {
+      return sendErrorResponse(res, `Structure must be tested before validation. Current status: ${structure.status}`, 400);
+    }
+    
+    structure.status = 'under_validation';
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+    
+    console.log(`✅ VE ${user.username} started validating structure ${id}`);
+    
+    sendSuccessResponse(res, 'Validation started successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      status: structure.status
+    });
+    
+  } catch (error) {
+    console.error('❌ Start validation error:', error);
+    sendErrorResponse(res, 'Failed to start validation', 500, error.message);
+  }
+}
+
+/**
+ * Complete validation (VE only)
+ * @route POST /api/structures/:id/complete-validation
+ * @access Private (VE only)
+ */
+async completeValidation(req, res) {
+  try {
+    const { id } = req.params;
+    const { validation_notes, status } = req.body;
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+    
+    // Only VE can complete validation
+    if (!this.hasRoleFromRequest(req, 'VE')) {
+      return sendErrorResponse(res, 'Only Verification Engineers can complete validation', 403);
+    }
+    
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    
+    if (structure.status !== 'under_validation' && structure.status !== 'tested') {
+      return sendErrorResponse(res, `Structure must be under validation. Current status: ${structure.status}`, 400);
+    }
+    
+    structure.workflow = structure.workflow || {};
+    
+    if (status === 'rejected') {
+      if (!req.body.rejection_reason) {
+        return sendErrorResponse(res, 'Rejection reason is required', 400);
+      }
+      
+      structure.status = 'rejected';
+      structure.workflow.rejected_by = {
+        user_id: user._id,
+        name: this.getUserFullName(user),
+        email: user.email,
+        role: 'VE',
+        date: new Date(),
+        rejection_reason: req.body.rejection_reason,
+        rejection_stage: 'validation'
+      };
+      
+      console.log(`❌ Structure ${id} rejected by VE ${user.username}`);
+    } else {
+      structure.status = 'validated';
+      structure.workflow.validated_by = {
+        user_id: user._id,
+        name: this.getUserFullName(user),
+        email: user.email,
+        role: 'VE',
+        date: new Date(),
+        validation_notes: validation_notes || ''
+      };
+      
+      console.log(`✅ Structure ${id} validated by VE ${user.username}`);
+    }
+    
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+    
+    sendSuccessResponse(res, status === 'rejected' ? 'Structure rejected' : 'Validation completed successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      status: structure.status,
+      validated_by: structure.workflow.validated_by,
+      rejected_by: structure.workflow.rejected_by
+    });
+    
+  } catch (error) {
+    console.error('❌ Complete validation error:', error);
+    sendErrorResponse(res, 'Failed to complete validation', 500, error.message);
+  }
+}
+
+/**
+ * Approve structure (AD only)
+ * @route POST /api/structures/:id/approve
+ * @access Private (AD only)
+ */
+async approveStructure(req, res) {
+  try {
+    const { id } = req.params;
+    const { approval_notes, status } = req.body;
+    
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+    
+    // Only AD can approve
+    if (!this.hasRoleFromRequest(req, 'AD')) {
+      return sendErrorResponse(res, 'Only Administrators can approve structures', 403);
+    }
+    
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    
+    if (structure.status !== 'validated') {
+      return sendErrorResponse(res, `Structure must be validated before approval. Current status: ${structure.status}`, 400);
+    }
+    
+    structure.workflow = structure.workflow || {};
+    
+    if (status === 'rejected') {
+      if (!req.body.rejection_reason) {
+        return sendErrorResponse(res, 'Rejection reason is required', 400);
+      }
+      
+      structure.status = 'rejected';
+      structure.workflow.rejected_by = {
+        user_id: user._id,
+        name: this.getUserFullName(user),
+        email: user.email,
+        role: 'AD',
+        date: new Date(),
+        rejection_reason: req.body.rejection_reason,
+        rejection_stage: 'approval'
+      };
+      
+      console.log(`❌ Structure ${id} rejected by AD ${user.username}`);
+    } else {
+      structure.status = 'approved';
+      structure.workflow.approved_by = {
+        user_id: user._id,
+        name: this.getUserFullName(user),
+        email: user.email,
+        role: 'AD',
+        date: new Date(),
+        approval_notes: approval_notes || ''
+      };
+      
+      console.log(`✅ Structure ${id} approved by AD ${user.username}`);
+    }
+    
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+    
+    sendSuccessResponse(res, status === 'rejected' ? 'Structure rejected' : 'Structure approved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      status: structure.status,
+      approved_by: structure.workflow.approved_by,
+      rejected_by: structure.workflow.rejected_by
+    });
+    
+  } catch (error) {
+    console.error('❌ Approve structure error:', error);
+    sendErrorResponse(res, 'Failed to approve structure', 500, error.message);
+  }
+}
+
+/**
+ * Get workflow history for a structure
+ * @route GET /api/structures/:id/workflow
+ * @access Private (All authenticated users)
+ */
+async getWorkflowHistory(req, res) {
+  try {
+    const { id } = req.params;
+    
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    
+    const workflow = structure.workflow || {};
+    
+    sendSuccessResponse(res, 'Workflow history retrieved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      current_status: structure.status,
+      workflow: {
+        submitted: workflow.submitted_by || null,
+        tested: workflow.tested_by || null,
+        validated: workflow.validated_by || null,
+        approved: workflow.approved_by || null,
+        rejected: workflow.rejected_by || null
+      },
+      timeline: this.buildWorkflowTimeline(workflow, structure.status)
+    });
+    
+  } catch (error) {
+    console.error('❌ Get workflow history error:', error);
+    sendErrorResponse(res, 'Failed to retrieve workflow history', 500, error.message);
+  }
+}
+
+/**
+ * Helper: Build workflow timeline
+ */
+buildWorkflowTimeline(workflow, currentStatus) {
+  const timeline = [];
+  
+  if (workflow.submitted_by) {
+    timeline.push({
+      stage: 'Submitted',
+      user: workflow.submitted_by.name,
+      role: workflow.submitted_by.role,
+      date: workflow.submitted_by.date,
+      status: 'completed'
+    });
+  }
+  
+  if (workflow.tested_by) {
+    timeline.push({
+      stage: 'Tested',
+      user: workflow.tested_by.name,
+      role: workflow.tested_by.role,
+      date: workflow.tested_by.date,
+      notes: workflow.tested_by.test_notes,
+      status: 'completed'
+    });
+  }
+  
+  if (workflow.validated_by) {
+    timeline.push({
+      stage: 'Validated',
+      user: workflow.validated_by.name,
+      role: workflow.validated_by.role,
+      date: workflow.validated_by.date,
+      notes: workflow.validated_by.validation_notes,
+      status: 'completed'
+    });
+  }
+  
+  if (workflow.approved_by) {
+    timeline.push({
+      stage: 'Approved',
+      user: workflow.approved_by.name,
+      role: workflow.approved_by.role,
+      date: workflow.approved_by.date,
+      notes: workflow.approved_by.approval_notes,
+      status: 'completed'
+    });
+  }
+  
+  if (workflow.rejected_by) {
+    timeline.push({
+      stage: 'Rejected',
+      user: workflow.rejected_by.name,
+      role: workflow.rejected_by.role,
+      date: workflow.rejected_by.date,
+      reason: workflow.rejected_by.rejection_reason,
+      rejection_stage: workflow.rejected_by.rejection_stage,
+      status: 'rejected'
+    });
+  }
+  
+  // Add current pending stage
+  if (currentStatus === 'submitted') {
+    timeline.push({ stage: 'Testing', status: 'pending' });
+  } else if (currentStatus === 'under_testing') {
+    timeline.push({ stage: 'Testing', status: 'in_progress' });
+  } else if (currentStatus === 'tested') {
+    timeline.push({ stage: 'Validation', status: 'pending' });
+  } else if (currentStatus === 'under_validation') {
+    timeline.push({ stage: 'Validation', status: 'in_progress' });
+  } else if (currentStatus === 'validated') {
+    timeline.push({ stage: 'Approval', status: 'pending' });
+  }
+  
+  return timeline;
+}
+
+// Don't forget to bind these in the constructor!
+// Add to constructor:
+/*
+this.submitForTesting = this.submitForTesting.bind(this);
+this.startTesting = this.startTesting.bind(this);
+this.completeTesting = this.completeTesting.bind(this);
+this.startValidation = this.startValidation.bind(this);
+this.completeValidation = this.completeValidation.bind(this);
+this.approveStructure = this.approveStructure.bind(this);
+this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
+this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
+*/
 
 
   // =================== END OF CLASS ===================

@@ -5,23 +5,23 @@ const mongoose = require('mongoose');
 const componentInstanceSchema = {
   _id: {
     type: String,
-    required: true
+ 
   },
   name: {
     type: String,
-    required: true,
+
     trim: true,
     maxlength: 200
   },
   rating: {
     type: Number,
-    required: true,
+
     min: [1, 'Rating must be at least 1'],
     max: [5, 'Rating cannot exceed 5']
   },
   photo: {
     type: String,
-    required: true,
+
     validate: {
       validator: function(v) {
         if (!v || v.trim() === '') return false;
@@ -477,6 +477,126 @@ const structureSchema = new mongoose.Schema({
       type: String,
       trim: true,
       maxlength: 200
+    }
+  },
+
+  status: {
+    type: String,
+    enum: [
+      'draft', 
+      'location_completed', 
+      'admin_completed', 
+      'geometric_completed', 
+      'ratings_in_progress', 
+      'ratings_completed', 
+      'submitted',        // FE submits
+      'under_testing',    // TE is testing
+      'tested',           // TE completed testing
+      'under_validation', // VE is validating
+      'validated',        // VE completed validation
+      'approved',         // AD approved
+      'rejected'          // Any stage rejection
+    ],
+    default: 'draft'
+  },
+  
+  // ✅ NEW: Workflow tracking
+  workflow: {
+    // FE Submission
+    submitted_by: {
+      user_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      name: String,
+      email: String,
+      role: {
+        type: String,
+        enum: ['FE']
+      },
+      date: Date
+    },
+    
+    // TE Testing
+    tested_by: {
+      user_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      name: String,
+      email: String,
+      role: {
+        type: String,
+        enum: ['TE']
+      },
+      date: Date,
+      test_notes: {
+        type: String,
+        maxlength: 2000
+      }
+    },
+    
+    // VE Validation
+    validated_by: {
+      user_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      name: String,
+      email: String,
+      role: {
+        type: String,
+        enum: ['VE']
+      },
+      date: Date,
+      validation_notes: {
+        type: String,
+        maxlength: 2000
+      }
+    },
+    
+    // AD Approval
+    approved_by: {
+      user_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      name: String,
+      email: String,
+      role: {
+        type: String,
+        enum: ['AD']
+      },
+      date: Date,
+      approval_notes: {
+        type: String,
+        maxlength: 2000
+      }
+    },
+    
+    // ✅ FIXED: Rejection tracking - removed required: true
+    rejected_by: {
+      user_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      name: String,
+      email: String,
+      role: {
+        type: String,
+        enum: ['TE', 'VE', 'AD']
+      },
+      date: Date,
+      rejection_reason: {
+        type: String,
+        // ✅ REMOVED: required: true
+        // We validate this in the controller/routes instead
+        maxlength: 2000
+      },
+      rejection_stage: {
+        type: String,
+        enum: ['testing', 'validation', 'approval']
+      }
     }
   },
   

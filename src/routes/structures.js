@@ -2,6 +2,7 @@ const express = require('express');
 const structureController = require('../controllers/structureController');
 const { authenticateToken } = require('../middlewares/auth');
 const { handleValidationErrors } = require('../middlewares/validation');
+const { body, param } = require('express-validator');
 const { 
   locationValidation, 
   administrativeValidation, 
@@ -57,6 +58,16 @@ router.post(
   structureController.saveFloorStructuralComponentsBulk
 );
 
+router.put(
+  '/:id/floors/:floorId/structural/bulk',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFloorStructuralComponentsBulk
+);
+
 router.post(
   '/:id/floors/:floorId/non-structural/bulk',
   authenticateToken,
@@ -69,6 +80,17 @@ router.post(
 
 // BLOCK-LEVEL BULK ROUTES
 router.post(
+  '/:id/floors/:floorId/blocks/:blockId/structural/bulk',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveBlockStructuralComponentsBulk
+);
+
+router.put(
   '/:id/floors/:floorId/blocks/:blockId/structural/bulk',
   authenticateToken,
   parameterValidations.structureId,
@@ -370,6 +392,120 @@ router.post('/validate-number',
 router.delete('/:id', structureController.deleteStructure);
 router.get('/:id', structureController.getStructureDetails);
 router.get('/', structureController.getAllStructures);
+
+// Add these routes to your structures.js routes file
+
+// =================== WORKFLOW STATUS ROUTES ===================
+// Place these BEFORE the general structure routes
+
+// FE: Submit for testing
+router.post('/:id/submit-for-testing', 
+  authenticateToken,
+  parameterValidations.structureId,
+  handleValidationErrors,
+  structureController.submitForTesting
+);
+
+// TE: Start testing
+router.post('/:id/start-testing',
+  authenticateToken,
+  parameterValidations.structureId,
+  handleValidationErrors,
+  structureController.startTesting
+);
+
+// TE: Complete testing (approve or reject)
+router.post('/:id/complete-testing',
+  authenticateToken,
+  parameterValidations.structureId,
+  [
+    body('status')
+      .optional()
+      .isIn(['tested', 'rejected'])
+      .withMessage('Status must be either "tested" or "rejected"'),
+    body('test_notes')
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ max: 2000 })
+      .withMessage('Test notes cannot exceed 2000 characters'),
+    body('rejection_reason')
+      .if(body('status').equals('rejected'))
+      .notEmpty()
+      .withMessage('Rejection reason is required when rejecting')
+      .isLength({ max: 2000 })
+      .withMessage('Rejection reason cannot exceed 2000 characters')
+  ],
+  handleValidationErrors,
+  structureController.completeTesting
+);
+
+// VE: Start validation
+router.post('/:id/start-validation',
+  authenticateToken,
+  parameterValidations.structureId,
+  handleValidationErrors,
+  structureController.startValidation
+);
+
+// VE: Complete validation (approve or reject)
+router.post('/:id/complete-validation',
+  authenticateToken,
+  parameterValidations.structureId,
+  [
+    body('status')
+      .optional()
+      .isIn(['validated', 'rejected'])
+      .withMessage('Status must be either "validated" or "rejected"'),
+    body('validation_notes')
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ max: 2000 })
+      .withMessage('Validation notes cannot exceed 2000 characters'),
+    body('rejection_reason')
+      .if(body('status').equals('rejected'))
+      .notEmpty()
+      .withMessage('Rejection reason is required when rejecting')
+      .isLength({ max: 2000 })
+      .withMessage('Rejection reason cannot exceed 2000 characters')
+  ],
+  handleValidationErrors,
+  structureController.completeValidation
+);
+
+// AD: Approve structure (final approval or rejection)
+router.post('/:id/approve',
+  authenticateToken,
+  parameterValidations.structureId,
+  [
+    body('status')
+      .optional()
+      .isIn(['approved', 'rejected'])
+      .withMessage('Status must be either "approved" or "rejected"'),
+    body('approval_notes')
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ max: 2000 })
+      .withMessage('Approval notes cannot exceed 2000 characters'),
+    body('rejection_reason')
+      .if(body('status').equals('rejected'))
+      .notEmpty()
+      .withMessage('Rejection reason is required when rejecting')
+      .isLength({ max: 2000 })
+      .withMessage('Rejection reason cannot exceed 2000 characters')
+  ],
+  handleValidationErrors,
+  structureController.approveStructure
+);
+
+router.get('/:id/workflow',
+  authenticateToken,
+  parameterValidations.structureId,
+  handleValidationErrors,
+  structureController.getWorkflowHistory
+);
 
 console.log('✅ All structure routes registered');
 
