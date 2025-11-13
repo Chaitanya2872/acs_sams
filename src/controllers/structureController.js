@@ -4242,76 +4242,90 @@ getPriority(average) {
    * @access Private (FE, VE roles)
    */
   async addRemark(req, res) {
-    try {
-      const { id } = req.params;
-      const { text } = req.body;
-      
-      if (!text || text.trim().length === 0) {
-        return sendErrorResponse(res, 'Remark text is required', 400);
-      }
+  try {
+    const { id } = req.params;
+    const { text, remark_text } = req.body;
+    const remarkText = text?.trim() || remark_text?.trim();
 
-      const user = await User.findById(req.user.userId);
-      if (!user) {
-        return sendErrorResponse(res, 'User not found', 404);
-      }
-
-      // Check if user has FE or VE role
-      const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
-      if (!userRole) {
-        return sendErrorResponse(res, 'Only Field Engineers (FE) and Verification Engineers (VE) can add remarks', 403);
-      }
-
-   // Use findStructureAcrossUsers to allow privileged access
-const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
-      
-      // Initialize remarks object if it doesn't exist
-      if (!structure.remarks) {
-        structure.remarks = {
-          fe_remarks: [],
-          ve_remarks: [],
-          last_updated_by: {}
-        };
-      }
-
-      const authorName = this.getUserFullName(user);
-      const newRemark = {
-        text: text.trim(),
-        author_name: authorName,
-        author_role: userRole,
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-
-      // Add remark to appropriate array based on user role
-      if (userRole === 'FE') {
-        structure.remarks.fe_remarks.push(newRemark);
-      } else if (userRole === 'VE') {
-        structure.remarks.ve_remarks.push(newRemark);
-      }
-
-      // Update last_updated_by information
-      structure.remarks.last_updated_by = {
-        role: userRole,
-        name: authorName,
-        date: new Date()
-      };
-
-      structure.creation_info.last_updated_date = new Date();
-      await user.save();
-
-      sendSuccessResponse(res, 'Remark updated successfully', {
-        remark_id: updatedRemark._id,
-        text: updatedRemark.text,
-        updated_at: updatedRemark.updated_at,
-        author_name: updatedRemark.author_name,
-        author_role: updatedRemark.author_role
-      });
-
-    } catch (error) {
-      console.error('❌ Update remark error:', error);
-      sendErrorResponse(res, 'Failed to update remark', 500, error.message);
+    if (!remarkText || remarkText.length === 0) {
+      return sendErrorResponse(res, 'Remark text is required', 400);
     }
+
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
+    }
+
+    // Check if user has FE or VE role
+    const userRole = this.hasRoleFromRequest(req, 'FE')
+      ? 'FE'
+      : this.hasRoleFromRequest(req, 'VE')
+      ? 'VE'
+      : null;
+
+    if (!userRole) {
+      return sendErrorResponse(
+        res,
+        'Only Field Engineers (FE) and Verification Engineers (VE) can add remarks',
+        403
+      );
+    }
+
+    // Use findStructureAcrossUsers to allow privileged access
+    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    if (!structure) {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+
+    // Initialize remarks object if it doesn't exist
+    if (!structure.remarks) {
+      structure.remarks = {
+        fe_remarks: [],
+        ve_remarks: [],
+        last_updated_by: {}
+      };
+    }
+
+    const authorName = this.getUserFullName(user);
+    const newRemark = {
+      text: remarkText,
+      author_name: authorName,
+      author_role: userRole,
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+
+    // Add remark to appropriate array based on user role
+    if (userRole === 'FE') {
+      structure.remarks.fe_remarks.push(newRemark);
+    } else if (userRole === 'VE') {
+      structure.remarks.ve_remarks.push(newRemark);
+    }
+
+    // Update last_updated_by info
+    structure.remarks.last_updated_by = {
+      role: userRole,
+      name: authorName,
+      date: new Date()
+    };
+
+    structure.creation_info.last_updated_date = new Date();
+
+    // Save the structure
+    await structure.save();
+
+    sendSuccessResponse(res, 'Remark added successfully', {
+      text: newRemark.text,
+      updated_at: newRemark.updated_at,
+      author_name: newRemark.author_name,
+      author_role: newRemark.author_role
+    });
+  } catch (error) {
+    console.error('❌ Add remark error:', error);
+    sendErrorResponse(res, 'Failed to update remark', 500, error.message);
   }
+}
+
 
   // Add after the addRemark method in your controller:
 
