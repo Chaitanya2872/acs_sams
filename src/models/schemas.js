@@ -718,6 +718,33 @@ const structureSchema = new mongoose.Schema({
         default: Date.now
       }
     }],
+
+    te_remarks: [{               // ✅ Add this
+    text: {
+      type: String,
+      required: true,
+      maxlength: 2000,
+      trim: true
+    },
+    author_name: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    author_role: {
+      type: String,
+      enum: ['TE'],           // ✔ only TE
+      required: true
+    },
+    created_at: {
+      type: Date,
+      default: Date.now
+    },
+    updated_at: {
+      type: Date,
+      default: Date.now
+    }
+  }],
     ve_remarks: [{
       text: {
         type: String,
@@ -747,7 +774,7 @@ const structureSchema = new mongoose.Schema({
     last_updated_by: {
       role: {
         type: String,
-        enum: ['FE', 'VE']
+        enum: ['FE', 'VE', 'TE']
       },
       name: String,
       date: {

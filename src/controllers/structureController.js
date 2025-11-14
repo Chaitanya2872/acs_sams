@@ -2672,9 +2672,18 @@ generateBlockId() {
  * Enhanced getAllStructures with workflow information
  * Replace the existing getAllStructures method in structureController.js
  */
+// Add this to structureController.js - Enhanced getAllStructures method
+// This ensures TE can see all submitted structures
+
+/**
+ * Enhanced getAllStructures with proper TE access to submitted structures
+ * @route GET /api/structures
+ * @access Private (All authenticated users)
+ */
 async getAllStructures(req, res) {
   try {
     console.log('📋 Getting all structures for user:', req.user.userId);
+    console.log('🔐 User roles:', req.user.roles || [req.user.role]);
     
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -2683,14 +2692,16 @@ async getAllStructures(req, res) {
     const sortBy = req.query.sortBy || 'creation_date';
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
     
-    // Check if user has privileged access (AD, VE, TE, admin)
+    // ✅ Check if user has privileged access (AD, VE, TE, admin)
     const isPrivileged = hasPrivilegedAccess(req.user);
+    const userRole = req.user.roles?.[0] || req.user.role;
     
     let structures = [];
     let ownerInfo = {}; // To track structure owners for privileged users
     
+    // ✅ PRIVILEGED USERS: Fetch all structures from all users
     if (isPrivileged) {
-      console.log('✅ Privileged user - fetching ALL structures from ALL users');
+      console.log('✅ Privileged user detected:', userRole);
       console.log('   User roles:', req.user.roles || [req.user.role]);
       
       // Get all users with their structures
@@ -2704,6 +2715,55 @@ async getAllStructures(req, res) {
       allUsers.forEach(user => {
         if (user.structures && user.structures.length > 0) {
           user.structures.forEach(structure => {
+            // ✅ FILTER FOR TE: Only show structures that TE should see
+            // TE should see: submitted, under_testing, tested, rejected (from testing stage)
+            if (userRole === 'TE') {
+              const teRelevantStatuses = [
+                'submitted',        // Ready for TE to start testing
+                'under_testing',    // TE is currently testing
+                'tested',          // TE completed testing
+                'rejected'         // Any rejected (TE can review)
+              ];
+              
+              // Skip structures not relevant to TE
+              if (!teRelevantStatuses.includes(structure.status)) {
+                return; // Skip this structure
+              }
+              
+              console.log(`✅ TE viewing structure ${structure._id} with status: ${structure.status}`);
+            }
+            
+            // ✅ FILTER FOR VE: Only show structures that VE should see
+            if (userRole === 'VE') {
+              const veRelevantStatuses = [
+                'tested',          // Ready for VE to start validation
+                'under_validation', // VE is currently validating
+                'validated',       // VE completed validation
+                'rejected'         // Any rejected (VE can review)
+              ];
+              
+              if (!veRelevantStatuses.includes(structure.status)) {
+                return; // Skip this structure
+              }
+              
+              console.log(`✅ VE viewing structure ${structure._id} with status: ${structure.status}`);
+            }
+            
+            // ✅ FILTER FOR AD: Only show structures that AD should see
+            if (userRole === 'AD') {
+              const adRelevantStatuses = [
+                'validated',  // Ready for AD to approve
+                'approved',   // AD already approved
+                'rejected'    // Any rejected (AD can review)
+              ];
+              
+              if (!adRelevantStatuses.includes(structure.status)) {
+                return; // Skip this structure
+              }
+              
+              console.log(`✅ AD viewing structure ${structure._id} with status: ${structure.status}`);
+            }
+            
             // Add structure with owner info
             const structureWithOwner = structure.toObject();
             structureWithOwner._ownerId = user._id;
@@ -2714,8 +2774,10 @@ async getAllStructures(req, res) {
         }
       });
       
-      console.log(`📊 Total structures from all users: ${structures.length}`);
+      console.log(`📊 Total structures visible to ${userRole}: ${structures.length}`);
+      
     } else {
+      // ✅ REGULAR USERS (FE): Fetch only their own structures
       console.log('👤 Regular user - fetching only own structures');
       
       const user = await User.findById(req.user.userId);
@@ -2726,9 +2788,10 @@ async getAllStructures(req, res) {
       structures = user.structures || [];
     }
     
-    // Apply filters
+    // Apply additional filters
     if (status) {
       structures = structures.filter(structure => structure.status === status);
+      console.log(`🔍 Filtered by status '${status}': ${structures.length} structures`);
     }
     
     if (search) {
@@ -2832,7 +2895,6 @@ async getAllStructures(req, res) {
       
       // ✅ BUILD WORKFLOW STATUS DISPLAY
       const workflow = structure.workflow || {};
-      let statusDisplay = structure.status;
       let workflowInfo = {};
       
       if (workflow.submitted_by) {
@@ -2936,6 +2998,8 @@ async getAllStructures(req, res) {
       
       return structureData;
     });
+    
+    console.log(`📦 Returning ${structuresData.length} structures to ${userRole}`);
     
     sendPaginatedResponse(res, structuresData, page, limit, structures.length, 'Structures retrieved successfully');
 
@@ -4484,13 +4548,13 @@ getPriority(average) {
    * @route POST /api/structures/:id/remarks
    * @access Private (FE, VE roles)
    */
-  async addRemark(req, res) {
+async addRemark(req, res) {
   try {
     const { id } = req.params;
     const { text, remark_text } = req.body;
-    const remarkText = text?.trim() || remark_text?.trim();
 
-    if (!remarkText || remarkText.length === 0) {
+    const remarkText = text?.trim() || remark_text?.trim();
+    if (!remarkText) {
       return sendErrorResponse(res, 'Remark text is required', 400);
     }
 
@@ -4499,37 +4563,40 @@ getPriority(average) {
       return sendErrorResponse(res, 'User not found', 404);
     }
 
-    // Check if user has FE or VE role
+    // Determine the role
     const userRole = this.hasRoleFromRequest(req, 'FE')
       ? 'FE'
       : this.hasRoleFromRequest(req, 'VE')
       ? 'VE'
+      : this.hasRoleFromRequest(req, 'TE')
+      ? 'TE'
       : null;
 
     if (!userRole) {
       return sendErrorResponse(
         res,
-        'Only Field Engineers (FE) and Verification Engineers (VE) can add remarks',
+        'Only FE, VE, and TE roles can add remarks',
         403
       );
     }
 
-    // Use findStructureAcrossUsers to allow privileged access
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    const { structure } = await this.findStructureAcrossUsers(id);
     if (!structure) {
       return sendErrorResponse(res, 'Structure not found', 404);
     }
 
-    // Initialize remarks object if it doesn't exist
+    // Initialize remarks if missing
     if (!structure.remarks) {
       structure.remarks = {
         fe_remarks: [],
         ve_remarks: [],
+        te_remarks: [],
         last_updated_by: {}
       };
     }
 
     const authorName = this.getUserFullName(user);
+
     const newRemark = {
       text: remarkText,
       author_name: authorName,
@@ -4538,14 +4605,16 @@ getPriority(average) {
       updated_at: new Date()
     };
 
-    // Add remark to appropriate array based on user role
+    // Push to correct bucket
     if (userRole === 'FE') {
       structure.remarks.fe_remarks.push(newRemark);
     } else if (userRole === 'VE') {
       structure.remarks.ve_remarks.push(newRemark);
+    } else {
+      structure.remarks.te_remarks.push(newRemark);
     }
 
-    // Update last_updated_by info
+    // Set last updated information
     structure.remarks.last_updated_by = {
       role: userRole,
       name: authorName,
@@ -4554,20 +4623,33 @@ getPriority(average) {
 
     structure.creation_info.last_updated_date = new Date();
 
-    // Save the structure
     await structure.save();
 
+    // Get the last saved remark with MongoDB _id
+    const savedRemark =
+      userRole === 'FE'
+        ? structure.remarks.fe_remarks.slice(-1)[0]
+        : userRole === 'VE'
+        ? structure.remarks.ve_remarks.slice(-1)[0]
+        : structure.remarks.te_remarks.slice(-1)[0];
+
     sendSuccessResponse(res, 'Remark added successfully', {
-      text: newRemark.text,
-      updated_at: newRemark.updated_at,
-      author_name: newRemark.author_name,
-      author_role: newRemark.author_role
+      remark_id: savedRemark._id,
+      text: savedRemark.text,
+      created_at: savedRemark.created_at,
+      updated_at: savedRemark.updated_at,
+      author_name: savedRemark.author_name,
+      author_role: savedRemark.author_role
     });
+
   } catch (error) {
     console.error('❌ Add remark error:', error);
-    sendErrorResponse(res, 'Failed to update remark', 500, error.message);
+    sendErrorResponse(res, 'Failed to add remark', 500, error.message);
   }
 }
+
+
+
 
 
   // Add after the addRemark method in your controller:
@@ -4576,71 +4658,56 @@ async updateRemark(req, res) {
   try {
     const { id, remarkId } = req.params;
     const { text } = req.body;
-    
-    if (!text || text.trim().length === 0) {
-      return sendErrorResponse(res, 'Remark text is required', 400);
+
+    if (!text || !text.trim()) {
+      return sendErrorResponse(res, 'Updated text is required', 400);
     }
 
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
-    }
+    const userRole = this.hasRoleFromRequest(req, 'FE')
+      ? 'FE'
+      : this.hasRoleFromRequest(req, 'VE')
+      ? 'VE'
+      : this.hasRoleFromRequest(req, 'TE')
+      ? 'TE'
+      : null;
 
-    const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : 
-                     this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
     if (!userRole) {
-      return sendErrorResponse(res, 'Only FE and VE can update remarks', 403);
+      return sendErrorResponse(res, 'Only FE, VE, or TE can update remarks', 403);
     }
 
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
-    
-    if (!structure.remarks) {
-      return sendErrorResponse(res, 'No remarks found', 404);
+    const { structure } = await this.findStructureAcrossUsers(id);
+    if (!structure) {
+      return sendErrorResponse(res, 'Structure not found', 404);
     }
 
-    const authorName = this.getUserFullName(user);
-    let updatedRemark = null;
+    const bucketName =
+      userRole === 'FE'
+        ? 'fe_remarks'
+        : userRole === 'VE'
+        ? 've_remarks'
+        : 'te_remarks';
 
-    if (userRole === 'FE' && structure.remarks.fe_remarks) {
-      const remark = structure.remarks.fe_remarks.id(remarkId);
-      if (remark) {
-        if (remark.author_name !== authorName) {
-          return sendErrorResponse(res, 'You can only update your own remarks', 403);
-        }
-        remark.text = text.trim();
-        remark.updated_at = new Date();
-        updatedRemark = remark;
-      }
-    } else if (userRole === 'VE' && structure.remarks.ve_remarks) {
-      const remark = structure.remarks.ve_remarks.id(remarkId);
-      if (remark) {
-        if (remark.author_name !== authorName) {
-          return sendErrorResponse(res, 'You can only update your own remarks', 403);
-        }
-        remark.text = text.trim();
-        remark.updated_at = new Date();
-        updatedRemark = remark;
-      }
-    }
+    const bucket = structure.remarks[bucketName];
+    const remark = bucket.find(r => r._id.toString() === remarkId);
 
-    if (!updatedRemark) {
+    if (!remark) {
       return sendErrorResponse(res, 'Remark not found', 404);
     }
 
+    remark.text = text.trim();
+    remark.updated_at = new Date();
+
     structure.remarks.last_updated_by = {
       role: userRole,
-      name: authorName,
+      name: req.user.fullName,
       date: new Date()
     };
 
     structure.creation_info.last_updated_date = new Date();
-    await structureOwner.save();
 
-    sendUpdatedResponse(res, {
-      remark_id: updatedRemark._id,
-      text: updatedRemark.text,
-      updated_at: updatedRemark.updated_at
-    }, 'Remark updated successfully');
+    await structure.save();
+
+    sendSuccessResponse(res, 'Remark updated successfully', remark);
 
   } catch (error) {
     console.error('❌ Update remark error:', error);
@@ -4648,26 +4715,41 @@ async updateRemark(req, res) {
   }
 }
 
+
+
 async getRemarks(req, res) {
   try {
     const { id } = req.params;
+
     const user = await User.findById(req.user.userId);
-    
     if (!user) {
       return sendErrorResponse(res, 'User not found', 404);
     }
 
-    const userRole = this.hasRoleFromRequest(req, 'FE') ? 'FE' : 
-                     this.hasRoleFromRequest(req, 'VE') ? 'VE' : null;
+    // Allow FE, VE, TE to view remarks
+    const userRole =
+      this.hasRoleFromRequest(req, 'FE') ? 'FE' :
+      this.hasRoleFromRequest(req, 'VE') ? 'VE' :
+      this.hasRoleFromRequest(req, 'TE') ? 'TE' : null;
+
     if (!userRole) {
-      return sendErrorResponse(res, 'Only FE and VE can view remarks', 403);
+      return sendErrorResponse(
+        res,
+        'Only FE, VE and TE can view remarks',
+        403
+      );
     }
 
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
-    
+    const { structure } = await this.findStructureAcrossUsers(id);
+    if (!structure) {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+
+    // Initialize if missing
     const remarks = structure.remarks || {
       fe_remarks: [],
       ve_remarks: [],
+      te_remarks: [],
       last_updated_by: {}
     };
 
@@ -4676,8 +4758,10 @@ async getRemarks(req, res) {
       uid: structure.structural_identity?.uid,
       fe_remarks: remarks.fe_remarks,
       ve_remarks: remarks.ve_remarks,
+      te_remarks: remarks.te_remarks || [],
       total_fe_remarks: remarks.fe_remarks.length,
       total_ve_remarks: remarks.ve_remarks.length,
+      total_te_remarks: (remarks.te_remarks || []).length,
       last_updated_by: remarks.last_updated_by
     });
 
@@ -4686,6 +4770,7 @@ async getRemarks(req, res) {
     sendErrorResponse(res, 'Failed to retrieve remarks', 500, error.message);
   }
 }
+
 
 async deleteRemark(req, res) {
   try {
