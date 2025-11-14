@@ -35,7 +35,6 @@ const componentInstanceSchema = {
   },
   condition_comment: {
     type: String,
-    required: true,
     trim: true,
     maxlength: 1000
   },

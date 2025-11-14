@@ -37,7 +37,29 @@ router.post(
   structureController.saveFlatStructuralComponentsBulk
 );
 
+router.put(
+  '/:id/flats/:flatId/structural/bulk',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFlatStructuralComponentsBulk
+);
+
+
+
 router.post(
+  '/:id/flats/:flatId/non-structural/bulk',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.flatId,
+  multiComponentRatingValidation,
+  handleValidationErrors,
+  structureController.saveFlatNonStructuralComponentsBulk
+);
+
+router.put(
   '/:id/flats/:flatId/non-structural/bulk',
   authenticateToken,
   parameterValidations.structureId,
