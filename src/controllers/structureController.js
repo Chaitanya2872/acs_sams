@@ -42,6 +42,15 @@ class StructureController {
   this.saveFloorNonStructuralComponentsBulk = this.saveFloorNonStructuralComponentsBulk.bind(this);
   this.getFloorStructuralComponents = this.getFloorStructuralComponents.bind(this);
   this.getFloorNonStructuralComponents = this.getFloorNonStructuralComponents.bind(this);
+
+  this.getFloorRatings = this.getFloorRatings.bind(this);
+  this.hasFloorStructuralRating = this.hasFloorStructuralRating.bind(this);
+ this.hasFloorNonStructuralRating = this.hasFloorNonStructuralRating.bind(this);
+this.calculateComponentAverage = this.calculateComponentAverage.bind(this);
+this.calculateNonStructuralAverages = this.calculateNonStructuralAverages.bind(this);
+this.countComponentsWithPhotos = this.countComponentsWithPhotos.bind(this);
+this.countLowRatedComponents = this.countLowRatedComponents.bind(this);
+this.extractFloorRatingImages = this.extractFloorRatingImages.bind(this);
   
   // Block-level bulk component ratings
   this.saveBlockStructuralComponentsBulk = this.saveBlockStructuralComponentsBulk.bind(this);
@@ -84,6 +93,15 @@ class StructureController {
   this.getAllImages = this.getAllImages.bind(this);
   this.getStructureImages = this.getStructureImages.bind(this);
   this.getUserImageStats = this.getUserImageStats.bind(this);
+
+  this.submitForTesting = this.submitForTesting.bind(this);
+this.startTesting = this.startTesting.bind(this);
+this.completeTesting = this.completeTesting.bind(this);
+this.startValidation = this.startValidation.bind(this);
+this.completeValidation = this.completeValidation.bind(this);
+this.approveStructure = this.approveStructure.bind(this);
+this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
+this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     
     // Bulk Operations
     this.saveBulkRatings = this.saveBulkRatings.bind(this);
@@ -103,7 +121,7 @@ class StructureController {
     this.deleteRemark = this.deleteRemark.bind(this);
     this.deleteStructure = this.deleteStructure.bind(this);
 
-this.submitForTesting = this.submitForTesting.bind(this);
+ this.submitForTesting = this.submitForTesting.bind(this);
  this.startTesting = this.startTesting.bind(this);
  this.completeTesting = this.completeTesting.bind(this);
  this.startValidation = this.startValidation.bind(this);
@@ -1453,6 +1471,38 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     }
   }
 
+
+  /**
+ * Check if floor has structural ratings
+ * @param {Object} floor - Floor object from structure
+ * @returns {Boolean} - True if floor has any structural ratings
+ */
+hasFloorStructuralRating(floor) {
+  if (!floor.structural_rating) return false;
+  
+  return !!(
+    (floor.structural_rating.beams?.length > 0) ||
+    (floor.structural_rating.columns?.length > 0) ||
+    (floor.structural_rating.slabs?.length > 0) ||
+    (floor.structural_rating.foundations?.length > 0)
+  );
+}
+
+
+/**
+ * Check if floor has non-structural ratings
+ * @param {Object} floor - Floor object from structure
+ * @returns {Boolean} - True if floor has any non-structural ratings
+ */
+hasFloorNonStructuralRating(floor) {
+  if (!floor.non_structural_rating) return false;
+  
+  return Object.keys(floor.non_structural_rating).some(key => {
+    const value = floor.non_structural_rating[key];
+    return Array.isArray(value) && value.length > 0;
+  });
+}
+
   async getFlatStructuralRating(req, res) {
     try {
       const { id, floorId, flatId } = req.params;
@@ -1604,6 +1654,149 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
       sendErrorResponse(res, 'Failed to get flat non-structural ratings', 500, error.message);
     }
   }
+
+
+  /**
+ * Calculate averages for all non-structural component types
+ * @param {Object} nonStructuralRating - Non-structural rating object with component type arrays
+ * @returns {Object} - Object with averages for each component type
+ */
+calculateNonStructuralAverages(nonStructuralRating) {
+  if (!nonStructuralRating) return {};
+  
+  const averages = {};
+  
+  Object.entries(nonStructuralRating).forEach(([type, components]) => {
+    if (Array.isArray(components) && components.length > 0) {
+      averages[type] = this.calculateComponentAverage(components);
+    }
+  });
+  
+  return averages;
+}
+
+/**
+ * Count components with photos
+ * @param {Object} floor - Floor object with structural and non-structural ratings
+ * @returns {Number} - Total count of components that have photos
+ */
+countComponentsWithPhotos(floor) {
+  let count = 0;
+  
+  // Count structural components with photos
+  if (floor.structural_rating) {
+    ['beams', 'columns', 'slabs', 'foundations'].forEach(type => {
+      if (floor.structural_rating[type]) {
+        count += floor.structural_rating[type].filter(c => c.photo).length;
+      }
+    });
+  }
+  
+  // Count non-structural components with photos
+  if (floor.non_structural_rating) {
+    Object.values(floor.non_structural_rating).forEach(components => {
+      if (Array.isArray(components)) {
+        count += components.filter(c => c.photo).length;
+      }
+    });
+  }
+  
+  return count;
+}
+
+/**
+ * Count components with rating below 3
+ * @param {Object} floor - Floor object with structural and non-structural ratings
+ * @returns {Number} - Total count of components with rating < 3
+ */
+countLowRatedComponents(floor) {
+  let count = 0;
+  
+  // Count structural components with low ratings
+  if (floor.structural_rating) {
+    ['beams', 'columns', 'slabs', 'foundations'].forEach(type => {
+      if (floor.structural_rating[type]) {
+        count += floor.structural_rating[type].filter(c => c.rating < 3).length;
+      }
+    });
+  }
+  
+  // Count non-structural components with low ratings
+  if (floor.non_structural_rating) {
+    Object.values(floor.non_structural_rating).forEach(components => {
+      if (Array.isArray(components)) {
+        count += components.filter(c => c.rating < 3).length;
+      }
+    });
+  }
+  
+  return count;
+}
+
+/**
+ * Extract all images from floor ratings
+ * @param {Object} floor - Floor object with structural and non-structural ratings
+ * @returns {Object} - Object containing structural and non-structural images with summary
+ */
+extractFloorRatingImages(floor) {
+  const images = {
+    structural: [],
+    non_structural: [],
+    summary: {
+      total_images: 0,
+      structural_count: 0,
+      non_structural_count: 0
+    }
+  };
+  
+  // Extract structural component images
+  if (floor.structural_rating) {
+    ['beams', 'columns', 'slabs', 'foundations'].forEach(type => {
+      if (floor.structural_rating[type]) {
+        floor.structural_rating[type].forEach(component => {
+          if (component.photo) {
+            images.structural.push({
+              component_type: type,
+              component_name: component.name,
+              component_id: component._id,
+              rating: component.rating,
+              photo: component.photo,
+              remarks: component.remarks,
+              inspection_date: component.inspection_date
+            });
+            images.summary.structural_count++;
+          }
+        });
+      }
+    });
+  }
+  
+  // Extract non-structural component images
+  if (floor.non_structural_rating) {
+    Object.entries(floor.non_structural_rating).forEach(([type, components]) => {
+      if (Array.isArray(components)) {
+        components.forEach(component => {
+          if (component.photo) {
+            images.non_structural.push({
+              component_type: type,
+              component_name: component.name,
+              component_id: component._id,
+              rating: component.rating,
+              photo: component.photo,
+              remarks: component.remarks,
+              inspection_date: component.inspection_date
+            });
+            images.summary.non_structural_count++;
+          }
+        });
+      }
+    });
+  }
+  
+  images.summary.total_images = images.summary.structural_count + images.summary.non_structural_count;
+  
+  return images;
+}
 
   async updateFlatNonStructuralRating(req, res) {
     return this.saveFlatNonStructuralRating(req, res);
@@ -2317,22 +2510,108 @@ async saveFloorRatings(req, res) {
 }
 
 
+/**
+ * Get complete floor ratings (structural + non-structural + overall)
+ * @route GET /api/structures/:id/floors/:floorId/ratings
+ * @access Private
+ */
 async getFloorRatings(req, res) {
   try {
     const { id, floorId } = req.params;
+    const includeImages = req.query.include_images === 'true';
+    
+    console.log('📊 Getting floor ratings for floor:', floorId);
+    
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-
+    
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) return sendErrorResponse(res, 'Floor not found', 404);
-
-    return sendSuccessResponse(res, 'Floor ratings retrieved successfully', {
-      structural_rating: floor.structural_rating || {},
-      non_structural_rating: floor.non_structural_rating || {},
-      floor_overall_rating: floor.floor_overall_rating || null
-    });
-  } catch (err) {
-    console.error('❌ Get floor ratings error:', err);
-    sendErrorResponse(res, 'Failed to get floor ratings', 500, err.message);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
+    }
+    
+    // Build complete floor ratings response
+    const floorRatings = {
+      structure_id: id,
+      floor_id: floorId,
+      floor_number: floor.floor_number,
+      floor_type: floor.floor_type,
+      floor_label_name: floor.floor_label_name,
+      floor_height: floor.floor_height,
+      total_area_sq_mts: floor.total_area_sq_mts,
+      
+      // Structural ratings with all components
+      structural_rating: {
+        beams: floor.structural_rating?.beams || [],
+        columns: floor.structural_rating?.columns || [],
+        slabs: floor.structural_rating?.slabs || [],
+        foundations: floor.structural_rating?.foundations || [],
+        overall_average: floor.structural_rating?.overall_average || null,
+        assessment_date: floor.structural_rating?.assessment_date || null,
+        inspector_notes: floor.structural_rating?.inspector_notes || null,
+        
+        // Component averages
+        averages: {
+          beams: this.calculateComponentAverage(floor.structural_rating?.beams),
+          columns: this.calculateComponentAverage(floor.structural_rating?.columns),
+          slabs: this.calculateComponentAverage(floor.structural_rating?.slabs),
+          foundations: this.calculateComponentAverage(floor.structural_rating?.foundations)
+        }
+      },
+      
+      // Non-structural ratings with all component types
+      non_structural_rating: {
+        ...(floor.non_structural_rating || {}),
+        overall_average: floor.non_structural_rating?.overall_average || null,
+        assessment_date: floor.non_structural_rating?.assessment_date || null,
+        inspector_notes: floor.non_structural_rating?.inspector_notes || null,
+        
+        // Component type averages
+        averages: this.calculateNonStructuralAverages(floor.non_structural_rating)
+      },
+      
+      // Overall floor rating
+      floor_overall_rating: floor.floor_overall_rating || null,
+      
+      // Statistics
+      statistics: {
+        total_structural_components: 
+          (floor.structural_rating?.beams?.length || 0) +
+          (floor.structural_rating?.columns?.length || 0) +
+          (floor.structural_rating?.slabs?.length || 0) +
+          (floor.structural_rating?.foundations?.length || 0),
+        
+        total_non_structural_components: 
+          Object.values(floor.non_structural_rating || {})
+            .reduce((sum, value) => {
+              if (Array.isArray(value)) {
+                return sum + value.length;
+              }
+              return sum;
+            }, 0),
+        
+        components_with_photos: this.countComponentsWithPhotos(floor),
+        components_below_rating_3: this.countLowRatedComponents(floor),
+        
+        has_structural_ratings: this.hasFloorStructuralRating(floor),
+        has_non_structural_ratings: this.hasFloorNonStructuralRating(floor),
+        
+        last_structural_update: floor.structural_rating?.assessment_date || null,
+        last_non_structural_update: floor.non_structural_rating?.assessment_date || null
+      }
+    };
+    
+    // Extract images if requested
+    if (includeImages) {
+      floorRatings.images = this.extractFloorRatingImages(floor);
+    }
+    
+    console.log('✅ Floor ratings retrieved successfully');
+    
+    sendSuccessResponse(res, 'Floor ratings retrieved successfully', floorRatings);
+    
+  } catch (error) {
+    console.error('❌ Get floor ratings error:', error);
+    sendErrorResponse(res, 'Failed to get floor ratings', 500, error.message);
   }
 }
 
@@ -3118,8 +3397,43 @@ async getStructureDetails(req, res) {
           total_area_sq_mts: floor.total_area_sq_mts,
           floor_label_name: floor.floor_label_name,
           floor_notes: floor.floor_notes,
+          
+          // ✅ NEW: Add floor rating indicators
+          has_floor_structural_ratings: this.hasFloorStructuralRating(floor),
+          has_floor_non_structural_ratings: this.hasFloorNonStructuralRating(floor),
+          
           flats: []
         };
+        
+        // ✅ NEW: Include floor ratings if requested
+        if (includeRatings) {
+          floorData.floor_structural_rating = floor.structural_rating || null;
+          floorData.floor_non_structural_rating = floor.non_structural_rating || null;
+          floorData.floor_overall_rating = floor.floor_overall_rating || null;
+          
+          // Add floor rating statistics
+          if (floor.structural_rating || floor.non_structural_rating) {
+            floorData.floor_statistics = {
+              structural_components: 
+                (floor.structural_rating?.beams?.length || 0) +
+                (floor.structural_rating?.columns?.length || 0) +
+                (floor.structural_rating?.slabs?.length || 0) +
+                (floor.structural_rating?.foundations?.length || 0),
+              
+              non_structural_components: 
+                Object.values(floor.non_structural_rating || {})
+                  .reduce((sum, value) => {
+                    if (Array.isArray(value)) {
+                      return sum + value.length;
+                    }
+                    return sum;
+                  }, 0),
+              
+              structural_average: floor.structural_rating?.overall_average || null,
+              non_structural_average: floor.non_structural_rating?.overall_average || null
+            };
+          }
+        }
         
         if (floor.flats) {
           structureDetails.statistics.total_flats += floor.flats.length;
@@ -4424,6 +4738,13 @@ calculateStructuralAverage(flat) {
     flat.structural_rating.health_status = this.getHealthStatus(average);
     flat.structural_rating.assessment_date = new Date();
   }
+}
+
+calculateComponentAverage(components) {
+  if (!components || components.length === 0) return null;
+  
+  const sum = components.reduce((acc, comp) => acc + (comp.rating || 0), 0);
+  return Math.round((sum / components.length) * 10) / 10;
 }
 
 calculateNonStructuralAverage(flat) {
