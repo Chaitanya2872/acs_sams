@@ -44,6 +44,9 @@ class StructureController {
   this.getFloorNonStructuralComponents = this.getFloorNonStructuralComponents.bind(this);
 
   this.getFloorRatings = this.getFloorRatings.bind(this);
+  this.saveFloorRatings = this.saveFloorRatings.bind(this);
+  this.saveFloorStructuralComponents = this.saveFloorStructuralComponents.bind(this);
+  this.saveFloorNonStructuralComponents = this.saveFloorNonStructuralComponents.bind(this);
   this.hasFloorStructuralRating = this.hasFloorStructuralRating.bind(this);
  this.hasFloorNonStructuralRating = this.hasFloorNonStructuralRating.bind(this);
 this.calculateComponentAverage = this.calculateComponentAverage.bind(this);
@@ -1705,9 +1708,9 @@ countComponentsWithPhotos(floor) {
 }
 
 /**
- * Count components with rating below 3
+ * Count components with rating 1-3
  * @param {Object} floor - Floor object with structural and non-structural ratings
- * @returns {Number} - Total count of components with rating < 3
+ * @returns {Number} - Total count of components with rating 1-3
  */
 countLowRatedComponents(floor) {
   let count = 0;
@@ -1716,7 +1719,7 @@ countLowRatedComponents(floor) {
   if (floor.structural_rating) {
     ['beams', 'columns', 'slabs', 'foundations'].forEach(type => {
       if (floor.structural_rating[type]) {
-        count += floor.structural_rating[type].filter(c => c.rating < 3).length;
+        count += floor.structural_rating[type].filter(c => c.rating <= 3).length;
       }
     });
   }
@@ -1725,7 +1728,7 @@ countLowRatedComponents(floor) {
   if (floor.non_structural_rating) {
     Object.values(floor.non_structural_rating).forEach(components => {
       if (Array.isArray(components)) {
-        count += components.filter(c => c.rating < 3).length;
+        count += components.filter(c => c.rating <= 3).length;
       }
     });
   }
@@ -2111,13 +2114,13 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     ? ratingData.condition_comment.trim().substring(0, 1000) 
     : '';
   
-  if (rating < 3 && !conditionComment) {
-    console.warn(`⚠️  Warning: Rating below 3 for ${componentName} but no condition comment provided`);
+  if (rating <= 3 && !conditionComment) {
+    console.warn(`⚠️  Warning: Rating 1-3 for ${componentName} but no condition comment provided`);
   }
 
   // Validate photos requirement for low ratings
-  if (rating < 3 && photos.length === 0) {
-    console.warn(`⚠️  Warning: Rating below 3 for ${componentName} but no photos provided`);
+  if (rating <= 3 && photos.length === 0) {
+    console.warn(`⚠️  Warning: Rating 1-3 for ${componentName} but no photos provided`);
   }
 
   // Process inspector notes

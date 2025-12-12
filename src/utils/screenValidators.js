@@ -53,15 +53,16 @@ const multiComponentRatingValidation = [
     .withMessage('Rating must be between 1 and 5'),
 
   body('structures.*.components.*.photo')
-    .notEmpty()
-    .withMessage('Photo is required')
+    .optional()
     .isString()
     .custom((value) => {
       if (!value || value.trim() === '') return false;
+      const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
       return value.startsWith('data:image/') || 
              value.startsWith('blob:') || 
              value.includes('/uploads/') || 
-             /^https?:\/\/.+/i.test(value);
+             /^https?:\/\/.+/i.test(value) ||
+             extRegex.test(value);
     })
     .withMessage('Invalid photo format. Must be a valid image URL or data URI'),
 
@@ -88,9 +89,15 @@ const multiComponentRatingValidation = [
       requestBody.structures.forEach((structure, structureIndex) => {
         if (structure.components && Array.isArray(structure.components)) {
           structure.components.forEach((component, index) => {
-            if (component.rating && component.rating < 3) {
+            if (component.rating && component.rating <= 3) {
               if (!component.condition_comment || component.condition_comment.trim().length < 10) {
-                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Detailed condition comment (min 10 chars) is required for ratings below 3`);
+                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Detailed condition comment (min 10 chars) is required for ratings 1-3`);
+              }
+              // require either 'photo' string or 'photos' array to be present
+              const hasPhotoString = component.photo && typeof component.photo === 'string' && component.photo.trim() !== '';
+              const hasPhotosArray = Array.isArray(component.photos) && component.photos.length > 0;
+              if (!hasPhotoString && !hasPhotosArray) {
+                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): At least one photo is required for ratings 1-3`);
               }
             }
           });
@@ -150,15 +157,16 @@ const componentRatingValidation = [
     .withMessage('Rating must be between 1 and 5'),
 
   body('components.*.photo')
-    .notEmpty()
-    .withMessage('Photo is required')
+    .optional()
     .isString()
     .custom((value) => {
       if (!value || value.trim() === '') return false;
+      const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
       return value.startsWith('data:image/') || 
              value.startsWith('blob:') || 
              value.includes('/uploads/') || 
-             /^https?:\/\/.+/i.test(value);
+             /^https?:\/\/.+/i.test(value) ||
+             extRegex.test(value);
     })
     .withMessage('Invalid photo format'),
 
@@ -182,11 +190,16 @@ const componentRatingValidation = [
     
     if (requestBody.components && Array.isArray(requestBody.components)) {
       requestBody.components.forEach((component, index) => {
-        if (component.rating && component.rating < 3) {
-          if (!component.condition_comment || component.condition_comment.trim().length < 10) {
-            errors.push(`Component ${index + 1} (${component.name || 'unnamed'}): Detailed condition comment (min 10 chars) is required for ratings below 3`);
+          if (component.rating && component.rating <= 3) {
+            if (!component.condition_comment || component.condition_comment.trim().length < 10) {
+              errors.push(`Component ${index + 1} (${component.name || 'unnamed'}): Detailed condition comment (min 10 chars) is required for ratings 1-3`);
+            }
+            const hasPhotoString = component.photo && typeof component.photo === 'string' && component.photo.trim() !== '';
+            const hasPhotosArray = Array.isArray(component.photos) && component.photos.length > 0;
+            if (!hasPhotoString && !hasPhotosArray) {
+              errors.push(`Component ${index + 1} (${component.name || 'unnamed'}): At least one photo is required for ratings 1-3`);
+            }
           }
-        }
       });
     }
     
@@ -217,10 +230,12 @@ const componentUpdateValidation = [
     .isString()
     .custom((value) => {
       if (!value || value.trim() === '') return true;
+      const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
       return value.startsWith('data:image/') || 
              value.startsWith('blob:') || 
              value.includes('/uploads/') || 
-             /^https?:\/\/.+/i.test(value);
+             /^https?:\/\/.+/i.test(value) ||
+             extRegex.test(value);
     })
     .withMessage('Invalid photo format'),
 
@@ -252,9 +267,14 @@ const componentUpdateValidation = [
   }),
 
   body().custom((requestBody) => {
-    if (requestBody.rating && requestBody.rating < 3) {
+    if (requestBody.rating && requestBody.rating <= 3) {
       if (!requestBody.condition_comment || requestBody.condition_comment.trim().length < 10) {
-        throw new Error('Detailed condition comment (min 10 chars) is required when rating is below 3');
+        throw new Error('Detailed condition comment (min 10 chars) is required when rating is 1-3');
+      }
+      const hasPhotoString = requestBody.photo && typeof requestBody.photo === 'string' && requestBody.photo.trim() !== '';
+      const hasPhotosArray = Array.isArray(requestBody.photos) && requestBody.photos.length > 0;
+      if (!hasPhotoString && !hasPhotosArray) {
+        throw new Error('At least one photo (photo or photos array) is required when rating is 1-3');
       }
     }
     
@@ -856,12 +876,12 @@ const blockRatingsValidation = [
       
       structuralComponents.forEach(component => {
         const rating = requestBody.structural_rating[component];
-        if (rating && rating.rating && rating.rating < 3) {
+        if (rating && rating.rating && rating.rating <= 3) {
           if (!rating.photos || rating.photos.length === 0) {
-            errors.push(`Photos are required for ${component} when rating is below 3`);
+            errors.push(`Photos are required for ${component} when rating is 1-3`);
           }
           if (!rating.condition_comment || rating.condition_comment.trim() === '') {
-            errors.push(`Condition comment is required for ${component} when rating is below 3`);
+            errors.push(`Condition comment is required for ${component} when rating is 1-3`);
           }
         }
       });
@@ -876,14 +896,14 @@ const blockRatingsValidation = [
       
       nonStructuralComponents.forEach(component => {
         const rating = requestBody.non_structural_rating[component];
-        if (rating && rating.rating && rating.rating < 3) {
+        if (rating && rating.rating && rating.rating <= 3) {
           if (!rating.photos || rating.photos.length === 0) {
             const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            errors.push(`Photos are required for ${componentName} when rating is below 3`);
+            errors.push(`Photos are required for ${componentName} when rating is 1-3`);
           }
           if (!rating.condition_comment || rating.condition_comment.trim() === '') {
             const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            errors.push(`Condition comment is required for ${componentName} when rating is below 3`);
+            errors.push(`Condition comment is required for ${componentName} when rating is 1-3`);
           }
         }
       });
@@ -1519,12 +1539,12 @@ const flatCombinedRatingsValidation = [
       
       structuralComponents.forEach(component => {
         const rating = requestBody.structural_rating[component];
-        if (rating && rating.rating && rating.rating < 3) {
+        if (rating && rating.rating && rating.rating <= 3) {
           if (!rating.photos || rating.photos.length === 0) {
-            errors.push(`Photos are required for ${component} when rating is below 3`);
+            errors.push(`Photos are required for ${component} when rating is 1-3`);
           }
           if (!rating.condition_comment || rating.condition_comment.trim() === '') {
-            errors.push(`Condition comment is required for ${component} when rating is below 3`);
+            errors.push(`Condition comment is required for ${component} when rating is 1-3`);
           }
         }
       });
@@ -1540,14 +1560,14 @@ const flatCombinedRatingsValidation = [
       
       nonStructuralComponents.forEach(component => {
         const rating = requestBody.non_structural_rating[component];
-        if (rating && rating.rating && rating.rating < 3) {
+        if (rating && rating.rating && rating.rating <= 3) {
           if (!rating.photos || rating.photos.length === 0) {
             const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            errors.push(`Photos are required for ${componentName} when rating is below 3`);
+            errors.push(`Photos are required for ${componentName} when rating is 1-3`);
           }
           if (!rating.condition_comment || rating.condition_comment.trim() === '') {
             const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            errors.push(`Condition comment is required for ${componentName} when rating is below 3`);
+            errors.push(`Condition comment is required for ${componentName} when rating is 1-3`);
           }
         }
       });

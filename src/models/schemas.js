@@ -25,10 +25,17 @@ const componentInstanceSchema = {
     validate: {
       validator: function(v) {
         if (!v || v.trim() === '') return false;
-        return v.startsWith('data:image/') || 
-               v.startsWith('blob:') || 
-               v.includes('/uploads/') || 
-               /^https?:\/\/.+/i.test(v);
+        // Accept data URIs, blob URLs, uploaded paths, remote URLs,
+        // or local filenames/paths that end with common image extensions
+        const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
+        if (v.startsWith('data:image/') ||
+            v.startsWith('blob:') ||
+            v.includes('/uploads/') ||
+            /^https?:\/\/.+/i.test(v) ||
+            extRegex.test(v)) {
+          return true;
+        }
+        return false;
       },
       message: 'Invalid photo format'
     }
