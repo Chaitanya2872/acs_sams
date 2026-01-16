@@ -1,32 +1,50 @@
 const mongoose = require('mongoose');
 
+// =================== DISTRESS DIMENSIONS SCHEMA ===================
+const distressDimensionsSchema = {
+  length: {
+    type: Number,
+    min: [0, 'Length cannot be negative'],
+    max: [10000, 'Length cannot exceed 10000'],
+  },
+  breadth: {
+    type: Number,
+    min: [0, 'Breadth cannot be negative'],
+    max: [10000, 'Breadth cannot exceed 10000'],
+  },
+  height: {
+    type: Number,
+    min: [0, 'Height cannot be negative'],
+    max: [10000, 'Height cannot exceed 10000'],
+  },
+  unit: {
+    type: String,
+    enum: ['mm', 'cm', 'm', 'inch', 'feet'],
+    default: 'mm'
+  }
+};
+
 // =================== COMPONENT INSTANCE SCHEMA ===================
 // Each component (like beams) can have multiple instances
 const componentInstanceSchema = {
   _id: {
     type: String,
- 
   },
   name: {
     type: String,
-
     trim: true,
     maxlength: 200
   },
   rating: {
     type: Number,
-
     min: [1, 'Rating must be at least 1'],
     max: [5, 'Rating cannot exceed 5']
   },
   photo: {
     type: String,
-
     validate: {
       validator: function(v) {
         if (!v || v.trim() === '') return false;
-        // Accept data URIs, blob URLs, uploaded paths, remote URLs,
-        // or local filenames/paths that end with common image extensions
         const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
         if (v.startsWith('data:image/') ||
             v.startsWith('blob:') ||
@@ -54,6 +72,92 @@ const componentInstanceSchema = {
   inspection_date: {
     type: Date,
     default: Date.now
+  },
+  
+  // NEW FIELDS FOR DISTRESS OBSERVATIONS
+  distress_dimensions: distressDimensionsSchema,
+  
+  repair_methodology: {
+    type: String,
+    trim: true,
+    maxlength: 2000
+  },
+  
+  distress_types: [{
+    type: String,
+    enum: ['physical', 'chemical', 'mechanical']
+  }],
+  
+  pdf_files: [{
+    filename: {
+      type: String,
+      required: true
+    },
+    file_path: {
+      type: String,
+      required: true
+    },
+    file_size: {
+      type: Number
+    },
+    uploaded_at: {
+      type: Date,
+      default: Date.now
+    }
+  }]
+};
+
+// =================== TEST RESULT SCHEMA ===================
+const testResultSchema = {
+  test_id: {
+    type: String,
+    required: true
+  },
+  test_name: {
+    type: String,
+    required: true,
+    enum: [
+      'rebound_hammer',
+      'ultra_pulse_velocity',
+      'half_cell_potential',
+      'carbonation_depth',
+      'cover_meter',
+      'core_cutting',
+      'pull_out',
+      'chemical_analysis',
+      'ultrasonic_thickness_gauge',
+      'magnetic_particle',
+      'liquid_penetration',
+      'hardness_test'
+    ]
+  },
+  component_type: {
+    type: String,
+    required: true
+  },
+  component_id: {
+    type: String,
+    required: true
+  },
+  test_date: {
+    type: Date,
+    default: Date.now
+  },
+  test_results: {
+    type: mongoose.Schema.Types.Mixed
+  },
+  test_report_pdf: {
+    filename: String,
+    file_path: String,
+    uploaded_at: Date
+  },
+  tested_by: {
+    type: String,
+    maxlength: 100
+  },
+  remarks: {
+    type: String,
+    maxlength: 1000
   }
 };
 
@@ -93,6 +197,12 @@ const industrialBlockSchema = {
     slab: { type: [componentInstanceSchema], default: undefined },
     foundation: {type: [componentInstanceSchema], default: undefined},
     roof_truss: {type: [componentInstanceSchema], default: undefined},
+    // NEW: For steel structures
+    connections: {type: [componentInstanceSchema], default: undefined},
+    bracings: {type: [componentInstanceSchema], default: undefined},
+    purlins: {type: [componentInstanceSchema], default: undefined},
+    channels: {type: [componentInstanceSchema], default: undefined},
+    steel_flooring: {type: [componentInstanceSchema], default: undefined},
     
     overall_average: {
       type: Number,
@@ -111,6 +221,7 @@ const industrialBlockSchema = {
   
   // BLOCK-LEVEL NON-STRUCTURAL RATINGS (Array of instances)
   non_structural_rating: {
+    // For RCC structures
     walls_cladding:{type: [componentInstanceSchema], default: undefined},
     industrial_flooring: {type: [componentInstanceSchema], default: undefined},
     ventilation:{type: [componentInstanceSchema], default: undefined},
@@ -119,6 +230,28 @@ const industrialBlockSchema = {
     drainage: {type: [componentInstanceSchema], default: undefined},
     overhead_cranes: {type: [componentInstanceSchema], default: undefined},
     loading_docks: {type: [componentInstanceSchema], default: undefined},
+    
+    // NEW: For steel structures
+    cladding_partition_panels: {type: [componentInstanceSchema], default: undefined},
+    roof_sheeting: {type: [componentInstanceSchema], default: undefined},
+    chequered_plate: {type: [componentInstanceSchema], default: undefined},
+    doors_windows: {type: [componentInstanceSchema], default: undefined},
+    flooring: {type: [componentInstanceSchema], default: undefined},
+    electrical_wiring: {type: [componentInstanceSchema], default: undefined},
+    sanitary_fittings: {type: [componentInstanceSchema], default: undefined},
+    railings: {type: [componentInstanceSchema], default: undefined},
+    water_tanks: {type: [componentInstanceSchema], default: undefined},
+    plumbing: {type: [componentInstanceSchema], default: undefined},
+    sewage_system: {type: [componentInstanceSchema], default: undefined},
+    panel_board_transformer: {type: [componentInstanceSchema], default: undefined},
+    lift: {type: [componentInstanceSchema], default: undefined},
+    
+    // Dynamic/custom non-structural components
+    custom_components: {
+      type: Map,
+      of: [componentInstanceSchema],
+      default: undefined
+    },
     
     overall_average: {
       type: Number,
@@ -150,6 +283,14 @@ const industrialBlockSchema = {
       default: Date.now
     }
   },
+  
+  // NEW: Testing requirements for block
+  testing_required: {
+    type: Boolean,
+    default: false
+  },
+  
+  test_results: [testResultSchema],
   
   block_notes: {
     type: String,
@@ -230,6 +371,13 @@ const flatSchema = {
     panel_board:{ type: [componentInstanceSchema], default: undefined },
     lifts: { type: [componentInstanceSchema], default: undefined },
     
+    // Dynamic/custom non-structural components
+    custom_components: {
+      type: Map,
+      of: [componentInstanceSchema],
+      default: undefined
+    },
+    
     overall_average: {
       type: Number,
       min: 1,
@@ -260,6 +408,14 @@ const flatSchema = {
       default: Date.now
     }
   },
+  
+  // NEW: Testing requirements for flat (only for structural members)
+  testing_required: {
+    type: Boolean,
+    default: false
+  },
+  
+  test_results: [testResultSchema],
   
   flat_notes: {
     type: String,
@@ -322,12 +478,12 @@ const floorSchema = {
   flats: [flatSchema],
   blocks: [industrialBlockSchema],
   
-  // FLOOR-LEVEL STRUCTURAL RATINGS (Array of instances) - For commercial/industrial
+  // FLOOR-LEVEL STRUCTURAL RATINGS
   structural_rating: {
-    beams:{ type: [componentInstanceSchema], default: undefined },
+    beams: { type: [componentInstanceSchema], default: undefined },
     columns: { type: [componentInstanceSchema], default: undefined },
     slab: { type: [componentInstanceSchema], default: undefined },
-    foundation:{ type: [componentInstanceSchema], default: undefined },
+    foundation: { type: [componentInstanceSchema], default: undefined },
     
     overall_average: {
       type: Number,
@@ -344,12 +500,20 @@ const floorSchema = {
     }
   },
   
-  // FLOOR-LEVEL NON-STRUCTURAL RATINGS (Array of instances)
+  // FLOOR-LEVEL NON-STRUCTURAL RATINGS
   non_structural_rating: {
     walls: { type: [componentInstanceSchema], default: undefined },
     flooring: { type: [componentInstanceSchema], default: undefined },
-    electrical_system:{ type: [componentInstanceSchema], default: undefined },
-    fire_safety:{ type: [componentInstanceSchema], default: undefined },
+    electrical_system: { type: [componentInstanceSchema], default: undefined },
+    fire_safety: { type: [componentInstanceSchema], default: undefined },
+    drainage: { type: [componentInstanceSchema], default: undefined },
+    
+    // Dynamic/custom non-structural components
+    custom_components: {
+      type: Map,
+      of: [componentInstanceSchema],
+      default: undefined
+    },
     
     overall_average: {
       type: Number,
@@ -382,412 +546,270 @@ const floorSchema = {
     }
   },
   
+  // NEW: Testing requirements for floor
+  testing_required: {
+    type: Boolean,
+    default: false
+  },
+  
+  test_results: [testResultSchema],
+  
   floor_notes: {
     type: String,
-    maxlength: 1000
+    maxlength: 500
+  },
+  last_inspection_date: {
+    type: Date
   }
 };
+
+// =================== TEST FORMAT SCHEMA ===================
+const testFormatSchema = new mongoose.Schema({
+  format_id: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  test_name: {
+    type: String,
+    required: true,
+    enum: [
+      'rebound_hammer',
+      'ultra_pulse_velocity',
+      'half_cell_potential',
+      'carbonation_depth',
+      'cover_meter',
+      'core_cutting',
+      'pull_out',
+      'chemical_analysis',
+      'ultrasonic_thickness_gauge',
+      'magnetic_particle',
+      'liquid_penetration',
+      'hardness_test',
+      'custom' // For user-defined tests
+    ]
+  },
+  display_name: {
+    type: String,
+    required: true,
+    maxlength: 100
+  },
+  format_template: {
+    type: mongoose.Schema.Types.Mixed,
+    required: true
+  },
+  field_definitions: [{
+    field_name: {
+      type: String,
+      required: true
+    },
+    field_type: {
+      type: String,
+      enum: ['text', 'number', 'date', 'select', 'multiselect', 'file'],
+      required: true
+    },
+    field_label: {
+      type: String,
+      required: true
+    },
+    required: {
+      type: Boolean,
+      default: false
+    },
+    options: [String], // For select/multiselect
+    validation_rules: {
+      type: mongoose.Schema.Types.Mixed
+    }
+  }],
+  is_custom: {
+    type: Boolean,
+    default: false
+  },
+  created_by: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  created_at: {
+    type: Date,
+    default: Date.now
+  },
+  updated_at: {
+    type: Date,
+    default: Date.now
+  }
+});
 
 // =================== STRUCTURE SCHEMA ===================
 const structureSchema = new mongoose.Schema({
   structural_identity: {
+    structural_identity_number: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      match: /^[A-Z]{2}[0-9]{2}[A-Z]{4}[A-Z0-9]{2}[0-9]{3}$/
+    },
     uid: {
       type: String,
       required: true,
-      trim: true,
-      uppercase: true,
-      match: [/^[A-Z0-9]{8,12}$/, 'UID must be 8-12 alphanumeric characters']
+      unique: true
     },
+    type_of_structure: {
+      type: String,
+      enum: ['residential', 'commercial', 'educational', 'hospital', 'industrial'],
+      required: true
+    },
+    // NEW: Structure subtype (RCC or Steel)
+    structure_subtype: {
+      type: String,
+      enum: ['rcc', 'steel'],
+      required: true,
+      default: 'rcc'
+    },
+    commercial_subtype: {
+      type: String,
+      enum: ['only_commercial', 'commercial_residential']
+    },
+    // NEW: Age of structure in years (0-100)
+    age_of_structure: {
+      type: Number,
+      min: [0, 'Age cannot be negative'],
+      max: [100, 'Age cannot exceed 100 years'],
+      required: true
+    }
+  },
+  
+  location: {
     structure_name: {
       type: String,
       trim: true,
       maxlength: 200
     },
-    structural_identity_number: {
-      type: String,
-      sparse: true,
-      trim: true,
-      uppercase: true,
-      match: [/^[A-Z0-9]{17}$/, 'Structural Identity Number must be exactly 17 characters']
-    },
     zip_code: {
       type: String,
-      trim: true,
-      match: [/^\d{6}$/, 'Zip code must be exactly 6 digits']
+      required: true,
+      match: /^[0-9]{6}$/
     },
     state_code: {
       type: String,
-      trim: true,
+      required: true,
       uppercase: true,
-      match: [/^[A-Z]{2}$/, 'State code must be exactly 2 uppercase letters']
+      match: /^[A-Z]{2}$/
     },
     district_code: {
       type: String,
-      trim: true,
-      match: [/^\d{2}$/, 'District code must be exactly 2 digits']
+      required: true,
+      match: /^[0-9]{2}$/
     },
     city_name: {
       type: String,
-      trim: true,
+      required: true,
       uppercase: true,
-      maxlength: 50
+      maxlength: 4
     },
     location_code: {
       type: String,
-      trim: true,
+      required: true,
       uppercase: true,
-      maxlength: 10
+      maxlength: 2
     },
-    structure_number: {
-      type: String,
-      trim: true,
-      maxlength: 20
+    longitude: {
+      type: Number,
+      required: true,
+      min: -180,
+      max: 180
     },
-    type_of_structure: {
-      type: String,
-      enum: ['residential', 'commercial', 'educational', 'hospital', 'industrial'],
-      default: 'residential'
-    },
-    commercial_subtype: {
-      type: String,
-      enum: ['only_commercial', 'commercial_residential'],
-      required: function() {
-        return this.type_of_structure === 'commercial';
-      }
-    },
-    type_code: {
-      type: String,
-      match: [/^\d{2}$/, 'Type code must be exactly 2 digits']
-    }
-  },
-  
-  location: {
-    coordinates: {
-      latitude: {
-        type: Number,
-        min: [-90, 'Latitude must be between -90 and 90'],
-        max: [90, 'Latitude must be between -90 and 90']
-      },
-      longitude: {
-        type: Number,
-        min: [-180, 'Longitude must be between -180 and 180'],
-        max: [180, 'Longitude must be between -180 and 180']
-      }
+    latitude: {
+      type: Number,
+      required: true,
+      min: -90,
+      max: 90
     },
     address: {
       type: String,
       trim: true,
       maxlength: 500
-    },
-    landmark: {
-      type: String,
-      trim: true,
-      maxlength: 200
-    }
-  },
-
-  status: {
-    type: String,
-    enum: [
-      'draft', 
-      'location_completed', 
-      'admin_completed', 
-      'geometric_completed', 
-      'ratings_in_progress', 
-      'ratings_completed', 
-      'submitted',        // FE submits
-      'under_testing',    // TE is testing
-      'tested',           // TE completed testing
-      'under_validation', // VE is validating
-      'validated',        // VE completed validation
-      'approved',         // AD approved
-      'rejected'          // Any stage rejection
-    ],
-    default: 'draft'
-  },
-  
-  // ✅ NEW: Workflow tracking
-  workflow: {
-    // FE Submission
-    submitted_by: {
-      user_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      name: String,
-      email: String,
-      role: {
-        type: String,
-        enum: ['FE']
-      },
-      date: Date
-    },
-    
-    // TE Testing
-    tested_by: {
-      user_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      name: String,
-      email: String,
-      role: {
-        type: String,
-        enum: ['TE']
-      },
-      date: Date,
-      test_notes: {
-        type: String,
-        maxlength: 2000
-      }
-    },
-    
-    // VE Validation
-    validated_by: {
-      user_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      name: String,
-      email: String,
-      role: {
-        type: String,
-        enum: ['VE']
-      },
-      date: Date,
-      validation_notes: {
-        type: String,
-        maxlength: 2000
-      }
-    },
-    
-    // AD Approval
-    approved_by: {
-      user_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      name: String,
-      email: String,
-      role: {
-        type: String,
-        enum: ['AD']
-      },
-      date: Date,
-      approval_notes: {
-        type: String,
-        maxlength: 2000
-      }
-    },
-    
-    // ✅ FIXED: Rejection tracking - removed required: true
-    rejected_by: {
-      user_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      name: String,
-      email: String,
-      role: {
-        type: String,
-        enum: ['TE', 'VE', 'AD']
-      },
-      date: Date,
-      rejection_reason: {
-        type: String,
-        // ✅ REMOVED: required: true
-        // We validate this in the controller/routes instead
-        maxlength: 2000
-      },
-      rejection_stage: {
-        type: String,
-        enum: ['testing', 'validation', 'approval']
-      }
     }
   },
   
-  administration: {
-    client_name: {
-      type: String,
-      trim: true,
-      maxlength: 100
-    },
-    custodian: {
-      type: String,
-      trim: true,
-      maxlength: 100
-    },
-    engineer_designation: {
-      type: String,
-      trim: true,
-      maxlength: 100
-    },
-    contact_details: {
-      type: String,
-      trim: true,
-      match: [/^[6-9]\d{9}$/, 'Contact details must be a valid 10-digit Indian mobile number']
-    },
-    email_id: {
-      type: String,
-      trim: true,
-      lowercase: true,
-      match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email address']
-    },
-    organization: {
-      type: String,
-      trim: true,
-      maxlength: 200
-    }
+  administrative_details: {
+    // ... (keep existing fields from original schema)
   },
   
   geometric_details: {
     number_of_floors: {
       type: Number,
-      min: [1, 'Number of floors must be at least 1'],
-      max: [200, 'Number of floors cannot exceed 200']
+      min: [1, 'Must have at least 1 floor'],
+      max: [200, 'Cannot exceed 200 floors']
     },
-    has_parking_floors: {
-      type: Boolean,
-      default: false
-    },
-    number_of_parking_floors: {
+    total_built_up_area_sq_mts: {
       type: Number,
-      min: [0, 'Number of parking floors cannot be negative'],
-      max: [10, 'Number of parking floors cannot exceed 10'],
-      default: 0
+      min: [1, 'Built-up area must be at least 1 square meter'],
+      max: [1000000, 'Built-up area cannot exceed 1,000,000 square meters']
     },
-    structure_height: {
+    total_carpet_area_sq_mts: {
       type: Number,
-      min: [3, 'Structure height must be at least 3 meters'],
-      max: [1000, 'Structure height cannot exceed 1000 meters']
+      min: [1, 'Carpet area must be at least 1 square meter'],
+      max: [1000000, 'Carpet area cannot exceed 1,000,000 square meters']
     },
-    structure_width: {
+    year_of_construction: {
       type: Number,
-      min: [5, 'Structure width must be at least 5 meters'],
-      max: [1000, 'Structure width cannot exceed 1000 meters']
+      min: [1800, 'Year must be 1800 or later'],
+      max: [new Date().getFullYear() + 5, 'Year cannot be more than 5 years in the future']
     },
-    structure_length: {
+    basement_floors: {
       type: Number,
-      min: [5, 'Structure length must be at least 5 meters'],
-      max: [1000, 'Structure length cannot exceed 1000 meters']
+      default: 0,
+      min: [0, 'Cannot have negative basement floors'],
+      max: [10, 'Cannot exceed 10 basement floors']
     },
-    
-    floors: [floorSchema],
-    
-    building_age: {
-      type: Number,
-      min: [0, 'Building age cannot be negative'],
-      max: [200, 'Building age cannot exceed 200 years']
+    parking_type: {
+      type: String,
+      enum: ['none', 'surface', 'basement', 'stilt', 'mechanical', 'mixed']
     },
-    construction_year: {
-      type: Number,
-      min: [1800, 'Construction year seems too old'],
-      max: [new Date().getFullYear() + 5, 'Construction year cannot be in the far future']
-    }
+    floors: [floorSchema]
   },
   
   status: {
     type: String,
-    enum: ['draft', 'location_completed', 'admin_completed', 'geometric_completed', 
-           'ratings_in_progress', 'ratings_completed', 'submitted', 'approved'],
+    enum: ['draft', 'submitted', 'in_testing', 'tested', 'in_validation', 'validated', 'approved', 'rejected'],
     default: 'draft'
   },
   
-  general_notes: {
-    type: String,
-    maxlength: 5000
+  // NEW: Overall testing requirement for structure
+  overall_testing_required: {
+    type: Boolean,
+    default: false
   },
   
-  remarks: {
-    fe_remarks: [{
-      text: {
-        type: String,
-        required: true,
-        maxlength: 2000,
-        trim: true
+  // NEW: Structure-level test results
+  structure_test_results: [testResultSchema],
+  
+  // NEW: Report generation tracking
+  reports: {
+    observations_with_quantifications: {
+      generated: {
+        type: Boolean,
+        default: false
       },
-      author_name: {
-        type: String,
-        required: true,
-        trim: true
-      },
-      author_role: {
-        type: String,
-        enum: ['FE'],
-        required: true
-      },
-      created_at: {
-        type: Date,
-        default: Date.now
-      },
-      updated_at: {
-        type: Date,
-        default: Date.now
-      }
-    }],
-
-    te_remarks: [{               // ✅ Add this
-    text: {
-      type: String,
-      required: true,
-      maxlength: 2000,
-      trim: true
+      file_path: String,
+      generated_at: Date
     },
-    author_name: {
-      type: String,
-      required: true,
-      trim: true
+    non_destructive_test_results: {
+      generated: {
+        type: Boolean,
+        default: false
+      },
+      file_path: String,
+      generated_at: Date
     },
-    author_role: {
-      type: String,
-      enum: ['TE'],           // ✔ only TE
-      required: true
-    },
-    created_at: {
-      type: Date,
-      default: Date.now
-    },
-    updated_at: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-    ve_remarks: [{
-      text: {
-        type: String,
-        required: true,
-        maxlength: 2000,
-        trim: true
+    bill_of_quantities: {
+      generated: {
+        type: Boolean,
+        default: false
       },
-      author_name: {
-        type: String,
-        required: true,
-        trim: true
-      },
-      author_role: {
-        type: String,
-        enum: ['VE'],
-        required: true
-      },
-      created_at: {
-        type: Date,
-        default: Date.now
-      },
-      updated_at: {
-        type: Date,
-        default: Date.now
-      }
-    }],
-    last_updated_by: {
-      role: {
-        type: String,
-        enum: ['FE', 'VE', 'TE']
-      },
-      name: String,
-      date: {
-        type: Date,
-        default: Date.now
-      }
+      file_path: String,
+      generated_at: Date
     }
   },
   
@@ -974,6 +996,9 @@ userSchema.index({ 'structures.structural_identity.structural_identity_number': 
 userSchema.index({ 'structures.structural_identity.uid': 1 });
 userSchema.index({ 'structures.status': 1 });
 
+testFormatSchema.index({ test_name: 1 });
+testFormatSchema.index({ is_custom: 1 });
+
 // =================== VIRTUAL FIELDS ===================
 userSchema.virtual('full_name').get(function() {
   return `${this.profile?.first_name || ''} ${this.profile?.last_name || ''}`.trim();
@@ -995,6 +1020,11 @@ structureSchema.virtual('total_units').get(function() {
 
 // =================== MIDDLEWARE ===================
 userSchema.pre('save', function(next) {
+  this.updated_at = new Date();
+  next();
+});
+
+testFormatSchema.pre('save', function(next) {
   this.updated_at = new Date();
   next();
 });
@@ -1096,9 +1126,11 @@ tokenSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
 const User = mongoose.model('User', userSchema);
 const OTP = mongoose.model('OTP', otpSchema);
 const Token = mongoose.model('Token', tokenSchema);
+const TestFormat = mongoose.model('TestFormat', testFormatSchema);
 
 module.exports = {
   User,
   OTP,
-  Token
+  Token,
+  TestFormat
 };

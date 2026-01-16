@@ -54,6 +54,11 @@ this.calculateNonStructuralAverages = this.calculateNonStructuralAverages.bind(t
 this.countComponentsWithPhotos = this.countComponentsWithPhotos.bind(this);
 this.countLowRatedComponents = this.countLowRatedComponents.bind(this);
 this.extractFloorRatingImages = this.extractFloorRatingImages.bind(this);
+
+// In the constructor, add these lines:
+this.getAvailableComponentsBySubtype = this.getAvailableComponentsBySubtype.bind(this);
+this.validateComponentForSubtype = this.validateComponentForSubtype.bind(this);
+this.validateComponentsForStructureType = this.validateComponentsForStructureType.bind(this);
   
   // Block-level bulk component ratings
   this.saveBlockStructuralComponentsBulk = this.saveBlockStructuralComponentsBulk.bind(this);
@@ -263,19 +268,44 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
 }
 
   // =================== SCREEN 1: LOCATION ===================
- async saveLocationScreen(req, res) {
+async saveLocationScreen(req, res) {
   try {
     const { id } = req.params;
     const { 
-      structure_name, zip_code, state_code, district_code, city_name, location_code, 
-      type_of_structure, commercial_subtype, longitude, latitude, address 
+      structure_name, 
+      zip_code, 
+      state_code, 
+      district_code, 
+      city_name, 
+      location_code, 
+      type_of_structure, 
+      structure_subtype,        // ⭐ NEW
+      age_of_structure,         // ⭐ NEW
+      commercial_subtype, 
+      longitude, 
+      latitude, 
+      address 
     } = req.body;
     
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
+    // ⭐ NEW: Validate structure_subtype
+    if (!structure_subtype || !['rcc', 'steel'].includes(structure_subtype)) {
+      return sendErrorResponse(res, 400, 'Structure subtype is required and must be either "rcc" or "steel"');
+    }
+    
+    // ⭐ NEW: Validate age_of_structure
+    if (age_of_structure === undefined || age_of_structure === null) {
+      return sendErrorResponse(res, 400, 'Age of structure is required');
+    }
+    
+    if (age_of_structure < 0 || age_of_structure > 100) {
+      return sendErrorResponse(res, 400, 'Age of structure must be between 0 and 100 years');
+    }
+    
     // Validate commercial subtype requirement
     if (type_of_structure === 'commercial' && !commercial_subtype) {
-      return sendErrorResponse(res, 'Commercial subtype is required for commercial structures', 400);
+      return sendErrorResponse(res, 400, 'Commercial subtype is required for commercial structures');
     }
     
     // Get next sequence number for this location
@@ -304,7 +334,9 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
       location_code: generatedNumbers.components.location_code,
       structure_number: generatedNumbers.components.structure_sequence,
       type_of_structure: type_of_structure,
-      type_code: generatedNumbers.components.type_code
+      type_code: generatedNumbers.components.type_code,
+      structure_subtype: structure_subtype,        // ⭐ NEW
+      age_of_structure: parseInt(age_of_structure) // ⭐ NEW
     };
     
     // Only add commercial_subtype if structure is commercial
@@ -314,12 +346,16 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     
     structure.structural_identity = structuralIdentity;
     
-    // Update location coordinates
+    // Update location
     structure.location = {
-      coordinates: {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude)
-      },
+      structure_name: structure_name || '',
+      zip_code: zip_code,
+      state_code: state_code,
+      district_code: district_code,
+      city_name: city_name,
+      location_code: location_code,
+      longitude: parseFloat(longitude),
+      latitude: parseFloat(latitude),
       address: address || ''
     };
     
@@ -327,44 +363,57 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     structure.status = 'location_completed';
     await user.save();
     
-    console.log(`✅ Generated Structure Number: ${generatedNumbers.structural_identity_number}`);
+    console.log(`✅ Structure Number: ${generatedNumbers.structural_identity_number}`);
+    console.log(`✅ Structure Subtype: ${structure_subtype}`);
+    console.log(`✅ Age: ${age_of_structure} years`);
     
-    sendSuccessResponse(res, 'Location details saved successfully', {
+    sendSuccessResponse(res, 200, {
       structure_id: id,
       uid: structure.structural_identity.uid,
       structure_name: structure.structural_identity.structure_name,
       structural_identity_number: structure.structural_identity.structural_identity_number,
       type_of_structure: structure.structural_identity.type_of_structure,
+      structure_subtype: structure.structural_identity.structure_subtype,     // ⭐ NEW
+      age_of_structure: structure.structural_identity.age_of_structure,       // ⭐ NEW
       commercial_subtype: structure.structural_identity.commercial_subtype,
       location: structure.location,
       formatted_display: generatedNumbers.formatted_display,
-      status: structure.status
+      status: structure.status,
+      message: 'Location details saved successfully'
     });
 
   } catch (error) {
     console.error('❌ Location save error:', error);
-    sendErrorResponse(res, 'Failed to save location details', 500, error.message);
+    return sendErrorResponse(res, 500, 'Failed to save location details', error.message);
   }
 }
 
 
   async getLocationScreen(req, res) {
-    try {
-      const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-      
-      sendSuccessResponse(res, 'Location details retrieved successfully', {
-        structure_id: id,
-        uid: structure.structural_identity?.uid,
-        structural_identity: structure.structural_identity || {},
-        location: structure.location || { coordinates: {} }
-      });
+  try {
+    const { id } = req.params;
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    sendSuccessResponse(res, 200, {
+      structure_id: id,
+      uid: structure.structural_identity?.uid,
+      structural_identity: {
+        ...structure.structural_identity?.toObject?.() || structure.structural_identity || {},
+        structure_subtype: structure.structural_identity?.structure_subtype || 'rcc',  // ⭐ NEW
+        age_of_structure: structure.structural_identity?.age_of_structure || 0         // ⭐ NEW
+      },
+      location: structure.location || { 
+        longitude: null,
+        latitude: null,
+        address: ''
+      }
+    });
 
-    } catch (error) {
-      console.error('❌ Location get error:', error);
-      sendErrorResponse(res, 'Failed to get location details', 500, error.message);
-    }
+  } catch (error) {
+    console.error('❌ Location get error:', error);
+    return sendErrorResponse(res, 500, 'Failed to get location details', error.message);
   }
+}
 
   async updateLocationScreen(req, res) {
     return this.saveLocationScreen(req, res);
@@ -1413,6 +1462,142 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
   });
 
   return ratingComponent;
+}
+
+
+/**
+ * NEW METHOD 4: getAvailableComponentsBySubtype
+ * Location: Add after location methods
+ * Purpose: Return valid components based on structure type
+ */
+getAvailableComponentsBySubtype(structureSubtype, structureType) {
+  let availableComponents = {
+    structural: [],
+    non_structural: []
+  };
+
+  if (structureSubtype === 'rcc') {
+    availableComponents.structural = [
+      { key: 'beams', label: 'Beams', category: 'structural' },
+      { key: 'columns', label: 'Columns', category: 'structural' },
+      { key: 'slab', label: 'Slab', category: 'structural' },
+      { key: 'foundation', label: 'Foundation', category: 'structural' },
+      { key: 'roof_truss', label: 'Roof Truss', category: 'structural' }
+    ];
+
+    if (structureType === 'industrial') {
+      availableComponents.non_structural = [
+        { key: 'walls_cladding', label: 'Walls/Cladding' },
+        { key: 'industrial_flooring', label: 'Industrial Flooring' },
+        { key: 'ventilation', label: 'Ventilation' },
+        { key: 'electrical_system', label: 'Electrical System' },
+        { key: 'fire_safety', label: 'Fire Safety' },
+        { key: 'drainage', label: 'Drainage' },
+        { key: 'overhead_cranes', label: 'Overhead Cranes' },
+        { key: 'loading_docks', label: 'Loading Docks' }
+      ];
+    } else {
+      availableComponents.non_structural = [
+        { key: 'brick_plaster', label: 'Brick/Plaster' },
+        { key: 'doors_windows', label: 'Doors & Windows' },
+        { key: 'flooring_tiles', label: 'Flooring/Tiles' },
+        { key: 'electrical_wiring', label: 'Electrical Wiring' },
+        { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
+        { key: 'railings', label: 'Railings' },
+        { key: 'water_tanks', label: 'Water Tanks' },
+        { key: 'plumbing', label: 'Plumbing' },
+        { key: 'sewage_system', label: 'Sewage System' },
+        { key: 'panel_board', label: 'Panel Board' },
+        { key: 'lifts', label: 'Lifts' }
+      ];
+    }
+  } else if (structureSubtype === 'steel') {
+    availableComponents.structural = [
+      { key: 'foundation', label: 'Foundation (RCC)' },
+      { key: 'columns', label: 'Columns (Steel)' },
+      { key: 'beams', label: 'Beams (Steel)' },
+      { key: 'roof_truss', label: 'Roof Trusses' },
+      { key: 'steel_flooring', label: 'Steel Flooring' },
+      { key: 'connections', label: 'Connections' },
+      { key: 'bracings', label: 'Bracings' },
+      { key: 'purlins', label: 'Purlins' },
+      { key: 'channels', label: 'Channels' }
+    ];
+
+    availableComponents.non_structural = [
+      { key: 'cladding_partition_panels', label: 'Cladding/Partition Panels' },
+      { key: 'roof_sheeting', label: 'Roof Sheeting' },
+      { key: 'chequered_plate', label: 'Chequered Plate' },
+      { key: 'doors_windows', label: 'Doors & Windows' },
+      { key: 'flooring', label: 'Flooring' },
+      { key: 'electrical_wiring', label: 'Electrical Wiring' },
+      { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
+      { key: 'railings', label: 'Railings' },
+      { key: 'water_tanks', label: 'Water Tanks' },
+      { key: 'plumbing', label: 'Plumbing' },
+      { key: 'sewage_system', label: 'Sewage System' },
+      { key: 'panel_board_transformer', label: 'Panel/Board Transformer' },
+      { key: 'lift', label: 'Lift' }
+    ];
+  }
+
+  return availableComponents;
+}
+
+/**
+ * NEW METHOD 5: validateComponentForSubtype
+ * Location: Add after getAvailableComponentsBySubtype
+ * Purpose: Validate single component against structure type
+ */
+validateComponentForSubtype(componentType, structureSubtype, structureType) {
+  const availableComponents = this.getAvailableComponentsBySubtype(structureSubtype, structureType);
+  
+  const isStructural = availableComponents.structural.some(c => c.key === componentType);
+  const isNonStructural = availableComponents.non_structural.some(c => c.key === componentType);
+  
+  return {
+    isValid: isStructural || isNonStructural,
+    category: isStructural ? 'structural' : (isNonStructural ? 'non_structural' : null),
+    availableComponents: availableComponents
+  };
+}
+
+/**
+ * NEW METHOD 6: validateComponentsForStructureType
+ * Location: Add after validateComponentForSubtype
+ * Purpose: Validate bulk components against structure type
+ */
+async validateComponentsForStructureType(structure, componentsData) {
+  const structureSubtype = structure.structural_identity?.structure_subtype || 'rcc';
+  const structureType = structure.structural_identity?.type_of_structure || 'residential';
+  
+  const errors = [];
+  
+  for (const structureData of componentsData) {
+    const componentType = structureData.component_type;
+    
+    const validation = this.validateComponentForSubtype(
+      componentType,
+      structureSubtype,
+      structureType
+    );
+    
+    if (!validation.isValid) {
+      errors.push({
+        component_type: componentType,
+        message: `Component type "${componentType}" is not available for ${structureSubtype.toUpperCase()} structures of type ${structureType}`
+      });
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors: errors,
+    structureInfo: {
+      subtype: structureSubtype,
+      type: structureType
+    }
+  };
 }
 
   async updateFlatCombinedRatings(req, res) {
@@ -5495,18 +5680,53 @@ async getFloorNonStructuralComponents(req, res) {
 /**
  * Save multiple structural component types for a floor
  */
+/**
+ * Save multiple structural component types for a floor (UPDATED WITH VALIDATION)
+ * POST /api/structures/:id/floors/:floorId/structural/bulk
+ */
 async saveFloorStructuralComponentsBulk(req, res) {
   try {
     const { id, floorId } = req.params;
     const { structures } = req.body;
-    
-    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-    
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
+
+    console.log('📥 saveFloorStructuralComponentsBulk called');
+    console.log('Structure ID:', id);
+    console.log('Floor ID:', floorId);
+    console.log('Structures data:', JSON.stringify(structures, null, 2));
+
+    // Validate structures array exists
+    if (!structures || structures.length === 0) {
+      return sendErrorResponse(res, 400, 'No component structures provided');
     }
     
+    // Find user and structure
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // ⭐ NEW: Validate components against structure subtype
+    const validation = await this.validateComponentsForStructureType(structure, structures);
+    
+    if (!validation.isValid) {
+      console.log('❌ Component validation failed:', validation.errors);
+      return sendErrorResponse(res, 400, 'Invalid component types for this structure', {
+        structure_subtype: validation.structureInfo.subtype,
+        structure_type: validation.structureInfo.type,
+        errors: validation.errors,
+        message: 'The components you are trying to save are not valid for this structure type. Please select appropriate components.'
+      });
+    }
+    
+    console.log('✅ Component validation passed');
+    
+    // Find the floor
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      console.log('❌ Floor not found:', floorId);
+      return sendErrorResponse(res, 404, 'Floor not found');
+    }
+    
+    console.log('✅ Floor found:', floor.floor_label_name);
+    
+    // Initialize structural_rating if it doesn't exist
     if (!floor.structural_rating) {
       floor.structural_rating = {};
     }
@@ -5515,61 +5735,134 @@ async saveFloorStructuralComponentsBulk(req, res) {
     let totalComponentsSaved = 0;
     const savedComponentTypes = [];
     
+    // Process each component type
     structures.forEach(({ component_type, components }) => {
-      // ✅ FIXED: Auto-generate component IDs if not provided
-      const formattedComponents = components.map(comp => ({
-        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
-        name: comp.name,
-        rating: parseInt(comp.rating),
-        photo: comp.photo,
-        condition_comment: comp.condition_comment,
-        inspector_notes: comp.inspector_notes || '',
-        inspection_date: inspectionDate
-      }));
+      console.log(`📝 Processing component type: ${component_type}`);
+      console.log(`   Components count: ${components.length}`);
       
+      // Format components with auto-generated IDs if not provided
+      const formattedComponents = components.map(comp => {
+        const componentId = comp._id || this.generateComponentId(component_type);
+        
+        return {
+          _id: componentId,
+          name: comp.name,
+          rating: parseInt(comp.rating),
+          photo: comp.photo,
+          condition_comment: comp.condition_comment,
+          inspector_notes: comp.inspector_notes || '',
+          inspection_date: inspectionDate,
+          // ⭐ NEW: Add distress fields if provided
+          distress_dimensions: comp.distress_dimensions || undefined,
+          repair_methodology: comp.repair_methodology || undefined,
+          distress_types: comp.distress_types || undefined,
+          pdf_files: comp.pdf_files || undefined
+        };
+      });
+      
+      // Save components to floor
       floor.structural_rating[component_type] = formattedComponents;
       totalComponentsSaved += formattedComponents.length;
+      
       savedComponentTypes.push({
         component_type,
         count: formattedComponents.length,
-        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+        components: formattedComponents.map(c => ({ 
+          _id: c._id, 
+          name: c.name,
+          rating: c.rating 
+        }))
       });
+      
+      console.log(`   ✅ Saved ${formattedComponents.length} components for ${component_type}`);
     });
     
+    // Calculate averages
+    console.log('📊 Calculating floor structural average...');
     this.calculateFloorStructuralAverage(floor);
     this.calculateFloorCombinedRating(floor);
     
+    // Update structure metadata
     structure.creation_info.last_updated_date = new Date();
+    
+    console.log('💾 Saving to database...');
     await user.save();
     
-    sendSuccessResponse(res, 'Floor structural components saved successfully', {
+    console.log('✅ Floor structural components saved successfully');
+    console.log(`   Total components: ${totalComponentsSaved}`);
+    console.log(`   Component types: ${savedComponentTypes.length}`);
+    
+    sendSuccessResponse(res, 200, {
       structure_id: id,
       floor_id: floorId,
+      floor_label: floor.floor_label_name,
       total_components_saved: totalComponentsSaved,
-      component_types_saved: savedComponentTypes
+      component_types_saved: savedComponentTypes,
+      structural_rating: {
+        overall_average: floor.structural_rating?.overall_average,
+        health_status: floor.structural_rating?.health_status
+      },
+      message: 'Floor structural components saved successfully'
     });
     
   } catch (error) {
     console.error('❌ Save floor structural components bulk error:', error);
-    sendErrorResponse(res, 'Failed to save floor structural components', 500, error.message);
+    console.error('❌ Error stack:', error.stack);
+    return sendErrorResponse(res, 500, 'Failed to save floor structural components', error.message);
   }
 }
 
+// =================== METHOD 2: saveFloorNonStructuralComponentsBulk ===================
+// Location: Line ~5561
+// Description: Save multiple non-structural component types for a floor
+
 /**
- * Save multiple non-structural component types for a floor
+ * Save multiple non-structural component types for a floor (UPDATED WITH VALIDATION)
+ * POST /api/structures/:id/floors/:floorId/non-structural/bulk
  */
 async saveFloorNonStructuralComponentsBulk(req, res) {
   try {
     const { id, floorId } = req.params;
     const { structures } = req.body;
-    
-    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-    
-    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-    if (!floor) {
-      return sendErrorResponse(res, 'Floor not found', 404);
+
+    console.log('📥 saveFloorNonStructuralComponentsBulk called');
+    console.log('Structure ID:', id);
+    console.log('Floor ID:', floorId);
+    console.log('Structures data:', JSON.stringify(structures, null, 2));
+
+    // Validate structures array exists
+    if (!structures || structures.length === 0) {
+      return sendErrorResponse(res, 400, 'No component structures provided');
     }
     
+    // Find user and structure
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    
+    // ⭐ NEW: Validate components against structure subtype
+    const validation = await this.validateComponentsForStructureType(structure, structures);
+    
+    if (!validation.isValid) {
+      console.log('❌ Component validation failed:', validation.errors);
+      return sendErrorResponse(res, 400, 'Invalid component types for this structure', {
+        structure_subtype: validation.structureInfo.subtype,
+        structure_type: validation.structureInfo.type,
+        errors: validation.errors,
+        message: 'The components you are trying to save are not valid for this structure type. Please select appropriate components.'
+      });
+    }
+    
+    console.log('✅ Component validation passed');
+    
+    // Find the floor
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      console.log('❌ Floor not found:', floorId);
+      return sendErrorResponse(res, 404, 'Floor not found');
+    }
+    
+    console.log('✅ Floor found:', floor.floor_label_name);
+    
+    // Initialize non_structural_rating if it doesn't exist
     if (!floor.non_structural_rating) {
       floor.non_structural_rating = {};
     }
@@ -5578,43 +5871,79 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
     let totalComponentsSaved = 0;
     const savedComponentTypes = [];
     
+    // Process each component type
     structures.forEach(({ component_type, components }) => {
-      // ✅ FIXED: Auto-generate component IDs if not provided
-      const formattedComponents = components.map(comp => ({
-        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
-        name: comp.name,
-        rating: parseInt(comp.rating),
-        photo: comp.photo,
-        condition_comment: comp.condition_comment,
-        inspector_notes: comp.inspector_notes || '',
-        inspection_date: inspectionDate
-      }));
+      console.log(`📝 Processing component type: ${component_type}`);
+      console.log(`   Components count: ${components.length}`);
       
+      // Format components with auto-generated IDs if not provided
+      const formattedComponents = components.map(comp => {
+        const componentId = comp._id || this.generateComponentId(component_type);
+        
+        return {
+          _id: componentId,
+          name: comp.name,
+          rating: parseInt(comp.rating),
+          photo: comp.photo,
+          condition_comment: comp.condition_comment,
+          inspector_notes: comp.inspector_notes || '',
+          inspection_date: inspectionDate,
+          // ⭐ NEW: Add distress fields if provided
+          distress_dimensions: comp.distress_dimensions || undefined,
+          repair_methodology: comp.repair_methodology || undefined,
+          distress_types: comp.distress_types || undefined,
+          pdf_files: comp.pdf_files || undefined
+        };
+      });
+      
+      // Save components to floor
       floor.non_structural_rating[component_type] = formattedComponents;
       totalComponentsSaved += formattedComponents.length;
+      
       savedComponentTypes.push({
         component_type,
         count: formattedComponents.length,
-        components: formattedComponents.map(c => ({ _id: c._id, name: c.name }))  // ✅ Include generated IDs
+        components: formattedComponents.map(c => ({ 
+          _id: c._id, 
+          name: c.name,
+          rating: c.rating 
+        }))
       });
+      
+      console.log(`   ✅ Saved ${formattedComponents.length} components for ${component_type}`);
     });
     
+    // Calculate averages
+    console.log('📊 Calculating floor non-structural average...');
     this.calculateFloorNonStructuralAverage(floor);
     this.calculateFloorCombinedRating(floor);
     
+    // Update structure metadata
     structure.creation_info.last_updated_date = new Date();
+    
+    console.log('💾 Saving to database...');
     await user.save();
     
-    sendSuccessResponse(res, 'Floor non-structural components saved successfully', {
+    console.log('✅ Floor non-structural components saved successfully');
+    console.log(`   Total components: ${totalComponentsSaved}`);
+    console.log(`   Component types: ${savedComponentTypes.length}`);
+    
+    sendSuccessResponse(res, 200, {
       structure_id: id,
       floor_id: floorId,
+      floor_label: floor.floor_label_name,
       total_components_saved: totalComponentsSaved,
-      component_types_saved: savedComponentTypes
+      component_types_saved: savedComponentTypes,
+      non_structural_rating: {
+        overall_average: floor.non_structural_rating?.overall_average
+      },
+      message: 'Floor non-structural components saved successfully'
     });
     
   } catch (error) {
     console.error('❌ Save floor non-structural components bulk error:', error);
-    sendErrorResponse(res, 'Failed to save floor non-structural components', 500, error.message);
+    console.error('❌ Error stack:', error.stack);
+    return sendErrorResponse(res, 500, 'Failed to save floor non-structural components', error.message);
   }
 }
 
