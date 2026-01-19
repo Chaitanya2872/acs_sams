@@ -732,8 +732,38 @@ const structureSchema = new mongoose.Schema({
     }
   },
   
-  administrative_details: {
-    // ... (keep existing fields from original schema)
+  administrative: {
+    client_name: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
+    custodian: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
+    engineer_designation: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
+    contact_details: {
+      type: String,
+      trim: true,
+      match: [/^[6-9]\d{9}$/, 'Contact details must be a valid 10-digit Indian mobile number']
+    },
+    email_id: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email address']
+    },
+    organization: {
+      type: String,
+      trim: true,
+      maxlength: 200
+    }
   },
   
   geometric_details: {
@@ -772,7 +802,7 @@ const structureSchema = new mongoose.Schema({
   
   status: {
     type: String,
-    enum: ['draft', 'submitted', 'in_testing', 'tested', 'in_validation', 'validated', 'approved', 'rejected'],
+    enum: ['draft', 'location_completed', 'admin_completed', 'geometric_completed', 'ratings_in_progress', 'submitted', 'in_testing', 'tested', 'in_validation', 'validated', 'approved', 'rejected'],
     default: 'draft'
   },
   

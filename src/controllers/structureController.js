@@ -192,19 +192,19 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
   }
 
   // =================== STRUCTURE INITIALIZATION ===================
-  async initializeStructure(req, res) {
+async initializeStructure(req, res) {
   try {
     console.log('🚀 Initializing new structure...');
     console.log('👤 User:', req.user.userId, req.user.email);
     
     const user = await User.findById(req.user.userId);
     if (!user) {
-      return sendErrorResponse(res, 'User not found', 404);
+      return sendErrorResponse(res, 404, 'User not found');
     }
 
     console.log('👤 User found, current structures:', user.structures.length);
 
-    // Generate a simple UID
+    // Generate a valid UID (8-12 alphanumeric characters)
     const generateValidUID = () => {
       const timestamp = Date.now().toString(36).toUpperCase();
       const random = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -212,17 +212,44 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
       console.log('🔑 Generated UID:', uid, 'Length:', uid.length);
       return uid;
     };
+    
+    // Generate temporary structural_identity_number
+    // Pattern: /^[A-Z]{2}[0-9]{2}[A-Z]{4}[A-Z0-9]{2}[0-9]{3}$/
+    // Format: XX00TEMP0T001
+    // XX = State code (2 letters)
+    // 00 = District code (2 digits)
+    // TEMP = City code (4 letters)
+    // 0T = Location code (2 alphanumeric)
+    // 001 = Structure number (3 digits)
+    const generateTempStructuralID = () => {
+      const random3Digits = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      return `XX00TEMP0T${random3Digits}`;  // Total: 15 chars matching pattern
+    };
 
-    // Create minimal structure - type and name will be set in location screen
+    const uid = generateValidUID();
+    const tempStructuralID = generateTempStructuralID();
+
+    // Create structure with all required fields
     const newStructure = {
       structural_identity: {
-        uid: generateValidUID()
-        // All other fields will be set in location screen
+        uid: uid,
+        structural_identity_number: tempStructuralID,    // Matches: [A-Z]{2}[0-9]{2}[A-Z]{4}[A-Z0-9]{2}[0-9]{3}
+        type_of_structure: 'residential',                // Required
+        structure_subtype: 'rcc',                        // ⭐ NEW - Required, default to RCC
+        age_of_structure: 0                              // ⭐ NEW - Required, default to 0
       },
       location: {
-        coordinates: {}
+        structure_name: '',
+        zip_code: '000000',                              // Required, 6 digits
+        state_code: 'XX',                                // Required, 2 letters
+        district_code: '00',                             // Required, 2 digits
+        city_name: 'TEMP',                               // Required, max 4 chars ⭐
+        location_code: 'XX',                             // Required, max 2 chars
+        longitude: 0,                                    // Required
+        latitude: 0,                                     // Required
+        address: ''
       },
-      administration: {},
+      administrative_details: {},
       geometric_details: {
         floors: []
       },
@@ -234,7 +261,12 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
       status: 'draft'
     };
 
-    console.log('📝 Structure object created, adding to user...');
+    console.log('📝 Structure object created with valid temporary values');
+    console.log('   UID:', uid);
+    console.log('   Temp Structural ID:', tempStructuralID);
+    console.log('   Structure Subtype:', newStructure.structural_identity.structure_subtype);
+    console.log('   Age:', newStructure.structural_identity.age_of_structure);
+    console.log('   City Name (max 4 chars):', newStructure.location.city_name);
 
     user.structures.push(newStructure);
     
@@ -246,14 +278,17 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     console.log('✅ Structure initialized successfully:', {
       id: createdStructure._id,
       uid: createdStructure.structural_identity.uid,
+      structural_identity_number: createdStructure.structural_identity.structural_identity_number,
       status: createdStructure.status
     });
     
-    sendCreatedResponse(res, {
+    return sendCreatedResponse(res, {
       structure_id: createdStructure._id,
       uid: createdStructure.structural_identity.uid,
+      structural_identity_number: createdStructure.structural_identity.structural_identity_number,
       status: createdStructure.status,
-      total_structures: user.structures.length
+      total_structures: user.structures.length,
+      message: 'Structure initialized successfully. Please complete location details.'
     }, 'Structure initialized successfully');
 
   } catch (error) {
@@ -261,9 +296,9 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     console.error('❌ Error stack:', error.stack);
     console.error('❌ Error name:', error.name);
     if (error.errors) {
-      console.error('❌ Validation errors:', error.errors);
+      console.error('❌ Validation errors:', JSON.stringify(error.errors, null, 2));
     }
-    sendErrorResponse(res, 'Failed to initialize structure', 500, error.message);
+    return sendErrorResponse(res, 500, 'Failed to initialize structure', error.message);
   }
 }
 
@@ -289,12 +324,12 @@ async saveLocationScreen(req, res) {
     
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
-    // ⭐ NEW: Validate structure_subtype
+    // ⭐ Validate structure_subtype
     if (!structure_subtype || !['rcc', 'steel'].includes(structure_subtype)) {
       return sendErrorResponse(res, 400, 'Structure subtype is required and must be either "rcc" or "steel"');
     }
     
-    // ⭐ NEW: Validate age_of_structure
+    // ⭐ Validate age_of_structure
     if (age_of_structure === undefined || age_of_structure === null) {
       return sendErrorResponse(res, 400, 'Age of structure is required');
     }
@@ -322,17 +357,50 @@ async saveLocationScreen(req, res) {
       type_of_structure
     }, nextSequence);
     
+    console.log('🔢 Generated structural_identity_number:', generatedNumbers.structural_identity_number);
+    console.log('   Length:', generatedNumbers.structural_identity_number.length);
+    console.log('   Structure sequence:', generatedNumbers.components.structure_sequence);
+    
+    // ⚠️ CRITICAL FIX: Ensure structure sequence is only 3 digits
+    // Schema pattern: /^[A-Z]{2}[0-9]{2}[A-Z]{4}[A-Z0-9]{2}[0-9]{3}$/
+    let structureSequence = generatedNumbers.components.structure_sequence;
+    
+    // If sequence is more than 3 digits, trim it
+    if (structureSequence.length > 3) {
+      console.warn('⚠️ Structure sequence too long:', structureSequence);
+      structureSequence = structureSequence.slice(-3); // Keep last 3 digits
+      console.log('🔧 Trimmed to 3 digits:', structureSequence);
+    }
+    
+    // Rebuild the structural identity number with correct length
+    const fixedStructuralId = 
+      state_code + 
+      district_code + 
+      city_name + 
+      location_code + 
+      structureSequence;
+    
+    console.log('✅ Final structural_identity_number:', fixedStructuralId);
+    console.log('   Length:', fixedStructuralId.length, '(should be 15)');
+    
+    // Validate the final format
+    const structuralIdPattern = /^[A-Z]{2}[0-9]{2}[A-Z]{4}[A-Z0-9]{2}[0-9]{3}$/;
+    if (!structuralIdPattern.test(fixedStructuralId)) {
+      console.error('❌ Structural ID does not match pattern!');
+      return sendErrorResponse(res, 500, 'Failed to generate valid structural identity number');
+    }
+    
     // Build structural identity object
     const structuralIdentity = {
       uid: structure.structural_identity.uid,
       structure_name: structure_name || '',
-      structural_identity_number: generatedNumbers.structural_identity_number,
+      structural_identity_number: fixedStructuralId,  // ⭐ Using fixed version
       zip_code: zip_code,
-      state_code: generatedNumbers.components.state_code,
-      district_code: generatedNumbers.components.district_code,
-      city_name: generatedNumbers.components.city_code,
-      location_code: generatedNumbers.components.location_code,
-      structure_number: generatedNumbers.components.structure_sequence,
+      state_code: state_code,
+      district_code: district_code,
+      city_name: city_name,
+      location_code: location_code,
+      structure_number: structureSequence,  // ⭐ Using trimmed 3-digit version
       type_of_structure: type_of_structure,
       type_code: generatedNumbers.components.type_code,
       structure_subtype: structure_subtype,        // ⭐ NEW
@@ -346,7 +414,7 @@ async saveLocationScreen(req, res) {
     
     structure.structural_identity = structuralIdentity;
     
-    // Update location
+    // Update location with all required fields
     structure.location = {
       structure_name: structure_name || '',
       zip_code: zip_code,
@@ -360,14 +428,19 @@ async saveLocationScreen(req, res) {
     };
     
     structure.creation_info.last_updated_date = new Date();
+    
+    // ✅ Now using correct enum value
     structure.status = 'location_completed';
+    
     await user.save();
     
-    console.log(`✅ Structure Number: ${generatedNumbers.structural_identity_number}`);
-    console.log(`✅ Structure Subtype: ${structure_subtype}`);
-    console.log(`✅ Age: ${age_of_structure} years`);
+    console.log(`✅ Structure saved successfully`);
+    console.log(`   Structural ID: ${fixedStructuralId}`);
+    console.log(`   Structure Subtype: ${structure_subtype}`);
+    console.log(`   Age: ${age_of_structure} years`);
+    console.log(`   Status: ${structure.status}`);
     
-    sendSuccessResponse(res, 200, {
+    return sendSuccessResponse(res, 200, {
       structure_id: id,
       uid: structure.structural_identity.uid,
       structure_name: structure.structural_identity.structure_name,
@@ -387,6 +460,7 @@ async saveLocationScreen(req, res) {
     return sendErrorResponse(res, 500, 'Failed to save location details', error.message);
   }
 }
+
 
 
   async getLocationScreen(req, res) {
@@ -420,38 +494,42 @@ async saveLocationScreen(req, res) {
   }
 
   // =================== SCREEN 2: ADMINISTRATIVE ===================
-  async saveAdministrativeScreen(req, res) {
-    try {
-      const { id } = req.params;
-      const { client_name, custodian, engineer_designation, contact_details, email_id } = req.body;
-      
-      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-      
-      structure.administration = {
-        client_name,
-        custodian,
-        engineer_designation,
-        contact_details,
-        email_id
-      };
-      
-      structure.creation_info.last_updated_date = new Date();
-      structure.status = 'admin_completed';
-      await user.save();
-      
-      sendSuccessResponse(res, 'Administrative details saved successfully', {
-        structure_id: id,
-        uid: structure.structural_identity.uid,
-        administration: structure.administration,
-        status: structure.status
-      });
+ 
 
-    } catch (error) {
-      console.error('❌ Administrative save error:', error);
-      sendErrorResponse(res, 'Failed to save administrative details', 500, error.message);
-    }
+async saveAdministrativeScreen(req, res) {
+  try {
+    const { id } = req.params;
+    const { client_name, custodian, engineer_designation, contact_details, email_id } = req.body;
+
+    const { user, structure } =
+      await this.findUserStructure(req.user.userId, id, req.user);
+
+    structure.administrative = {   // ✅ USE SCHEMA FIELD NAME
+      client_name,
+      custodian,
+      engineer_designation,
+      contact_details,
+      email_id
+    };
+
+    structure.creation_info.last_updated_date = new Date();
+    structure.status = 'admin_completed';
+
+    user.markModified('structures'); // 🔥 CRITICAL
+    await user.save();               // 🔥 REQUIRED
+
+    return sendSuccessResponse(res, 'Administrative details saved successfully', {
+      structure_id: id,
+      uid: structure.structural_identity.uid,
+      administrative: structure.administrative,
+      status: structure.status
+    });
+
+  } catch (error) {
+    console.error('❌ Administrative save error:', error);
+    return sendErrorResponse(res, 'Failed to save administrative details', 500, error.message);
   }
-
+}
   async getAdministrativeScreen(req, res) {
     try {
       const { id } = req.params;
@@ -460,7 +538,7 @@ async saveLocationScreen(req, res) {
       sendSuccessResponse(res, 'Administrative details retrieved successfully', {
         structure_id: id,
         uid: structure.structural_identity?.uid,
-        administration: structure.administration || {}
+        administrative: structure.administrative || {}
       });
 
     } catch (error) {
