@@ -487,6 +487,21 @@ const geometricDetailsValidation = [
       }
       return true;
     }),
+
+  body('parking_floor_type')
+    .optional()
+    .custom((value, { req }) => {
+      const allowed = ['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'];
+      if (req.body.has_parking_floors === true || req.body.has_parking_floors === 'true') {
+        if (!value) {
+          throw new Error('parking_floor_type is required when has_parking_floors is true');
+        }
+        if (typeof value !== 'string' || !allowed.includes(value)) {
+          throw new Error('Invalid parking_floor_type. Must be one of: ' + allowed.join(', '));
+        }
+      }
+      return true;
+    }),
   
   body('structure_width')
     .notEmpty()
@@ -572,11 +587,7 @@ const floorValidation = [
     .optional()
     .isBoolean()
     .withMessage('Is parking floor must be a boolean'),
-  
-  body('floors.*.parking_floor_type')
-    .optional()
-    .isIn(['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'])
-    .withMessage('Invalid parking floor type. Must be one of: stilt, cellar, subcellar_1, subcellar_2, subcellar_3, subcellar_4, subcellar_5'),
+
   
   body('floors.*.floor_height')
     .optional()

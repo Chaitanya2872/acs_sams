@@ -908,18 +908,20 @@ async saveBlockRatings(req, res) {
       floors.forEach((floorData, index) => {
         const floorId = this.generateFloorId();
         
-        // Validate parking floor data
+        // Validate parking floor data and inherit geometric-level parking_floor_type
         const isParkingFloor = floorData.is_parking_floor === true;
-        if (isParkingFloor && !floorData.parking_floor_type) {
+        const inheritedParkingType = structure.geometric_details?.parking_floor_type || null;
+        const parkingFloorType = isParkingFloor ? (floorData.parking_floor_type || inheritedParkingType) : undefined;
+        if (isParkingFloor && !parkingFloorType) {
           throw new Error(`Parking floor type is required when is_parking_floor is true (Floor ${floorData.floor_number || (index + 1)})`);
         }
-        
+
         const newFloor = {
           floor_id: floorId,
           floor_number: floorData.floor_number || (index + 1),
           floor_type: floorData.floor_type || 'residential',
           is_parking_floor: isParkingFloor,
-          parking_floor_type: isParkingFloor ? floorData.parking_floor_type : undefined,
+          parking_floor_type: parkingFloorType,
           floor_height: floorData.floor_height || null,
           total_area_sq_mts: floorData.total_area_sq_mts || null,
           floor_label_name: floorData.floor_label_name || `Floor ${floorData.floor_number || (index + 1)}`,
