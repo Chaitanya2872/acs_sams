@@ -175,6 +175,13 @@ router.post('/:id/geometric-details',
   structureController.saveGeometricDetails
 );
 router.get('/:id/geometric-details', structureController.getGeometricDetails);
+
+// Get available parking floor types
+router.get('/parking-floor-types', 
+  authenticateToken,
+  structureController.getParkingFloorTypes
+);
+
 router.put('/:id/geometric-details', 
   geometricDetailsValidation, 
   handleValidationErrors, 

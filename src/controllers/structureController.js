@@ -128,6 +128,9 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     this.getRemarks = this.getRemarks.bind(this);
     this.deleteRemark = this.deleteRemark.bind(this);
     this.deleteStructure = this.deleteStructure.bind(this);
+    
+    // Geometric details helper
+    this.getParkingFloorTypes = this.getParkingFloorTypes.bind(this);
 
  this.submitForTesting = this.submitForTesting.bind(this);
  this.startTesting = this.startTesting.bind(this);
@@ -666,6 +669,32 @@ async saveAdministrativeScreen(req, res) {
     }
   }
 
+  /**
+   * Get available parking floor types
+   * @route GET /api/structures/parking-floor-types
+   * @access Private
+   */
+  async getParkingFloorTypes(req, res) {
+    try {
+      const parkingFloorTypes = [
+        { value: 'stilt', label: 'Stilt (Ground Level Parking)' },
+        { value: 'cellar', label: 'Cellar (Single Level Below Ground)' },
+        { value: 'subcellar_1', label: 'Subcellar 1 (First Level Below Cellar)' },
+        { value: 'subcellar_2', label: 'Subcellar 2 (Second Level Below Cellar)' },
+        { value: 'subcellar_3', label: 'Subcellar 3 (Third Level Below Cellar)' },
+        { value: 'subcellar_4', label: 'Subcellar 4 (Fourth Level Below Cellar)' },
+        { value: 'subcellar_5', label: 'Subcellar 5 (Fifth Level Below Cellar)' }
+      ];
+
+      sendSuccessResponse(res, 'Parking floor types retrieved successfully', {
+        parking_floor_types: parkingFloorTypes
+      });
+    } catch (error) {
+      console.error('❌ Error fetching parking floor types:', error);
+      sendErrorResponse(res, 'Failed to fetch parking floor types', 500, error.message);
+    }
+  }
+
   async addBlocksToFloor(req, res) {
   try {
     const { id, floorId } = req.params;
@@ -878,10 +907,19 @@ async saveBlockRatings(req, res) {
       
       floors.forEach((floorData, index) => {
         const floorId = this.generateFloorId();
+        
+        // Validate parking floor data
+        const isParkingFloor = floorData.is_parking_floor === true;
+        if (isParkingFloor && !floorData.parking_floor_type) {
+          throw new Error(`Parking floor type is required when is_parking_floor is true (Floor ${floorData.floor_number || (index + 1)})`);
+        }
+        
         const newFloor = {
           floor_id: floorId,
           floor_number: floorData.floor_number || (index + 1),
           floor_type: floorData.floor_type || 'residential',
+          is_parking_floor: isParkingFloor,
+          parking_floor_type: isParkingFloor ? floorData.parking_floor_type : undefined,
           floor_height: floorData.floor_height || null,
           total_area_sq_mts: floorData.total_area_sq_mts || null,
           floor_label_name: floorData.floor_label_name || `Floor ${floorData.floor_number || (index + 1)}`,
@@ -895,6 +933,8 @@ async saveBlockRatings(req, res) {
           floor_id: floorId,
           floor_number: newFloor.floor_number,
           floor_type: newFloor.floor_type,
+          is_parking_floor: newFloor.is_parking_floor,
+          parking_floor_type: newFloor.parking_floor_type,
           floor_label_name: newFloor.floor_label_name
         });
       });
@@ -925,6 +965,8 @@ async saveBlockRatings(req, res) {
         mongodb_id: floor._id,
         floor_number: floor.floor_number,
         floor_type: floor.floor_type,
+        is_parking_floor: floor.is_parking_floor || false,
+        parking_floor_type: floor.parking_floor_type || null,
         floor_height: floor.floor_height,
         total_area_sq_mts: floor.total_area_sq_mts,
         floor_label_name: floor.floor_label_name,
@@ -961,6 +1003,8 @@ async saveBlockRatings(req, res) {
           mongodb_id: floor._id,
           floor_number: floor.floor_number,
           floor_type: floor.floor_type,
+          is_parking_floor: floor.is_parking_floor || false,
+          parking_floor_type: floor.parking_floor_type || null,
           floor_height: floor.floor_height,
           total_area_sq_mts: floor.total_area_sq_mts,
           floor_label_name: floor.floor_label_name,

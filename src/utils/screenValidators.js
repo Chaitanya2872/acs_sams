@@ -105,10 +105,18 @@ const multiComponentRatingValidation = [
     .isIn(['mm', 'cm', 'm', 'inch', 'feet'])
     .withMessage('Unit must be one of: mm, cm, m, inch, feet'),
 
-  // NEW: Repair methodology validation
+  // NEW: Repair methodology validation - MUST BE STRING, not boolean
   body('structures.*.components.*.repair_methodology')
     .optional()
-    .isString()
+    .custom((value) => {
+      if (typeof value === 'boolean') {
+        throw new Error('Repair methodology must be a string, not a boolean');
+      }
+      if (typeof value !== 'string') {
+        throw new Error('Repair methodology must be a string value');
+      }
+      return true;
+    })
     .trim()
     .isLength({ max: 2000 })
     .withMessage('Repair methodology cannot exceed 2000 characters'),
@@ -170,8 +178,8 @@ const multiComponentRatingValidation = [
               }
               
               // NEW: Check for repair methodology
-              if (!component.repair_methodology || component.repair_methodology.trim().length < 10) {
-                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Repair methodology (min 10 chars) is required for ratings 1-3`);
+              if (!component.repair_methodology || typeof component.repair_methodology !== 'string' || component.repair_methodology.trim().length < 10) {
+                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Repair methodology must be a non-empty string (min 10 chars) for ratings 1-3`);
               }
               
               // NEW: Check for distress types
@@ -557,8 +565,18 @@ const floorValidation = [
   
   body('floors.*.floor_type')
     .optional()
-    .isIn(['residential', 'commercial', 'educational', 'parking', 'utility', 'recreational'])
+    .isIn(['residential', 'commercial', 'educational', 'parking', 'utility', 'recreational', 'industrial'])
     .withMessage('Invalid floor type'),
+  
+  body('floors.*.is_parking_floor')
+    .optional()
+    .isBoolean()
+    .withMessage('Is parking floor must be a boolean'),
+  
+  body('floors.*.parking_floor_type')
+    .optional()
+    .isIn(['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'])
+    .withMessage('Invalid parking floor type. Must be one of: stilt, cellar, subcellar_1, subcellar_2, subcellar_3, subcellar_4, subcellar_5'),
   
   body('floors.*.floor_height')
     .optional()
@@ -581,6 +599,11 @@ const floorValidation = [
   body('floors.*.number_of_flats')
     .isInt({ min: 0, max: 100 })
     .withMessage('Number of flats must be between 0 and 100'),
+  
+  body('floors.*.number_of_blocks')
+    .optional()
+    .isInt({ min: 0, max: 50 })
+    .withMessage('Number of blocks must be between 0 and 50'),
   
   body('floors.*.floor_notes')
     .optional()
