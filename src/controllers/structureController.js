@@ -575,9 +575,6 @@ async saveAdministrativeScreen(req, res) {
     structure.geometric_details = {
       ...structure.geometric_details,
       number_of_floors: parseInt(number_of_floors),
-      has_parking_floors: needsParkingOption ? (has_parking_floors || false) : false,
-      number_of_parking_floors: needsParkingOption && has_parking_floors ? 
-                                parseInt(number_of_parking_floors || 0) : 0,
       structure_width: parseFloat(structure_width),
       structure_length: parseFloat(structure_length),
       structure_height: parseFloat(structure_height)
@@ -626,8 +623,6 @@ async saveAdministrativeScreen(req, res) {
       commercial_subtype: commercialSubtype,
       geometric_details: {
         number_of_floors: structure.geometric_details.number_of_floors,
-        has_parking_floors: structure.geometric_details.has_parking_floors,
-        number_of_parking_floors: structure.geometric_details.number_of_parking_floors,
         structure_width: structure.geometric_details.structure_width,
         structure_length: structure.geometric_details.structure_length,
         structure_height: structure.geometric_details.structure_height,
@@ -919,7 +914,6 @@ async saveBlockRatings(req, res) {
         const newFloor = {
           floor_id: floorId,
           floor_number: floorData.floor_number || (index + 1),
-          floor_type: floorData.floor_type || 'residential',
           is_parking_floor: isParkingFloor,
           parking_floor_type: parkingFloorType,
           floor_height: floorData.floor_height || null,
@@ -934,7 +928,6 @@ async saveBlockRatings(req, res) {
         createdFloors.push({
           floor_id: floorId,
           floor_number: newFloor.floor_number,
-          floor_type: newFloor.floor_type,
           is_parking_floor: newFloor.is_parking_floor,
           parking_floor_type: newFloor.parking_floor_type,
           floor_label_name: newFloor.floor_label_name
