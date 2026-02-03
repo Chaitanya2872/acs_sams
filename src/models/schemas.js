@@ -442,7 +442,8 @@ const floorSchema = {
   floor_type: {
     type: String,
     enum: ['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational', 'industrial'],
-    default: 'residential'
+    default: 'residential',
+    required: false
   },
   is_parking_floor: {
     type: Boolean,
@@ -800,7 +801,7 @@ const structureSchema = new mongoose.Schema({
     parking_floor_type: {
       type: String,
       enum: ['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'],
-      default: null
+      sparse: true
     },
     floors: [floorSchema]
   },
