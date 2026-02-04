@@ -109,6 +109,7 @@ app.use('/api/reports', reportsRoutes);     // 5. Reports routes
 // app.use('/api/users', userRoutes)
 // app.use('/api/structures', structureRoutes);
 // app.use('/api/admin', adminRoutes);
+//test commit on 4th
 
 // ===== ERROR HANDLING =====
 
