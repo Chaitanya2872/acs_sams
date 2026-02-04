@@ -794,6 +794,15 @@ const structureSchema = new mongoose.Schema({
       min: [0, 'Cannot have negative basement floors'],
       max: [10, 'Cannot exceed 10 basement floors']
     },
+    structure_width: {
+    type: Number
+  },
+  structure_length: {
+    type: Number
+  },
+  structure_height: {
+    type: Number
+  },
     parking_type: {
       type: String,
       enum: ['none', 'surface', 'basement', 'stilt', 'mechanical', 'mixed']
