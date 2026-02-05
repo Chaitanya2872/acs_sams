@@ -439,12 +439,6 @@ const floorSchema = {
     min: [-5, 'Floor number cannot be less than -5 (for basements)'],
     max: [200, 'Floor number cannot exceed 200']
   },
-  floor_type: {
-    type: String,
-    enum: ['residential', 'commercial', 'mixed', 'parking', 'utility', 'recreational', 'industrial'],
-    default: 'residential',
-    required: false
-  },
   is_parking_floor: {
     type: Boolean,
     default: false
