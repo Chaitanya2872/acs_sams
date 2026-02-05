@@ -577,11 +577,7 @@ const floorValidation = [
   body('floors.*.floor_number')
     .isInt({ min: 0, max: 200 })
     .withMessage('Floor number must be between 0 and 200 (0 for basement/parking)'),
-  
-  body('floors.*.floor_type')
-    .optional()
-    .isIn(['residential', 'commercial', 'educational', 'parking', 'utility', 'recreational', 'industrial'])
-    .withMessage('Invalid floor type'),
+
   
   body('floors.*.is_parking_floor')
     .optional()
