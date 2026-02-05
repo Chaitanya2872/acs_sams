@@ -594,7 +594,6 @@ async saveAdministrativeScreen(req, res) {
           const parkingFloor = {
             floor_id: this.generateFloorId(),
             floor_number: floorNumber,
-            floor_type: 'parking',
             is_parking_floor: true,
             floor_label_name: `Parking Level ${Math.abs(floorNumber)}`,
             floor_height: 3, // Default parking height
@@ -959,7 +958,7 @@ async saveBlockRatings(req, res) {
         floor_id: floor.floor_id,
         mongodb_id: floor._id,
         floor_number: floor.floor_number,
-        floor_type: floor.floor_type,
+       
         is_parking_floor: floor.is_parking_floor || false,
         parking_floor_type: floor.parking_floor_type || null,
         floor_height: floor.floor_height,
@@ -997,7 +996,6 @@ async saveBlockRatings(req, res) {
           floor_id: floor.floor_id,
           mongodb_id: floor._id,
           floor_number: floor.floor_number,
-          floor_type: floor.floor_type,
           is_parking_floor: floor.is_parking_floor || false,
           parking_floor_type: floor.parking_floor_type || null,
           floor_height: floor.floor_height,
@@ -1042,7 +1040,6 @@ async saveBlockRatings(req, res) {
         updated_floor: {
           floor_id: floor.floor_id,
           floor_number: floor.floor_number,
-          floor_type: floor.floor_type,
           floor_label_name: floor.floor_label_name
         }
       }, 'Floor updated successfully');
@@ -1319,7 +1316,7 @@ async saveFlatCombinedRatings(req, res) {
     // Check if flat ratings are allowed
     if (
       type === 'residential' ||
-      (type === 'commercial' && subtype === 'commercial_residential' && floor.floor_type === 'residential')
+      (type === 'commercial' && subtype === 'commercial_residential')
     ) {
       const inspectionDate = new Date();
 
@@ -2266,7 +2263,6 @@ extractFloorRatingImages(floor) {
       
       const floorsWithRatings = structure.geometric_details.floors.map(floor => ({
         floor_number: floor.floor_number,
-        floor_type: floor.floor_type,
         floor_label_name: floor.floor_label_name,
         total_flats: floor.flats ? floor.flats.length : 0,
         flats: floor.flats ? floor.flats.map(flat => ({
@@ -2727,7 +2723,7 @@ async saveFloorRatings(req, res) {
     if (
       (type === 'commercial' && subtype === 'pure') ||
       (type === 'industrial') ||
-      (type === 'commercial' && subtype === 'commercial_residential' && floor.floor_type === 'commercial')
+      (type === 'commercial' && subtype === 'commercial_residential')
     ) {
       const inspectionDate = new Date();
 
@@ -2839,7 +2835,6 @@ async getFloorRatings(req, res) {
       structure_id: id,
       floor_id: floorId,
       floor_number: floor.floor_number,
-      floor_type: floor.floor_type,
       floor_label_name: floor.floor_label_name,
       floor_height: floor.floor_height,
       total_area_sq_mts: floor.total_area_sq_mts,
@@ -3697,7 +3692,6 @@ async getStructureDetails(req, res) {
           floor_id: floor.floor_id,
           mongodb_id: floor._id,
           floor_number: floor.floor_number,
-          floor_type: floor.floor_type,
           floor_height: floor.floor_height,
           total_area_sq_mts: floor.total_area_sq_mts,
           floor_label_name: floor.floor_label_name,
