@@ -436,7 +436,7 @@ const floorSchema = {
   floor_number: {
     type: Number,
     required: true,
-    min: [-5, 'Floor number cannot be less than -5 (for basements)'],
+    min: [-5, 'Floor number cannot be less thazn -5 (for basements)'],
     max: [200, 'Floor number cannot exceed 200']
   },
   is_parking_floor: {
