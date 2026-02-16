@@ -3125,7 +3125,8 @@ getStructuresByStatus(structures) {
     }
   }
 
-  calculateProgress(structure) {
+  calculateProgress(structure, options = {}) {
+  const { includePercentage = false } = options;
   let progress = {
     location: false,
     administrative: false,
@@ -3133,7 +3134,7 @@ getStructuresByStatus(structures) {
     floors_added: false,
     units_added: false, // Can be flats or blocks
     ratings_completed: false,
-    overall_percentage: 0
+    overall_percentage: null
   };
 
 const structureType = structure.structural_identity?.type_of_structure;
@@ -3202,9 +3203,11 @@ const structureType = structure.structural_identity?.type_of_structure;
     }
   }
 
-  // Calculate percentage
-  const completedSteps = Object.values(progress).filter(val => val === true).length;
-  progress.overall_percentage = Math.round((completedSteps / 6) * 100);
+  // Calculate percentage only when explicitly requested (submit flows)
+  if (includePercentage) {
+    const completedSteps = Object.values(progress).filter(val => val === true).length;
+    progress.overall_percentage = Math.round((completedSteps / 6) * 100);
+  }
 
   return progress;
 }
@@ -3219,7 +3222,7 @@ generateBlockId() {
       const { id } = req.params;
       const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
       
-      const progress = this.calculateProgress(structure);
+      const progress = this.calculateProgress(structure, { includePercentage: true });
       
       if (progress.overall_percentage < 100) {
         return sendErrorResponse(res, 'Cannot submit incomplete structure', 400);
@@ -6294,7 +6297,7 @@ async submitForTesting(req, res) {
     const { user: structureOwner, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     // Check if structure is complete enough to submit
-    const progress = this.calculateProgress(structure);
+    const progress = this.calculateProgress(structure, { includePercentage: true });
     if (progress.overall_percentage < 100) {
       return sendErrorResponse(res, `Structure is only ${progress.overall_percentage}% complete. Complete all sections before submitting.`, 400);
     }
