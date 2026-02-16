@@ -6296,12 +6296,6 @@ async submitForTesting(req, res) {
     
     const { user: structureOwner, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
-    // Check if structure is complete enough to submit
-    const progress = this.calculateProgress(structure, { includePercentage: true });
-    if (progress.overall_percentage < 100) {
-      return sendErrorResponse(res, `Structure is only ${progress.overall_percentage}% complete. Complete all sections before submitting.`, 400);
-    }
-    
     // Update status and workflow
     structure.status = 'submitted';
     structure.workflow = structure.workflow || {};
