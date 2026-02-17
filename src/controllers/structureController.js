@@ -1029,41 +1029,48 @@ async saveBlockRatings(req, res) {
   }
 
   async updateFloor(req, res) {
-    try {
-      const { id, floorId } = req.params;
-      const updateData = req.body;
-      
-      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
-      
-      const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
-      if (!floor) {
-        return sendErrorResponse(res, 'Floor not found', 404);
-      }
-      
-      Object.keys(updateData).forEach(key => {
-        if (key !== 'flats' && updateData[key] !== undefined) {
-          floor[key] = updateData[key];
-        }
-      });
-      
-      structure.creation_info.last_updated_date = new Date();
-      await user.save();
-      
-      sendUpdatedResponse(res, {
-        structure_id: id,
-        floor_id: floorId,
-        updated_floor: {
-          floor_id: floor.floor_id,
-          floor_number: floor.floor_number,
-          floor_label_name: floor.floor_label_name
-        }
-      }, 'Floor updated successfully');
+  try {
+    const { id, floorId } = req.params;
+    const updateData = req.body;
 
-    } catch (error) {
-      console.error('❌ Update floor error:', error);
-      sendErrorResponse(res, 'Failed to update floor', 500, error.message);
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 'Floor not found', 404);
     }
+
+    // Update only allowed keys
+    Object.keys(updateData).forEach(key => {
+      // Skip 'flats' if not a parking floor
+      if (key === 'flats' && floor.is_parking_floor === false) return;
+
+      if (updateData[key] !== undefined) {
+        floor[key] = updateData[key];
+      }
+    });
+
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+
+    sendUpdatedResponse(res, {
+      structure_id: id,
+      floor_id: floorId,
+      updated_floor: {
+        floor_id: floor.floor_id,
+        floor_number: floor.floor_number,
+        floor_label_name: floor.floor_label_name,
+        is_parking_floor: floor.is_parking_floor,
+        parking_floor_type: floor.parking_floor_type
+      }
+    }, 'Floor updated successfully');
+
+  } catch (error) {
+    console.error('❌ Update floor error:', error);
+    sendErrorResponse(res, 'Failed to update floor', 500, error.message);
   }
+}
+
 
   async deleteFloor(req, res) {
     try {
