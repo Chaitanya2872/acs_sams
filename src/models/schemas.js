@@ -1,5 +1,18 @@
 const mongoose = require('mongoose');
 
+const isValidPhotoReference = (value) => {
+  if (!value || typeof value !== 'string' || value.trim() === '') return false;
+  const v = value.trim();
+  const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
+  return (
+    v.startsWith('data:image/') ||
+    v.startsWith('blob:') ||
+    v.includes('/uploads/') ||
+    /^https?:\/\/.+/i.test(v) ||
+    extRegex.test(v)
+  );
+};
+
 // =================== DISTRESS DIMENSIONS SCHEMA ===================
 const distressDimensionsSchema = {
   length: {
@@ -44,20 +57,20 @@ const componentInstanceSchema = {
     type: String,
     validate: {
       validator: function(v) {
-        if (!v || v.trim() === '') return false;
-        const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
-        if (v.startsWith('data:image/') ||
-            v.startsWith('blob:') ||
-            v.includes('/uploads/') ||
-            /^https?:\/\/.+/i.test(v) ||
-            extRegex.test(v)) {
-          return true;
-        }
-        return false;
+        return isValidPhotoReference(v);
       },
       message: 'Invalid photo format'
     }
   },
+  photos: [{
+    type: String,
+    validate: {
+      validator: function(v) {
+        return isValidPhotoReference(v);
+      },
+      message: 'Invalid photo format'
+    }
+  }],
   condition_comment: {
     type: String,
     trim: true,
@@ -83,10 +96,11 @@ const componentInstanceSchema = {
     maxlength: 2000
   },
   
-  distress_types: [{
-    type: String,
-    enum: ['physical', 'chemical', 'mechanical']
-  }],
+  distress_types: {
+  type: String,
+  enum: ['physical', 'chemical', 'mechanical', 'none'],
+  required: true
+},
   
   pdf_files: [{
     filename: {

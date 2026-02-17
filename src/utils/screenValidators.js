@@ -69,6 +69,25 @@ const multiComponentRatingValidation = [
     })
     .withMessage('Invalid photo format. Must be a valid image URL or data URI'),
 
+  body('structures.*.components.*.photos')
+    .optional()
+    .isArray()
+    .withMessage('Photos must be an array'),
+
+  body('structures.*.components.*.photos.*')
+    .optional()
+    .isString()
+    .custom((value) => {
+      if (!value || value.trim() === '') return false;
+      const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
+      return value.startsWith('data:image/') ||
+             value.startsWith('blob:') ||
+             value.includes('/uploads/') ||
+             /^https?:\/\/.+/i.test(value) ||
+             extRegex.test(value);
+    })
+    .withMessage('Invalid photo format in photos array. Must be a valid image URL or data URI'),
+
   body('structures.*.components.*.condition_comment')
     .notEmpty()
     .withMessage('Condition comment is required')

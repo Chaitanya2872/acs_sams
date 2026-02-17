@@ -11,6 +11,21 @@ const {
 } = require('../utils/responseHandler');
 const { MESSAGES, PAGINATION } = require('../utils/constants');
 
+const normalizePhotoList = (photosInput, photoInput) => {
+  const fromArray = Array.isArray(photosInput)
+    ? photosInput
+    : [];
+  const fromSingle = typeof photoInput === 'string' && photoInput.trim() !== ''
+    ? [photoInput]
+    : [];
+
+  const combined = [...fromArray, ...fromSingle]
+    .filter((photo) => typeof photo === 'string' && photo.trim() !== '')
+    .map((photo) => photo.trim());
+
+  return Array.from(new Set(combined));
+};
+
 class StructureController {
   constructor() {
     this.structureNumberGenerator = new StructureNumberGenerator();
@@ -1438,15 +1453,16 @@ async getFlatCombinedRatings(req, res) {
     // ✅ Helper function to convert array format to single object (backward compatible)
     const convertArrayToSingle = (componentArray) => {
       if (!componentArray || !Array.isArray(componentArray) || componentArray.length === 0) {
-        return { rating: null, condition_comment: '', photo: '', inspection_date: null };
+        return { rating: null, condition_comment: '', photo: '', photos: [], inspection_date: null };
       }
       // Return first item for backward compatibility
       const component = componentArray[0];
+      const componentPhotos = normalizePhotoList(component.photos, component.photo);
       return {
         rating: component.rating || null,
         condition_comment: component.condition_comment || '',
-        photo: component.photo || '',
-        photos: [component.photo].filter(Boolean),
+        photo: componentPhotos[0] || '',
+        photos: componentPhotos,
         inspection_date: component.inspection_date || null,
         inspector_notes: component.inspector_notes || '',
         _id: component._id,
@@ -1532,22 +1548,9 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
       .replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
-  // ✅ Process photos (optional now)
-  let photos = [];
-  if (Array.isArray(ratingData.photos)) {
-    photos = ratingData.photos
-      .filter(photo => photo && typeof photo === 'string' && photo.trim() !== '')
-      .map(photo => photo.trim())
-      .slice(0, 50);
-  }
-
-  // ✅ Get photo string (backward compatibility with single photo field)
-  let photoUrl = '';
-  if (ratingData.photo && typeof ratingData.photo === 'string') {
-    photoUrl = ratingData.photo.trim();
-  } else if (photos.length > 0) {
-    photoUrl = photos[0];
-  }
+  // ✅ Normalize photos input (supports both `photo` and `photos`)
+  const photos = normalizePhotoList(ratingData.photos, ratingData.photo).slice(0, 50);
+  const photoUrl = photos[0] || '';
 
   const conditionComment = ratingData.condition_comment 
     ? ratingData.condition_comment.trim().substring(0, 1000) 
@@ -1563,6 +1566,7 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     name: displayName,
     rating: rating,
     photo: photoUrl,  // Can be empty string now
+    photos: photos,
     condition_comment: conditionComment,
     inspection_date: inspectionDate || new Date(),
     inspector_notes: inspectorNotes
@@ -2414,17 +2418,9 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
   }
 
   // Process photos array
-  let photos = [];
-  if (Array.isArray(ratingData.photos)) {
-    // Validate and clean photo URLs
-    photos = ratingData.photos
-      .filter(photo => photo && typeof photo === 'string' && photo.trim() !== '')
-      .map(photo => photo.trim())
-      .slice(0, 50); // Limit to 50 photos max
-    
-    if (photos.length > 0) {
-      console.log(`📸 Added ${photos.length} photo(s) for ${componentName}`);
-    }
+  const photos = normalizePhotoList(ratingData.photos, ratingData.photo).slice(0, 50);
+  if (photos.length > 0) {
+    console.log(`📸 Added ${photos.length} photo(s) for ${componentName}`);
   }
 
   // Validate condition comment for low ratings
@@ -2451,6 +2447,7 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     component_id: componentId,
     component_name: displayName,
     rating: rating,
+    photo: photos[0] || '',
     condition_comment: conditionComment,
     inspection_date: inspectionDate || new Date(),
     photos: photos,
@@ -5634,7 +5631,8 @@ async saveFlatStructuralComponentsBulk(req, res) {
         _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
         name: comp.name,
         rating: parseInt(comp.rating),
-        photo: comp.photo,
+        photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
+        photos: normalizePhotoList(comp.photos, comp.photo),
         condition_comment: comp.condition_comment,
         inspector_notes: comp.inspector_notes || '',
         inspection_date: inspectionDate
@@ -5729,7 +5727,8 @@ async saveFlatNonStructuralComponentsBulk(req, res) {
         _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
         name: comp.name,
         rating: parseInt(comp.rating),
-        photo: comp.photo,
+        photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
+        photos: normalizePhotoList(comp.photos, comp.photo),
         condition_comment: comp.condition_comment,
         inspector_notes: comp.inspector_notes || '',
         inspection_date: inspectionDate
@@ -5901,7 +5900,8 @@ async saveFloorStructuralComponentsBulk(req, res) {
           _id: componentId,
           name: comp.name,
           rating: parseInt(comp.rating),
-          photo: comp.photo,
+          photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
+          photos: normalizePhotoList(comp.photos, comp.photo),
           condition_comment: comp.condition_comment,
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
@@ -6037,7 +6037,8 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
           _id: componentId,
           name: comp.name,
           rating: parseInt(comp.rating),
-          photo: comp.photo,
+          photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
+          photos: normalizePhotoList(comp.photos, comp.photo),
           condition_comment: comp.condition_comment,
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
@@ -6138,7 +6139,8 @@ async saveBlockStructuralComponentsBulk(req, res) {
         _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
         name: comp.name,
         rating: parseInt(comp.rating),
-        photo: comp.photo,
+        photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
+        photos: normalizePhotoList(comp.photos, comp.photo),
         condition_comment: comp.condition_comment,
         inspector_notes: comp.inspector_notes || '',
         inspection_date: inspectionDate
@@ -6211,7 +6213,8 @@ async saveBlockNonStructuralComponentsBulk(req, res) {
         _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
         name: comp.name,
         rating: parseInt(comp.rating),
-        photo: comp.photo,
+        photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
+        photos: normalizePhotoList(comp.photos, comp.photo),
         condition_comment: comp.condition_comment,
         inspector_notes: comp.inspector_notes || '',
         inspection_date: inspectionDate
