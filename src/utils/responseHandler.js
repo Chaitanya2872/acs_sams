@@ -30,6 +30,21 @@ const sendSuccessResponse = (res, message, data = null, statusCode = 200) => {
  * @param {*} error - Additional error details (optional)
  */
 const sendErrorResponse = (res, message, statusCode = 400, error = null) => {
+  // Backward compatibility for accidental call pattern:
+  // sendErrorResponse(res, 500, 'Message', error)
+  if (typeof message === 'number') {
+    const normalizedStatusCode = message;
+    const normalizedMessage = typeof statusCode === 'string' ? statusCode : 'Request failed';
+    const normalizedError = error ?? (typeof statusCode !== 'string' ? statusCode : null);
+    message = normalizedMessage;
+    statusCode = normalizedStatusCode;
+    error = normalizedError;
+  }
+
+  if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599) {
+    statusCode = 400;
+  }
+
   const response = {
     success: false,
     message

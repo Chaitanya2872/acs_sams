@@ -13,6 +13,18 @@ const isValidPhotoReference = (value) => {
   );
 };
 
+const normalizeDistressTypes = (value) => {
+  const allowedDistressTypes = new Set(['physical', 'chemical', 'mechanical', 'none']);
+  const rawValues = Array.isArray(value) ? value.flat(Infinity) : [value];
+
+  const normalized = rawValues
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => allowedDistressTypes.has(item));
+
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+};
+
 // =================== DISTRESS DIMENSIONS SCHEMA ===================
 const distressDimensionsSchema = {
   length: {
@@ -97,10 +109,18 @@ const componentInstanceSchema = {
   },
   
   distress_types: {
-  type: String,
-  enum: ['physical', 'chemical', 'mechanical', 'none'],
-  required: true
-},
+    type: [String],
+    default: undefined,
+    set: normalizeDistressTypes,
+    validate: {
+      validator: function(v) {
+        if (!v) return true;
+        const allowed = new Set(['physical', 'chemical', 'mechanical', 'none']);
+        return Array.isArray(v) && v.every(item => allowed.has(item));
+      },
+      message: 'Distress types must be one or more of: physical, chemical, mechanical, none'
+    }
+  },
   
   pdf_files: [{
     filename: {

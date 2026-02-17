@@ -29,6 +29,20 @@ const normalizePhotoList = (photosInput, photoInput) => {
   return Array.from(new Set(combined));
 };
 
+const normalizeDistressTypes = (distressTypesInput) => {
+  const allowedDistressTypes = new Set(['physical', 'chemical', 'mechanical', 'none']);
+  const raw = Array.isArray(distressTypesInput)
+    ? distressTypesInput.flat(Infinity)
+    : [distressTypesInput];
+
+  const normalized = raw
+    .filter((value) => typeof value === 'string')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => allowedDistressTypes.has(value));
+
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+};
+
 class StructureController {
   constructor() {
     this.structureNumberGenerator = new StructureNumberGenerator();
@@ -5918,7 +5932,7 @@ async saveFloorStructuralComponentsBulk(req, res) {
           // ⭐ NEW: Add distress fields if provided
           distress_dimensions: comp.distress_dimensions || undefined,
           repair_methodology: comp.repair_methodology || undefined,
-          distress_types: comp.distress_types || undefined,
+          distress_types: normalizeDistressTypes(comp.distress_types),
           pdf_files: comp.pdf_files || undefined
         };
       });
@@ -6055,7 +6069,7 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
           // ⭐ NEW: Add distress fields if provided
           distress_dimensions: comp.distress_dimensions || undefined,
           repair_methodology: comp.repair_methodology || undefined,
-          distress_types: comp.distress_types || undefined,
+          distress_types: normalizeDistressTypes(comp.distress_types),
           pdf_files: comp.pdf_files || undefined
         };
       });
