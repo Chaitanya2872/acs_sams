@@ -592,8 +592,8 @@ const floorValidation = [
   
   body('floors.*.floor_height')
     .optional()
-    .isFloat({ min: 2, max: 10 })
-    .withMessage('Floor height must be between 2 and 10 meters'),
+    .isFloat({ min: 2, max: 100000 })
+    .withMessage('Floor height must be between 2 and 100,000 meters'),
   
   body('floors.*.total_area_sq_mts')
     .optional()
