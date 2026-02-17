@@ -12,11 +12,11 @@ const validateRatingImages = (req, res, next) => {
           if (flat.structural_rating) {
             ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
               const rating = flat.structural_rating[component];
-              if (rating && rating.rating <= 3) {
+              if (rating && rating.rating >= 1 && rating.rating <= 5) {
                 if (!rating.photos || rating.photos.length === 0) {
                   errors.push({
                     field: `geometric_details.floors[${floorIndex}].flats[${flatIndex}].structural_rating.${component}.photos`,
-                    message: `Photos are required for ${component} with rating ${rating.rating} (ratings 1-3)`,
+                    message: `Photos are required for ${component} with rating ${rating.rating} (ratings 1-5)`,
                     location: `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`
                   });
                 }
@@ -28,11 +28,11 @@ const validateRatingImages = (req, res, next) => {
           if (flat.non_structural_rating) {
             Object.keys(flat.non_structural_rating).forEach(component => {
               const rating = flat.non_structural_rating[component];
-              if (rating && rating.rating <= 3) {
+              if (rating && rating.rating >= 1 && rating.rating <= 5) {
                 if (!rating.photos || rating.photos.length === 0) {
                   errors.push({
                     field: `geometric_details.floors[${floorIndex}].flats[${flatIndex}].non_structural_rating.${component}.photos`,
-                    message: `Photos are required for ${component.replace('_', ' ')} with rating ${rating.rating} (ratings 1-3)`,
+                    message: `Photos are required for ${component.replace('_', ' ')} with rating ${rating.rating} (ratings 1-5)`,
                     location: `Floor ${floor.floor_number}, Flat ${flat.flat_number || flatIndex + 1}`
                   });
                 }
@@ -47,7 +47,7 @@ const validateRatingImages = (req, res, next) => {
   if (errors.length > 0) {
     return res.status(400).json({
       success: false,
-      message: 'Image validation failed - Photos required for ratings 1-3',
+      message: 'Image validation failed - Photos required for ratings 1-5',
       errors: errors
     });
   }

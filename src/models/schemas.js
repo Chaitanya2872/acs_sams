@@ -444,9 +444,7 @@ const floorSchema = {
     default: false
   },
   floor_height: {
-    type: Number,
-    min: [2, 'Floor height must be at least 2 meters'],
-    max: [20, 'Floor height cannot exceed 20 meters']
+    type: Number
   },
   total_area_sq_mts: {
     type: Number,

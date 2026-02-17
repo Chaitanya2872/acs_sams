@@ -2436,9 +2436,9 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     console.warn(`⚠️  Warning: Rating 1-3 for ${componentName} but no condition comment provided`);
   }
 
-  // Validate photos requirement for low ratings
-  if (rating <= 3 && photos.length === 0) {
-    console.warn(`⚠️  Warning: Rating 1-3 for ${componentName} but no photos provided`);
+  // Validate photos requirement for all valid ratings
+  if (rating >= 1 && rating <= 5 && photos.length === 0) {
+    console.warn(`⚠️  Warning: Rating 1-5 for ${componentName} but no photos provided`);
   }
 
   // Process inspector notes
