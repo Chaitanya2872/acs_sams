@@ -1,5 +1,17 @@
 const { body, validationResult } = require('express-validator');
 
+const hasAtLeastOnePhoto = (photoField, photosField) => {
+  const hasPhotoString = typeof photoField === 'string' && photoField.trim() !== '';
+  const hasPhotoArray = Array.isArray(photoField) && photoField.some(
+    (photo) => typeof photo === 'string' && photo.trim() !== ''
+  );
+  const hasPhotosArray = Array.isArray(photosField) && photosField.some(
+    (photo) => typeof photo === 'string' && photo.trim() !== ''
+  );
+
+  return hasPhotoString || hasPhotoArray || hasPhotosArray;
+};
+
 // Custom validator for rating-based image requirements
 const validateRatingImages = (req, res, next) => {
   const errors = [];
@@ -13,7 +25,7 @@ const validateRatingImages = (req, res, next) => {
             ['beams', 'columns', 'slab', 'foundation'].forEach(component => {
               const rating = flat.structural_rating[component];
               if (rating && rating.rating >= 1 && rating.rating <= 5) {
-                if (!rating.photos || rating.photos.length === 0) {
+                if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
                   errors.push({
                     field: `geometric_details.floors[${floorIndex}].flats[${flatIndex}].structural_rating.${component}.photos`,
                     message: `Photos are required for ${component} with rating ${rating.rating} (ratings 1-5)`,
@@ -29,7 +41,7 @@ const validateRatingImages = (req, res, next) => {
             Object.keys(flat.non_structural_rating).forEach(component => {
               const rating = flat.non_structural_rating[component];
               if (rating && rating.rating >= 1 && rating.rating <= 5) {
-                if (!rating.photos || rating.photos.length === 0) {
+                if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
                   errors.push({
                     field: `geometric_details.floors[${floorIndex}].flats[${flatIndex}].non_structural_rating.${component}.photos`,
                     message: `Photos are required for ${component.replace('_', ' ')} with rating ${rating.rating} (ratings 1-5)`,

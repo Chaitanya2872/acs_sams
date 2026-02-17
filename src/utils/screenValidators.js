@@ -10,6 +10,18 @@ const isValidImageReference = (value) => {
          extRegex.test(value);
 };
 
+const hasAtLeastOnePhoto = (photoField, photosField) => {
+  const hasPhotoString = typeof photoField === 'string' && photoField.trim() !== '';
+  const hasPhotoArray = Array.isArray(photoField) && photoField.some(
+    (photo) => typeof photo === 'string' && photo.trim() !== ''
+  );
+  const hasPhotosArray = Array.isArray(photosField) && photosField.some(
+    (photo) => typeof photo === 'string' && photo.trim() !== ''
+  );
+
+  return hasPhotoString || hasPhotoArray || hasPhotosArray;
+};
+
 
 const multiComponentRatingValidation = [
   body('structures')
@@ -188,14 +200,7 @@ const multiComponentRatingValidation = [
 
             if (hasValidRating) {
               // Check for photo for all valid ratings
-              const hasPhotoString = component.photo && typeof component.photo === 'string' && component.photo.trim() !== '';
-              const hasPhotoArray = Array.isArray(component.photo) && component.photo.some(
-                (photo) => typeof photo === 'string' && photo.trim() !== ''
-              );
-              const hasPhotosArray = Array.isArray(component.photos) && component.photos.some(
-                (photo) => typeof photo === 'string' && photo.trim() !== ''
-              );
-              if (!hasPhotoString && !hasPhotoArray && !hasPhotosArray) {
+              if (!hasAtLeastOnePhoto(component.photo, component.photos)) {
                 errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): At least one photo is required for ratings 1-5`);
               }
             }
@@ -963,7 +968,7 @@ const blockRatingsValidation = [
       structuralComponents.forEach(component => {
         const rating = requestBody.structural_rating[component];
         if (rating && rating.rating && rating.rating >= 1 && rating.rating <= 5) {
-          if (!rating.photos || rating.photos.length === 0) {
+          if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
             errors.push(`Photos are required for ${component} when rating is 1-5`);
           }
         }
@@ -985,7 +990,7 @@ const blockRatingsValidation = [
       nonStructuralComponents.forEach(component => {
         const rating = requestBody.non_structural_rating[component];
         if (rating && rating.rating && rating.rating >= 1 && rating.rating <= 5) {
-          if (!rating.photos || rating.photos.length === 0) {
+          if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
             const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             errors.push(`Photos are required for ${componentName} when rating is 1-5`);
           }
@@ -1630,7 +1635,7 @@ const flatCombinedRatingsValidation = [
       structuralComponents.forEach(component => {
         const rating = requestBody.structural_rating[component];
         if (rating && rating.rating && rating.rating >= 1 && rating.rating <= 5) {
-          if (!rating.photos || rating.photos.length === 0) {
+          if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
             errors.push(`Photos are required for ${component} when rating is 1-5`);
           }
         }
@@ -1653,7 +1658,7 @@ const flatCombinedRatingsValidation = [
       nonStructuralComponents.forEach(component => {
         const rating = requestBody.non_structural_rating[component];
         if (rating && rating.rating && rating.rating >= 1 && rating.rating <= 5) {
-          if (!rating.photos || rating.photos.length === 0) {
+          if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
             const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             errors.push(`Photos are required for ${componentName} when rating is 1-5`);
           }
