@@ -18,8 +18,11 @@ const normalizePhotoList = (photosInput, photoInput) => {
   const fromSingle = typeof photoInput === 'string' && photoInput.trim() !== ''
     ? [photoInput]
     : [];
+  const fromLegacyPhotoArray = Array.isArray(photoInput)
+    ? photoInput
+    : [];
 
-  const combined = [...fromArray, ...fromSingle]
+  const combined = [...fromArray, ...fromSingle, ...fromLegacyPhotoArray]
     .filter((photo) => typeof photo === 'string' && photo.trim() !== '')
     .map((photo) => photo.trim());
 

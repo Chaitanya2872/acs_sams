@@ -1,5 +1,15 @@
 const { body, query, param } = require('express-validator');
 
+const isValidImageReference = (value) => {
+  if (!value || typeof value !== 'string' || value.trim() === '') return false;
+  const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
+  return value.startsWith('data:image/') ||
+         value.startsWith('blob:') ||
+         value.includes('/uploads/') ||
+         /^https?:\/\/.+/i.test(value) ||
+         extRegex.test(value);
+};
+
 
 const multiComponentRatingValidation = [
   body('structures')
@@ -57,17 +67,21 @@ const multiComponentRatingValidation = [
 
   body('structures.*.components.*.photo')
     .optional()
-    .isString()
     .custom((value) => {
-      if (!value || value.trim() === '') return false;
-      const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
-      return value.startsWith('data:image/') || 
-             value.startsWith('blob:') || 
-             value.includes('/uploads/') || 
-             /^https?:\/\/.+/i.test(value) ||
-             extRegex.test(value);
+      // Backward compatibility:
+      // - string: "photo": "url-or-filename"
+      // - array : "photo": ["url1", "url2"] (legacy mobile payload)
+      if (Array.isArray(value)) {
+        if (value.length === 0) return true;
+        return value.every((item) => isValidImageReference(item));
+      }
+      if (typeof value === 'string') {
+        if (value.trim() === '') return true;
+        return isValidImageReference(value);
+      }
+      return false;
     })
-    .withMessage('Invalid photo format. Must be a valid image URL or data URI'),
+    .withMessage('Invalid photo format. Must be a valid image URL, filename, or data URI'),
 
   body('structures.*.components.*.photos')
     .optional()
@@ -78,15 +92,9 @@ const multiComponentRatingValidation = [
     .optional()
     .isString()
     .custom((value) => {
-      if (!value || value.trim() === '') return false;
-      const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
-      return value.startsWith('data:image/') ||
-             value.startsWith('blob:') ||
-             value.includes('/uploads/') ||
-             /^https?:\/\/.+/i.test(value) ||
-             extRegex.test(value);
+      return isValidImageReference(value);
     })
-    .withMessage('Invalid photo format in photos array. Must be a valid image URL or data URI'),
+    .withMessage('Invalid photo format in photos array. Must be a valid image URL, filename, or data URI'),
 
   body('structures.*.components.*.condition_comment')
     .notEmpty()
@@ -142,7 +150,7 @@ const multiComponentRatingValidation = [
 
   // NEW: Distress types validation
   body('structures.*.components.*.distress_types')
-    .optional()
+    .optional({ values: 'falsy' })
     .isArray()
     .withMessage('Distress types must be an array'),
   
@@ -181,8 +189,13 @@ const multiComponentRatingValidation = [
             if (hasValidRating) {
               // Check for photo for all valid ratings
               const hasPhotoString = component.photo && typeof component.photo === 'string' && component.photo.trim() !== '';
-              const hasPhotosArray = Array.isArray(component.photos) && component.photos.length > 0;
-              if (!hasPhotoString && !hasPhotosArray) {
+              const hasPhotoArray = Array.isArray(component.photo) && component.photo.some(
+                (photo) => typeof photo === 'string' && photo.trim() !== ''
+              );
+              const hasPhotosArray = Array.isArray(component.photos) && component.photos.some(
+                (photo) => typeof photo === 'string' && photo.trim() !== ''
+              );
+              if (!hasPhotoString && !hasPhotoArray && !hasPhotosArray) {
                 errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): At least one photo is required for ratings 1-5`);
               }
             }
