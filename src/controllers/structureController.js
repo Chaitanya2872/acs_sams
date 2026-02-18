@@ -5519,84 +5519,64 @@ async deleteRemark(req, res) {
 
 
 
-  /**
-   * Delete a structure (soft delete or permanent removal)
-   * @route DELETE /api/structures/:id
-   * @access Private (Owner or Admin)
-   */
-  async deleteStructure(req, res) {
-    try {
-      const { id } = req.params;
-      const { permanent = false } = req.query; // Optional: ?permanent=true for hard delete
-      
-      console.log(`🗑️ Deleting structure ${id} (permanent: ${permanent})`);
-      
-      const user = await User.findById(req.user.userId);
-      if (!user) {
-        return sendErrorResponse(res, 'User not found', 404);
-      }
-
-      // Find the structure
-      const structureIndex = user.structures.findIndex(
-        s => s._id.toString() === id
-      );
-
-      if (structureIndex === -1) {
-        return sendErrorResponse(res, 'Structure not found', 404);
-      }
-
-      const structure = user.structures[structureIndex];
-
-      // Check permissions (only owner can delete, unless admin)
-      // Add admin check if needed: || req.user.role === 'admin'
-      
-      if (permanent === 'true' || permanent === true) {
-        // Permanent deletion - completely remove from array
-        const deletedStructure = user.structures[structureIndex];
-        user.structures.splice(structureIndex, 1);
-        
-        console.log(`✅ Structure ${id} permanently deleted`);
-        
-        await user.save();
-        
-        return sendSuccessResponse(res, 'Structure permanently deleted', {
-          structure_id: id,
-          uid: deletedStructure.structural_identity?.uid,
-          structure_number: deletedStructure.structural_identity?.structural_identity_number,
-          deletion_type: 'permanent',
-          deleted_at: new Date()
-        });
-      } else {
-        // Soft delete - mark as deleted but keep in database
-        structure.status = 'deleted';
-        structure.creation_info.last_updated_date = new Date();
-        
-        // Add deletion metadata
-        if (!structure.deletion_info) {
-          structure.deletion_info = {};
-        }
-        structure.deletion_info.deleted_at = new Date();
-        structure.deletion_info.deleted_by = req.user.userId;
-        
-        console.log(`✅ Structure ${id} soft deleted (can be restored)`);
-        
-        await user.save();
-        
-        return sendSuccessResponse(res, 'Structure deleted successfully', {
-          structure_id: id,
-          uid: structure.structural_identity?.uid,
-          structure_number: structure.structural_identity?.structural_identity_number,
-          deletion_type: 'soft',
-          deleted_at: structure.deletion_info.deleted_at,
-          note: 'Structure marked as deleted. Use permanent=true query param to delete permanently.'
-        });
-      }
-
-    } catch (error) {
-      console.error('❌ Delete structure error:', error);
-      sendErrorResponse(res, 'Failed to delete structure', 500, error.message);
+/**
+ * Delete a structure (hard delete)
+ * @route DELETE /api/structures/:id
+ * @access Private (Owner or Admin)
+ */
+async deleteStructure(req, res) {
+  try {
+    const { id } = req.params;
+    const { permanent = true } = req.query; // Default to hard delete
+    
+    console.log(`🗑️ Deleting structure ${id} (permanent: ${permanent})`);
+    
+    // Fetch the user
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return sendErrorResponse(res, 'User not found', 404);
     }
+
+    // Find the structure index in the user's structures array
+    const structureIndex = user.structures.findIndex(
+      s => s._id.toString() === id
+    );
+
+    if (structureIndex === -1) {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+
+    // Optional: permission check
+    // if (user is not owner/admin) return sendErrorResponse(...);
+
+    const structure = user.structures[structureIndex];
+
+    if (permanent === 'true' || permanent === true) {
+      // Hard delete: remove from array completely
+      user.structures.splice(structureIndex, 1);
+      await user.save();
+
+      console.log(`✅ Structure ${id} permanently deleted`);
+
+      return sendSuccessResponse(res, 'Structure permanently deleted', {
+        structure_id: id,
+        uid: structure.structural_identity?.uid,
+        structure_number: structure.structural_identity?.structural_identity_number,
+        deletion_type: 'permanent',
+        deleted_at: new Date()
+      });
+    }
+
+    // Optional: remove soft delete if you don't need it
+    // Otherwise, keep your soft delete logic here
+    // structure.status = 'deleted'; // <-- will fail if enum doesn't allow it
+
+  } catch (error) {
+    console.error('❌ Delete structure error:', error);
+    sendErrorResponse(res, 'Failed to delete structure', 500, error.message);
   }
+}
+
 
 
 
