@@ -6097,13 +6097,14 @@ async saveFloorStructuralComponentsBulk(req, res) {
           name: c.name,
           rating: c.rating,
           photo: c.photo || null,
-          photos: c.photos || []
+          photos: c.photos || [],
+          distress_types: (c.distress_types && c.distress_types[0]) || ''
         }))
       });
-      
+
       console.log(`   ✅ Saved ${formattedComponents.length} components for ${component_type}`);
     });
-    
+
     // Calculate averages
     console.log('📊 Calculating floor structural average...');
     this.calculateFloorStructuralAverage(floor);
@@ -6286,7 +6287,8 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
           name: c.name,
           rating: c.rating,
           photo: c.photo || null,
-          photos: c.photos || []
+          photos: c.photos || [],
+          distress_types: (c.distress_types && c.distress_types[0]) || ''
         }))
       });
       
