@@ -23,6 +23,27 @@ const {
 
 const router = express.Router();
 
+// ✅ Import multer upload middleware (handles Cloudinary uploads)
+const { uploadMultiple, handleUploadError } = require('../middlewares/upload');
+
+// ✅ Middleware: when the request is multipart/form-data, the `structures` field
+//    arrives as a raw JSON string (not a parsed array). Parse it here so that
+//    express-validator and the controller both see a proper JS array.
+const parseStructuresBody = (req, res, next) => {
+  if (req.body && typeof req.body.structures === 'string') {
+    try {
+      req.body.structures = JSON.parse(req.body.structures);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid JSON in "structures" field',
+        details: e.message
+      });
+    }
+  }
+  next();
+};
+
 // =================== ⚠️ CRITICAL: BULK ROUTES FIRST - MOST SPECIFIC PATHS ⚠️ ===================
 console.log('🔧 Registering bulk routes...');
 
@@ -30,6 +51,8 @@ console.log('🔧 Registering bulk routes...');
 router.post(
   '/:id/flats/:flatId/structural/bulk',
   authenticateToken,
+  uploadMultiple,        // ✅ Upload files to Cloudinary before hitting controller
+  handleUploadError,     // ✅ Handle multer/Cloudinary errors gracefully
   parameterValidations.structureId,
   parameterValidations.flatId,
   multiComponentRatingValidation,
@@ -40,6 +63,9 @@ router.post(
 router.put(
   '/:id/flats/:flatId/structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.flatId,
   multiComponentRatingValidation,
@@ -52,6 +78,9 @@ router.put(
 router.post(
   '/:id/flats/:flatId/non-structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.flatId,
   multiComponentRatingValidation,
@@ -62,6 +91,9 @@ router.post(
 router.put(
   '/:id/flats/:flatId/non-structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.flatId,
   multiComponentRatingValidation,
@@ -73,6 +105,9 @@ router.put(
 router.post(
   '/:id/floors/:floorId/structural/bulk',
   authenticateToken,
+  uploadMultiple,        // ✅ Upload files to Cloudinary before hitting controller
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.floorId,
   multiComponentRatingValidation,
@@ -83,6 +118,9 @@ router.post(
 router.put(
   '/:id/floors/:floorId/structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.floorId,
   multiComponentRatingValidation,
@@ -93,6 +131,9 @@ router.put(
 router.post(
   '/:id/floors/:floorId/non-structural/bulk',
   authenticateToken,
+  uploadMultiple,        // ✅ Upload files to Cloudinary before hitting controller
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.floorId,
   multiComponentRatingValidation,
@@ -104,6 +145,9 @@ router.post(
 router.post(
   '/:id/floors/:floorId/blocks/:blockId/structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.floorId,
   parameterValidations.blockId,
@@ -115,6 +159,9 @@ router.post(
 router.put(
   '/:id/floors/:floorId/blocks/:blockId/structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.floorId,
   parameterValidations.blockId,
@@ -126,6 +173,9 @@ router.put(
 router.post(
   '/:id/floors/:floorId/blocks/:blockId/non-structural/bulk',
   authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseStructuresBody,  // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.floorId,
   parameterValidations.blockId,

@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const isValidPhotoReference = (value) => {
-  if (!value || typeof value !== 'string' || value.trim() === '') return false;
+  // Allow empty/null — photo is optional; undefined values are skipped by Mongoose
+  if (!value || typeof value !== 'string' || value.trim() === '') return true;
   const v = value.trim();
   const extRegex = /\.(jpe?g|png|gif|webp|bmp|svg)$/i;
   return (

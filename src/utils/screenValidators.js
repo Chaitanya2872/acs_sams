@@ -198,13 +198,6 @@ const multiComponentRatingValidation = [
             const parsedRating = Number(component.rating);
             const hasValidRating = !Number.isNaN(parsedRating) && parsedRating >= 1 && parsedRating <= 5;
 
-            if (hasValidRating) {
-              // Check for photo for all valid ratings
-              if (!hasAtLeastOnePhoto(component.photo, component.photos)) {
-                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): At least one photo is required for ratings 1-5`);
-              }
-            }
-
             if (hasValidRating && parsedRating <= 3) {
               // Check for detailed comment
               if (!component.condition_comment || component.condition_comment.trim().length < 10) {

@@ -2,6 +2,7 @@
 const { User } = require('../models/schemas');
 const { hasPrivilegedAccess } = require('../middlewares/auth'); 
 const StructureNumberGenerator = require('../utils/StructureNumberGenerator');
+const cloudinary = require('../config/cloudinary');
 const {
   sendSuccessResponse,
   sendErrorResponse,
@@ -46,6 +47,7 @@ const normalizeDistressTypes = (distressTypesInput) => {
 class StructureController {
   constructor() {
     this.structureNumberGenerator = new StructureNumberGenerator();
+    this._cloudinaryMissingConfigLogged = false;
     
     // Bind all methods to maintain 'this' context
     this.initializeStructure = this.initializeStructure.bind(this);
@@ -171,8 +173,12 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
  this.completeValidation = this.completeValidation.bind(this);
  this.approveStructure = this.approveStructure.bind(this);
  this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
- this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
- this.buildStatusDisplay = this.buildStatusDisplay.bind(this);
+this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
+this.buildStatusDisplay = this.buildStatusDisplay.bind(this);
+this.convertPhotoDataUrisToCloudinary = this.convertPhotoDataUrisToCloudinary.bind(this);
+this.uploadInlineImageToCloudinary = this.uploadInlineImageToCloudinary.bind(this);
+this.isDataImageUri = this.isDataImageUri.bind(this);
+this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   }
 
   // =================== UTILITY METHODS ===================
@@ -224,6 +230,118 @@ this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
     const timestamp = Date.now();
     const random = Math.random().toString(36).substr(2, 9);
     return `${componentType}_${timestamp}_${random}`;
+  }
+
+  isDataImageUri(value) {
+    return (
+      typeof value === 'string' &&
+      /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(value.trim())
+    );
+  }
+
+  isCloudinaryConfigured() {
+    return Boolean(
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    );
+  }
+
+  async uploadInlineImageToCloudinary(imageValue, folder = 'sams/structures') {
+    const normalizedValue = typeof imageValue === 'string' ? imageValue.trim() : '';
+    if (!this.isDataImageUri(normalizedValue)) {
+      return normalizedValue;
+    }
+
+    if (!this.isCloudinaryConfigured()) {
+      if (!this._cloudinaryMissingConfigLogged) {
+        console.warn('⚠️ Cloudinary credentials are missing. Keeping inline image data as-is.');
+        this._cloudinaryMissingConfigLogged = true;
+      }
+      return normalizedValue;
+    }
+
+    const uploadResult = await cloudinary.uploader.upload(normalizedValue, {
+      folder,
+      resource_type: 'image'
+    });
+
+    return uploadResult?.secure_url || normalizedValue;
+  }
+
+  async convertPhotoDataUrisToCloudinary(payload, options = {}) {
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+
+    const folder = options.folder || 'sams/structures';
+    const uploadCache = new Map();
+
+    const uploadWithCache = async (photoValue) => {
+      if (typeof photoValue !== 'string') {
+        return photoValue;
+      }
+
+      const normalizedValue = photoValue.trim();
+      if (!this.isDataImageUri(normalizedValue)) {
+        return normalizedValue;
+      }
+
+      if (!uploadCache.has(normalizedValue)) {
+        uploadCache.set(
+          normalizedValue,
+          this.uploadInlineImageToCloudinary(normalizedValue, folder)
+        );
+      }
+
+      return uploadCache.get(normalizedValue);
+    };
+
+    const walk = async (node) => {
+      if (Array.isArray(node)) {
+        const transformedItems = await Promise.all(node.map((item) => walk(item)));
+        node.splice(0, node.length, ...transformedItems);
+        return node;
+      }
+
+      if (!node || typeof node !== 'object') {
+        return node;
+      }
+
+      if (Array.isArray(node.photos)) {
+        const rawPhotos = node.photos
+          .filter((photo) => typeof photo === 'string')
+          .map((photo) => photo.trim())
+          .filter((photo) => photo !== '');
+
+        const convertedPhotos = await Promise.all(rawPhotos.map((photo) => uploadWithCache(photo)));
+        node.photos = Array.from(new Set(convertedPhotos.filter((photo) => typeof photo === 'string' && photo.trim() !== '')));
+      }
+
+      if (Object.prototype.hasOwnProperty.call(node, 'photo')) {
+        if (Array.isArray(node.photo)) {
+          const rawPhotoArray = node.photo
+            .filter((photo) => typeof photo === 'string')
+            .map((photo) => photo.trim())
+            .filter((photo) => photo !== '');
+
+          const convertedPhotoArray = await Promise.all(rawPhotoArray.map((photo) => uploadWithCache(photo)));
+          node.photo = Array.from(new Set(convertedPhotoArray.filter((photo) => typeof photo === 'string' && photo.trim() !== '')));
+        } else if (typeof node.photo === 'string' && node.photo.trim() !== '') {
+          node.photo = await uploadWithCache(node.photo);
+        }
+      }
+
+      const childKeys = Object.keys(node).filter((key) => key !== 'photo' && key !== 'photos');
+      for (const key of childKeys) {
+        node[key] = await walk(node[key]);
+      }
+
+      return node;
+    };
+
+    await walk(payload);
+    return payload;
   }
 
   // =================== STRUCTURE INITIALIZATION ===================
@@ -5850,6 +5968,48 @@ async saveFloorStructuralComponentsBulk(req, res) {
     console.log('Floor ID:', floorId);
     console.log('Structures data:', JSON.stringify(structures, null, 2));
 
+    // ✅ Build a filename → Cloudinary URL map from uploaded files.
+    //    upload.fields() sets req.files as an object: { photo: [...], photos: [...] }
+    //    Flatten all fields into a single ordered array for sequential fallback.
+    const uploadedFileMap = {};
+    const uploadedFileQueue = []; // ordered Cloudinary URLs for sequential assignment
+    if (req.files && typeof req.files === 'object') {
+      const allFiles = Object.values(req.files).flat();
+      console.log(`📸 ${allFiles.length} file(s) uploaded to Cloudinary`);
+      allFiles.forEach(file => {
+        const cloudinaryUrl = file.path || file.secure_url || (file.filename && `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}`);
+        if (cloudinaryUrl) {
+          uploadedFileMap[file.originalname] = cloudinaryUrl;
+          uploadedFileQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Mapped: ${file.originalname} → ${cloudinaryUrl}`);
+        }
+      });
+    }
+    let fileQueueIndex = 0; // tracks next unassigned file for sequential fallback
+
+    // ✅ Helper: resolve a photo value to a Cloudinary URL.
+    //    Priority: (1) already a remote URL → keep as-is
+    //              (2) filename matches an uploaded file → use that URL
+    //              (3) any non-empty placeholder → assign next uploaded file sequentially
+    const resolvePhoto = (photoValue) => {
+      if (typeof photoValue !== 'string' || !photoValue.trim()) return null;
+      const trimmed = photoValue.trim();
+      // Already a remote URL — keep it
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      // Exact filename match
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedFileMap[basename]) return uploadedFileMap[basename];
+      if (uploadedFileMap[trimmed]) return uploadedFileMap[trimmed];
+      // Fallback: assign next uploaded file sequentially (handles filename mismatch)
+      if (fileQueueIndex < uploadedFileQueue.length) {
+        const url = uploadedFileQueue[fileQueueIndex];
+        fileQueueIndex++;
+        console.log(`   ⚡ Sequential fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
     // Validate structures array exists
     if (!structures || structures.length === 0) {
       return sendErrorResponse(res, 400, 'No component structures provided');
@@ -5899,13 +6059,21 @@ async saveFloorStructuralComponentsBulk(req, res) {
       // Format components with auto-generated IDs if not provided
       const formattedComponents = components.map(comp => {
         const componentId = comp._id || this.generateComponentId(component_type);
+
+        // ✅ Resolve all photo entries: swap filenames for Cloudinary URLs
+        const rawPhotos = normalizePhotoList(comp.photos, comp.photo);
+        const resolvedPhotos = rawPhotos
+          .map(resolvePhoto)
+          .filter(Boolean);
+
+        console.log(`   📸 Component "${comp.name}" — raw photos: ${JSON.stringify(rawPhotos)} → resolved: ${JSON.stringify(resolvedPhotos)}`);
         
         return {
           _id: componentId,
           name: comp.name,
           rating: parseInt(comp.rating),
-          photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
-          photos: normalizePhotoList(comp.photos, comp.photo),
+          photo: resolvedPhotos[0] || undefined,
+          photos: resolvedPhotos.length > 0 ? resolvedPhotos : undefined,
           condition_comment: comp.condition_comment,
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
@@ -5927,7 +6095,9 @@ async saveFloorStructuralComponentsBulk(req, res) {
         components: formattedComponents.map(c => ({ 
           _id: c._id, 
           name: c.name,
-          rating: c.rating 
+          rating: c.rating,
+          photo: c.photo || null,
+          photos: c.photos || []
         }))
       });
       
@@ -5987,6 +6157,48 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
     console.log('Floor ID:', floorId);
     console.log('Structures data:', JSON.stringify(structures, null, 2));
 
+    // ✅ Build a filename → Cloudinary URL map from uploaded files.
+    //    upload.fields() sets req.files as an object: { photo: [...], photos: [...] }
+    //    Flatten all fields into a single ordered array for sequential fallback.
+    const uploadedFileMap = {};
+    const uploadedFileQueue = []; // ordered Cloudinary URLs for sequential assignment
+    if (req.files && typeof req.files === 'object') {
+      const allFiles = Object.values(req.files).flat();
+      console.log(`📸 ${allFiles.length} file(s) uploaded to Cloudinary`);
+      allFiles.forEach(file => {
+        const cloudinaryUrl = file.path || file.secure_url || (file.filename && `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}`);
+        if (cloudinaryUrl) {
+          uploadedFileMap[file.originalname] = cloudinaryUrl;
+          uploadedFileQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Mapped: ${file.originalname} → ${cloudinaryUrl}`);
+        }
+      });
+    }
+    let fileQueueIndex = 0; // tracks next unassigned file for sequential fallback
+
+    // ✅ Helper: resolve a photo value to a Cloudinary URL.
+    //    Priority: (1) already a remote URL → keep as-is
+    //              (2) filename matches an uploaded file → use that URL
+    //              (3) any non-empty placeholder → assign next uploaded file sequentially
+    const resolvePhoto = (photoValue) => {
+      if (typeof photoValue !== 'string' || !photoValue.trim()) return null;
+      const trimmed = photoValue.trim();
+      // Already a remote URL — keep it
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      // Exact filename match
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedFileMap[basename]) return uploadedFileMap[basename];
+      if (uploadedFileMap[trimmed]) return uploadedFileMap[trimmed];
+      // Fallback: assign next uploaded file sequentially (handles filename mismatch)
+      if (fileQueueIndex < uploadedFileQueue.length) {
+        const url = uploadedFileQueue[fileQueueIndex];
+        fileQueueIndex++;
+        console.log(`   ⚡ Sequential fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
     // Validate structures array exists
     if (!structures || structures.length === 0) {
       return sendErrorResponse(res, 400, 'No component structures provided');
@@ -6036,13 +6248,21 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
       // Format components with auto-generated IDs if not provided
       const formattedComponents = components.map(comp => {
         const componentId = comp._id || this.generateComponentId(component_type);
+
+        // ✅ Resolve all photo entries: swap filenames for Cloudinary URLs
+        const rawPhotos = normalizePhotoList(comp.photos, comp.photo);
+        const resolvedPhotos = rawPhotos
+          .map(resolvePhoto)
+          .filter(Boolean);
+
+        console.log(`   📸 Component "${comp.name}" — raw photos: ${JSON.stringify(rawPhotos)} → resolved: ${JSON.stringify(resolvedPhotos)}`);
         
         return {
           _id: componentId,
           name: comp.name,
           rating: parseInt(comp.rating),
-          photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
-          photos: normalizePhotoList(comp.photos, comp.photo),
+          photo: resolvedPhotos[0] || undefined,
+          photos: resolvedPhotos.length > 0 ? resolvedPhotos : undefined,
           condition_comment: comp.condition_comment,
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
@@ -6064,7 +6284,9 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
         components: formattedComponents.map(c => ({ 
           _id: c._id, 
           name: c.name,
-          rating: c.rating 
+          rating: c.rating,
+          photo: c.photo || null,
+          photos: c.photos || []
         }))
       });
       
