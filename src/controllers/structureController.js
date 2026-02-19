@@ -1790,6 +1790,8 @@ getAvailableComponentsBySubtype(structureSubtype, structureType) {
       { key: 'chequered_plate', label: 'Chequered Plate' },
       { key: 'doors_windows', label: 'Doors & Windows' },
       { key: 'flooring', label: 'Flooring' },
+      { key: 'walls', label: 'Walls' },
+      { key: 'paintings', label: 'Paintings' },
       { key: 'electrical_wiring', label: 'Electrical Wiring' },
       { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
       { key: 'railings', label: 'Railings' },
