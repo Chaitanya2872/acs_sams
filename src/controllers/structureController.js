@@ -1078,7 +1078,7 @@ async saveBlockRatings(req, res) {
           floor_id: floorId,
           floor_number: newFloor.floor_number,
           is_parking_floor: newFloor.is_parking_floor,
-          parking_floor_type: newFloor.parking_floor_type,
+          parking_floor_type: newFloor.parking_floor_type || null,
           floor_label_name: newFloor.floor_label_name
         });
       });
@@ -6098,6 +6098,26 @@ async saveFloorStructuralComponentsBulk(req, res) {
       floor.structural_rating[component_type] = formattedComponents;
       totalComponentsSaved += formattedComponents.length;
       
+      // ⭐ AUTO-PROPAGATE foundation ratings to all other floors
+      if (component_type === 'foundation') {
+        const allFloors = structure.geometric_details?.floors || [];
+        const otherFloors = allFloors.filter(f => f.floor_id !== floorId);
+        
+        otherFloors.forEach(otherFloor => {
+          if (!otherFloor.structural_rating) otherFloor.structural_rating = {};
+          // Clone components with new IDs so each floor has its own copy
+          const propagatedComponents = formattedComponents.map(comp => ({
+            ...comp,
+            _id: this.generateComponentId('foundation'),
+            inspection_date: inspectionDate
+          }));
+          otherFloor.structural_rating.foundation = propagatedComponents;
+          this.calculateFloorStructuralAverage(otherFloor);
+          this.calculateFloorCombinedRating(otherFloor);
+          console.log(`   🔁 Propagated foundation to floor: ${otherFloor.floor_label_name}`);
+        });
+      }
+      
       savedComponentTypes.push({
         component_type,
         count: formattedComponents.length,
@@ -6129,6 +6149,16 @@ async saveFloorStructuralComponentsBulk(req, res) {
     console.log(`   Total components: ${totalComponentsSaved}`);
     console.log(`   Component types: ${savedComponentTypes.length}`);
     
+    // Check if foundation was propagated
+    const allFloors = structure.geometric_details?.floors || [];
+    const foundationPropagated = savedComponentTypes.some(s => s.component_type === 'foundation');
+    const propagatedToFloors = foundationPropagated
+      ? allFloors.filter(f => f.floor_id !== floorId).map(f => ({
+          floor_id: f.floor_id,
+          floor_label: f.floor_label_name
+        }))
+      : [];
+
     sendSuccessResponse(res, 200, {
       structure_id: id,
       floor_id: floorId,
@@ -6139,7 +6169,13 @@ async saveFloorStructuralComponentsBulk(req, res) {
         overall_average: floor.structural_rating?.overall_average,
         health_status: floor.structural_rating?.health_status
       },
-      message: 'Floor structural components saved successfully'
+      ...(foundationPropagated && {
+        foundation_propagated: true,
+        propagated_to_floors: propagatedToFloors
+      }),
+      message: foundationPropagated
+        ? `Floor structural components saved. Foundation ratings auto-propagated to ${propagatedToFloors.length} other floor(s)`
+        : 'Floor structural components saved successfully'
     });
     
   } catch (error) {
