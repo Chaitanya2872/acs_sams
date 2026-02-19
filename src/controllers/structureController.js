@@ -5222,8 +5222,17 @@ calculateComponentAverage(components) {
 }
 
 normalizeRatingComponents(components) {
-  if (Array.isArray(components)) return components;
-  if (components && typeof components === 'object') return [components];
+  const normalize = (arr) => {
+    if (!Array.isArray(arr)) {
+      arr = arr && typeof arr === 'object' ? [arr] : [];
+    }
+    return arr.map(c => ({
+      ...c.toObject ? c.toObject() : c,
+      distress_types: (Array.isArray(c.distress_types) && c.distress_types[0]) || c.distress_types || ''
+    }));
+  };
+  if (Array.isArray(components)) return normalize(components);
+  if (components && typeof components === 'object') return normalize([components]);
   return [];
 }
 
