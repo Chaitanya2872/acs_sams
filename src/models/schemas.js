@@ -478,6 +478,11 @@ const floorSchema = {
     type: Boolean,
     default: false
   },
+  parking_floor_type: {
+    type: String,
+    enum: ['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5', null],
+    default: null
+  },
   floor_height: {
     type: Number
   },
