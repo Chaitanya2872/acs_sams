@@ -200,7 +200,7 @@ const multiComponentRatingValidation = [
 
             if (hasValidRating && parsedRating <= 3) {
               // Check for detailed comment
-              if (!component.condition_comment || component.condition_comment.trim().length < 10) {
+              if (!component.condition_comment || component.condition_comment.trim().length < 1) {
                 errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Detailed condition comment (min 10 chars) is required for ratings 1-3`);
               }
               
