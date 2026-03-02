@@ -3703,6 +3703,7 @@ async getAllStructures(req, res) {
       
       const structureData = {
         structure_id: structure._id,
+        structure_name: structure.structural_identity?.structure_name || '',
         uid: structure.structural_identity?.uid,
         structural_identity_number: structure.structural_identity?.structural_identity_number,
         client_name: structure.administration?.client_name,
