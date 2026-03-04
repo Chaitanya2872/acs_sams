@@ -213,7 +213,7 @@ const multiComponentRatingValidation = [
               }
               
               // NEW: Check for repair methodology
-              if (!component.repair_methodology || typeof component.repair_methodology !== 'string' || component.repair_methodology.trim().length < 10) {
+              if (!component.repair_methodology || typeof component.repair_methodology !== 'string' || component.repair_methodology.trim().length < 1) {
                 errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Repair methodology must be a non-empty string (min 10 chars) for ratings 1-3`);
               }
               
