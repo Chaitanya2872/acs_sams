@@ -397,6 +397,8 @@ const flatSchema = {
     brick_plaster: { type: [componentInstanceSchema], default: undefined },
     doors_windows: { type: [componentInstanceSchema], default: undefined },
     flooring_tiles:{ type: [componentInstanceSchema], default: undefined },
+    walls: { type: [componentInstanceSchema], default: undefined },
+    paintings: { type: [componentInstanceSchema], default: undefined },
     electrical_wiring: { type: [componentInstanceSchema], default: undefined },
     sanitary_fittings: { type: [componentInstanceSchema], default: undefined },
     railings: { type: [componentInstanceSchema], default: undefined },
@@ -536,6 +538,7 @@ const floorSchema = {
   // FLOOR-LEVEL NON-STRUCTURAL RATINGS
   non_structural_rating: {
     walls: { type: [componentInstanceSchema], default: undefined },
+    paintings: { type: [componentInstanceSchema], default: undefined },
     flooring: { type: [componentInstanceSchema], default: undefined },
     electrical_system: { type: [componentInstanceSchema], default: undefined },
     fire_safety: { type: [componentInstanceSchema], default: undefined },

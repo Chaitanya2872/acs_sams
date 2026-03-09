@@ -44,6 +44,34 @@ const normalizeDistressTypes = (distressTypesInput) => {
   return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
 };
 
+const RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS = [
+  { key: 'brick_plaster', label: 'Brick/Plaster' },
+  { key: 'doors_windows', label: 'Doors & Windows' },
+  { key: 'flooring_tiles', label: 'Flooring/Tiles' },
+  { key: 'walls', label: 'Walls' },
+  { key: 'paintings', label: 'Paintings' },
+  { key: 'electrical_wiring', label: 'Electrical Wiring' },
+  { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
+  { key: 'railings', label: 'Railings' },
+  { key: 'water_tanks', label: 'Water Tanks' },
+  { key: 'plumbing', label: 'Plumbing' },
+  { key: 'sewage_system', label: 'Sewage System' },
+  { key: 'panel_board', label: 'Panel Board' },
+  { key: 'lifts', label: 'Lifts' }
+];
+
+const RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES = RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS.map(
+  ({ key }) => key
+);
+
+const FLOOR_NON_STRUCTURAL_COMPONENT_TYPES = [
+  'walls',
+  'paintings',
+  'flooring',
+  'electrical_system',
+  'fire_safety'
+];
+
 class StructureController {
   constructor() {
     this.structureNumberGenerator = new StructureNumberGenerator();
@@ -1508,6 +1536,8 @@ async saveFlatCombinedRatings(req, res) {
           brick_plaster: non_structural_rating.brick_plaster ? [this.createRatingComponent(non_structural_rating.brick_plaster, inspectionDate, 'brick_plaster')].filter(Boolean) : [],
           doors_windows: non_structural_rating.doors_windows ? [this.createRatingComponent(non_structural_rating.doors_windows, inspectionDate, 'doors_windows')].filter(Boolean) : [],
           flooring_tiles: non_structural_rating.flooring_tiles ? [this.createRatingComponent(non_structural_rating.flooring_tiles, inspectionDate, 'flooring_tiles')].filter(Boolean) : [],
+          walls: non_structural_rating.walls ? [this.createRatingComponent(non_structural_rating.walls, inspectionDate, 'walls')].filter(Boolean) : [],
+          paintings: non_structural_rating.paintings ? [this.createRatingComponent(non_structural_rating.paintings, inspectionDate, 'paintings')].filter(Boolean) : [],
           electrical_wiring: non_structural_rating.electrical_wiring ? [this.createRatingComponent(non_structural_rating.electrical_wiring, inspectionDate, 'electrical_wiring')].filter(Boolean) : [],
           sanitary_fittings: non_structural_rating.sanitary_fittings ? [this.createRatingComponent(non_structural_rating.sanitary_fittings, inspectionDate, 'sanitary_fittings')].filter(Boolean) : [],
           railings: non_structural_rating.railings ? [this.createRatingComponent(non_structural_rating.railings, inspectionDate, 'railings')].filter(Boolean) : [],
@@ -1522,6 +1552,8 @@ async saveFlatCombinedRatings(req, res) {
           non_structural_rating.brick_plaster?.rating,
           non_structural_rating.doors_windows?.rating,
           non_structural_rating.flooring_tiles?.rating,
+          non_structural_rating.walls?.rating,
+          non_structural_rating.paintings?.rating,
           non_structural_rating.electrical_wiring?.rating,
           non_structural_rating.sanitary_fittings?.rating,
           non_structural_rating.railings?.rating,
@@ -1628,6 +1660,8 @@ async getFlatCombinedRatings(req, res) {
       brick_plaster: convertArrayToSingle(flat.non_structural_rating?.brick_plaster),
       doors_windows: convertArrayToSingle(flat.non_structural_rating?.doors_windows),
       flooring_tiles: convertArrayToSingle(flat.non_structural_rating?.flooring_tiles),
+      walls: convertArrayToSingle(flat.non_structural_rating?.walls),
+      paintings: convertArrayToSingle(flat.non_structural_rating?.paintings),
       electrical_wiring: convertArrayToSingle(flat.non_structural_rating?.electrical_wiring),
       sanitary_fittings: convertArrayToSingle(flat.non_structural_rating?.sanitary_fittings),
       railings: convertArrayToSingle(flat.non_structural_rating?.railings),
@@ -1757,19 +1791,7 @@ getAvailableComponentsBySubtype(structureSubtype, structureType) {
         { key: 'loading_docks', label: 'Loading Docks' }
       ];
     } else {
-      availableComponents.non_structural = [
-        { key: 'brick_plaster', label: 'Brick/Plaster' },
-        { key: 'doors_windows', label: 'Doors & Windows' },
-        { key: 'flooring_tiles', label: 'Flooring/Tiles' },
-        { key: 'electrical_wiring', label: 'Electrical Wiring' },
-        { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
-        { key: 'railings', label: 'Railings' },
-        { key: 'water_tanks', label: 'Water Tanks' },
-        { key: 'plumbing', label: 'Plumbing' },
-        { key: 'sewage_system', label: 'Sewage System' },
-        { key: 'panel_board', label: 'Panel Board' },
-        { key: 'lifts', label: 'Lifts' }
-      ];
+      availableComponents.non_structural = RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS;
     }
   } else if (structureSubtype === 'steel') {
     availableComponents.structural = [
@@ -1996,7 +2018,7 @@ hasFloorNonStructuralRating(floor) {
     try {
       const { id, floorId, flatId } = req.params;
       const { 
-        brick_plaster, doors_windows, flooring_tiles, electrical_wiring,
+        brick_plaster, doors_windows, flooring_tiles, walls, paintings, electrical_wiring,
         sanitary_fittings, railings, water_tanks, plumbing,
         sewage_system, panel_board, lifts 
       } = req.body;
@@ -2019,6 +2041,8 @@ hasFloorNonStructuralRating(floor) {
         brick_plaster: this.createRatingComponent(brick_plaster, inspectionDate),
         doors_windows: this.createRatingComponent(doors_windows, inspectionDate),
         flooring_tiles: this.createRatingComponent(flooring_tiles, inspectionDate),
+        walls: this.createRatingComponent(walls, inspectionDate),
+        paintings: this.createRatingComponent(paintings, inspectionDate),
         electrical_wiring: this.createRatingComponent(electrical_wiring, inspectionDate),
         sanitary_fittings: this.createRatingComponent(sanitary_fittings, inspectionDate),
         railings: this.createRatingComponent(railings, inspectionDate),
@@ -2031,9 +2055,9 @@ hasFloorNonStructuralRating(floor) {
       
       // Calculate average
       const ratings = [
-        brick_plaster.rating, doors_windows.rating, flooring_tiles.rating, electrical_wiring.rating,
-        sanitary_fittings.rating, railings.rating, water_tanks.rating, plumbing.rating,
-        sewage_system.rating, panel_board.rating, lifts.rating
+        brick_plaster?.rating, doors_windows?.rating, flooring_tiles?.rating, walls?.rating,
+        paintings?.rating, electrical_wiring?.rating, sanitary_fittings?.rating, railings?.rating,
+        water_tanks?.rating, plumbing?.rating, sewage_system?.rating, panel_board?.rating, lifts?.rating
       ].filter(r => r);
       
       if (ratings.length > 0) {
@@ -2087,6 +2111,8 @@ hasFloorNonStructuralRating(floor) {
           brick_plaster: defaultRating,
           doors_windows: defaultRating,
           flooring_tiles: defaultRating,
+          walls: defaultRating,
+          paintings: defaultRating,
           electrical_wiring: defaultRating,
           sanitary_fittings: defaultRating,
           railings: defaultRating,
@@ -2663,12 +2689,7 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
       flat.structural_rating.assessment_date = inspectionDate;
     }
   } else if (ratingType === 'non_structural_rating') {
-    const nonStructuralComponents = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
-    const nonStructuralRatings = nonStructuralComponents
+    const nonStructuralRatings = RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES
       .map(comp => flat.non_structural_rating[comp]?.rating)
       .filter(r => r);
     if (nonStructuralRatings.length > 0) {
@@ -2725,6 +2746,8 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     brick_plaster: { ...defaultRating, component_name: 'Brick & Plaster' },
     doors_windows: { ...defaultRating, component_name: 'Doors & Windows' },
     flooring_tiles: { ...defaultRating, component_name: 'Flooring & Tiles' },
+    walls: { ...defaultRating, component_name: 'Walls' },
+    paintings: { ...defaultRating, component_name: 'Paintings' },
     electrical_wiring: { ...defaultRating, component_name: 'Electrical Wiring' },
     sanitary_fittings: { ...defaultRating, component_name: 'Sanitary Fittings' },
     railings: { ...defaultRating, component_name: 'Railings' },
@@ -2821,13 +2844,7 @@ extractFlatImages(flat, options = {}) {
   
   // Process non-structural rating images
   if (flat.non_structural_rating && (!imageType || imageType === 'non_structural')) {
-    const nonStructuralComponents = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
-    
-    nonStructuralComponents.forEach(comp => {
+    RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.forEach(comp => {
       if (flat.non_structural_rating[comp]?.photos?.length > 0 && 
           (!component || component === comp)) {
         
@@ -2915,6 +2932,7 @@ async saveFloorRatings(req, res) {
       if (non_structural_rating) {
         floor.non_structural_rating = {
           walls: this.createRatingComponent(non_structural_rating.walls, inspectionDate, 'walls'),
+          paintings: this.createRatingComponent(non_structural_rating.paintings, inspectionDate, 'paintings'),
           flooring: this.createRatingComponent(non_structural_rating.flooring, inspectionDate, 'flooring'),
           electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate, 'electrical_system'),
           fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate, 'fire_safety'),
@@ -2922,6 +2940,7 @@ async saveFloorRatings(req, res) {
 
         const ratings = [
           floor.non_structural_rating.walls?.rating,
+          floor.non_structural_rating.paintings?.rating,
           floor.non_structural_rating.flooring?.rating,
           floor.non_structural_rating.electrical_system?.rating,
           floor.non_structural_rating.fire_safety?.rating
@@ -3128,13 +3147,7 @@ async generateMaintenanceRecommendations(structure) {
         
         // Check non-structural components
         if (flat.non_structural_rating) {
-          const nonStructuralComponents = [
-            'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-            'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-            'sewage_system', 'panel_board', 'lifts'
-          ];
-          
-          nonStructuralComponents.forEach(component => {
+          RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.forEach(component => {
             const rating = flat.non_structural_rating[component];
             if (rating && rating.rating <= 2) {
               recommendations.push({
@@ -4677,13 +4690,7 @@ async saveFlatNonStructuralComponents(req, res) {
     }
     
     // Validate component_type is non-structural
-    const nonStructuralComponents = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
-    
-    if (!nonStructuralComponents.includes(component_type)) {
+    if (!RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.includes(component_type)) {
       return sendErrorResponse(res, 'Invalid non-structural component type', 400);
     }
     
@@ -4905,13 +4912,8 @@ async updateFlatNonStructuralComponent(req, res) {
     // Find the component across all non-structural types
     let found = false;
     let componentType = null;
-    const nonStructuralTypes = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
     
-    for (const type of nonStructuralTypes) {
+    for (const type of RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES) {
       const components = targetFlat.non_structural_rating?.[type];
       if (components && Array.isArray(components)) {
         const componentIndex = components.findIndex(c => c._id === componentId);
@@ -5050,13 +5052,8 @@ async deleteFlatNonStructuralComponent(req, res) {
     // Find and delete the component
     let found = false;
     let componentType = null;
-    const nonStructuralTypes = [
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'
-    ];
     
-    for (const type of nonStructuralTypes) {
+    for (const type of RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES) {
       const components = targetFlat.non_structural_rating?.[type];
       if (components && Array.isArray(components)) {
         const componentIndex = components.findIndex(c => c._id === componentId);
@@ -5243,13 +5240,8 @@ calculateNonStructuralAverage(flat) {
   if (!flat.non_structural_rating) return;
   
   const allRatings = [];
-  const types = [
-    'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-    'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-    'sewage_system', 'panel_board', 'lifts'
-  ];
   
-  types.forEach(type => {
+  RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.forEach(type => {
     const components = flat.non_structural_rating[type];
     if (components && Array.isArray(components)) {
       components.forEach(comp => {
@@ -5306,9 +5298,8 @@ calculateFloorNonStructuralAverage(floor) {
   if (!floor.non_structural_rating) return;
   
   const allRatings = [];
-  const types = ['walls', 'flooring', 'electrical_system', 'fire_safety'];
   
-  types.forEach(type => {
+  FLOOR_NON_STRUCTURAL_COMPONENT_TYPES.forEach(type => {
     const components = floor.non_structural_rating[type];
     if (components && Array.isArray(components)) {
       components.forEach(comp => {
@@ -5846,13 +5837,7 @@ async saveFlatNonStructuralComponentsBulk(req, res) {
     // Process each component type
     structures.forEach(({ component_type, components }) => {
       // Validate it's a non-structural component
-      const nonStructuralComponents = [
-        'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-        'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-        'sewage_system', 'panel_board', 'lifts'
-      ];
-      
-      if (!nonStructuralComponents.includes(component_type)) {
+      if (!RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.includes(component_type)) {
         throw new Error(`Invalid non-structural component type: ${component_type}`);
       }
       

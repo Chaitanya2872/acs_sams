@@ -22,6 +22,23 @@ const hasAtLeastOnePhoto = (photoField, photosField) => {
   return hasPhotoString || hasPhotoArray || hasPhotosArray;
 };
 
+const RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES = [
+  'brick_plaster', 'doors_windows', 'flooring_tiles', 'walls', 'paintings',
+  'electrical_wiring', 'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
+  'sewage_system', 'panel_board', 'lifts'
+];
+
+const VALID_COMPONENT_TYPES = [
+  'beams', 'columns', 'slab', 'foundation', 'roof_truss',
+  'connections', 'bracings', 'purlins', 'channels', 'steel_flooring',
+  ...RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES,
+  'walls_cladding', 'industrial_flooring', 'ventilation',
+  'overhead_cranes', 'loading_docks',
+  'cladding_partition_panels', 'roof_sheeting', 'chequered_plate',
+  'panel_board_transformer', 'lift',
+  'flooring', 'electrical_system', 'fire_safety', 'drainage'
+];
+
 
 const multiComponentRatingValidation = [
   body('structures')
@@ -32,24 +49,7 @@ const multiComponentRatingValidation = [
     .notEmpty()
     .withMessage('Component type is required')
     .isString()
-    .isIn([
-      // Structural components (RCC)
-      'beams', 'columns', 'slab', 'foundation', 'roof_truss',
-      // Structural components (Steel) - NEW
-      'connections', 'bracings', 'purlins', 'channels', 'steel_flooring',
-      // Non-structural components (residential/commercial)
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts',
-      // Non-structural components (industrial - RCC)
-      'walls_cladding', 'industrial_flooring', 'ventilation',
-      'overhead_cranes', 'loading_docks',
-      // Non-structural components (industrial - Steel) - NEW
-      'cladding_partition_panels', 'roof_sheeting', 'chequered_plate',
-      'panel_board_transformer', 'lift',
-      // Floor-level components
-      'walls', 'flooring', 'electrical_system', 'fire_safety', 'drainage'
-    ])
+    .isIn(VALID_COMPONENT_TYPES)
     .withMessage('Invalid component type'),
 
   body('structures.*.components')
@@ -168,7 +168,7 @@ const multiComponentRatingValidation = [
   
   body('structures.*.components.*.distress_types.*')
     .if(body('structures.*.components.*.distress_types').exists())
-    .isIn(['physical', 'chemical', 'mechanical'])
+    .isIn(['physical', 'chemical', 'mechanical', 'none'])
     .withMessage('Distress type must be one of: physical, chemical, mechanical'),
 
   // NEW: PDF files validation
@@ -240,18 +240,7 @@ const componentRatingValidation = [
     .notEmpty()
     .withMessage('Component type is required')
     .isString()
-    .isIn([
-      'beams', 'columns', 'slab', 'foundation', 'roof_truss',
-      'connections', 'bracings', 'purlins', 'channels', 'steel_flooring',
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts',
-      'walls_cladding', 'industrial_flooring', 'ventilation',
-      'overhead_cranes', 'loading_docks',
-      'cladding_partition_panels', 'roof_sheeting', 'chequered_plate',
-      'panel_board_transformer', 'lift',
-      'walls', 'flooring', 'electrical_system', 'fire_safety', 'drainage'
-    ])
+    .isIn(VALID_COMPONENT_TYPES)
     .withMessage('Invalid component type'),
 
   body('components')
@@ -1284,6 +1273,84 @@ const flatCombinedRatingsValidation = [
     .isLength({ max: 2000 })
     .withMessage('Flooring & Tiles inspector notes cannot exceed 2000 characters'),
 
+  // Walls
+  body('non_structural_rating.walls.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Walls component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.walls.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Walls component name must be 1-100 characters'),
+  
+  body('non_structural_rating.walls.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Walls rating must be between 1 and 5'),
+  
+  body('non_structural_rating.walls.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Walls condition comment cannot exceed 1000 characters'),
+  
+  body('non_structural_rating.walls.photos')
+    .optional()
+    .isArray()
+    .withMessage('Walls photos must be an array'),
+
+  body('non_structural_rating.walls.inspector_notes')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Walls inspector notes cannot exceed 2000 characters'),
+
+  // Paintings
+  body('non_structural_rating.paintings.component_id')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Paintings component ID must be 1-100 characters'),
+  
+  body('non_structural_rating.paintings.component_name')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Paintings component name must be 1-100 characters'),
+  
+  body('non_structural_rating.paintings.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Paintings rating must be between 1 and 5'),
+  
+  body('non_structural_rating.paintings.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Paintings condition comment cannot exceed 1000 characters'),
+  
+  body('non_structural_rating.paintings.photos')
+    .optional()
+    .isArray()
+    .withMessage('Paintings photos must be an array'),
+
+  body('non_structural_rating.paintings.inspector_notes')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Paintings inspector notes cannot exceed 2000 characters'),
+
   // Electrical Wiring
   body('non_structural_rating.electrical_wiring.component_id')
     .optional()
@@ -1642,13 +1709,7 @@ const flatCombinedRatingsValidation = [
     
     // Check non-structural ratings
     if (requestBody.non_structural_rating) {
-      const nonStructuralComponents = [
-        'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-        'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-        'sewage_system', 'panel_board', 'lifts'
-      ];
-      
-      nonStructuralComponents.forEach(component => {
+      RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.forEach(component => {
         const rating = requestBody.non_structural_rating[component];
         if (rating && rating.rating && rating.rating >= 1 && rating.rating <= 5) {
           if (!hasAtLeastOnePhoto(rating.photo, rating.photos)) {
@@ -1721,10 +1782,8 @@ const bulkRatingsValidation = [
     .isInt({ min: 1, max: 5 })
     .withMessage('Foundation rating must be between 1 and 5'),
 
-  // Optional non-structural ratings validation (basic check for all 11 components)
-  ...['brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts'].map(component =>
+  // Optional non-structural ratings validation (basic check for all RCC flat components)
+  ...RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.map(component =>
     body(`floors.*.flats.*.non_structural_rating.${component}.rating`)
       .optional()
       .isInt({ min: 1, max: 5 })
@@ -1856,18 +1915,7 @@ const parameterValidations = {
     .notEmpty()
     .withMessage('Component type is required')
     .isString()
-    .isIn([
-      'beams', 'columns', 'slab', 'foundation', 'roof_truss',
-      'connections', 'bracings', 'purlins', 'channels', 'steel_flooring',
-      'brick_plaster', 'doors_windows', 'flooring_tiles', 'electrical_wiring',
-      'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
-      'sewage_system', 'panel_board', 'lifts',
-      'walls_cladding', 'industrial_flooring', 'ventilation',
-      'overhead_cranes', 'loading_docks',
-      'cladding_partition_panels', 'roof_sheeting', 'chequered_plate',
-      'panel_board_transformer', 'lift',
-      'walls', 'flooring', 'electrical_system', 'fire_safety', 'drainage'
-    ])
+    .isIn(VALID_COMPONENT_TYPES)
     .withMessage('Invalid component type'),
   
   testId: param('testId')
@@ -2043,6 +2091,23 @@ const floorRatingsValidation = [
     .optional()
     .isArray()
     .withMessage('Walls photos must be an array'),
+
+  body('non_structural_rating.paintings.rating')
+    .optional()
+    .isInt({ min: 1, max: 5 })
+    .withMessage('Paintings rating must be between 1 and 5'),
+  
+  body('non_structural_rating.paintings.condition_comment')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Paintings condition comment cannot exceed 1000 characters'),
+  
+  body('non_structural_rating.paintings.photos')
+    .optional()
+    .isArray()
+    .withMessage('Paintings photos must be an array'),
   
   body('non_structural_rating.flooring.rating')
     .optional()
