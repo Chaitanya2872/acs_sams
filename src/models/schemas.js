@@ -256,7 +256,22 @@ const industrialBlockSchema = {
   
   // BLOCK-LEVEL NON-STRUCTURAL RATINGS (Array of instances)
   non_structural_rating: {
-    // For RCC structures
+    // RCC structures use the same component set as residential/commercial.
+    brick_plaster: {type: [componentInstanceSchema], default: undefined},
+    doors_windows: {type: [componentInstanceSchema], default: undefined},
+    flooring_tiles: {type: [componentInstanceSchema], default: undefined},
+    walls: {type: [componentInstanceSchema], default: undefined},
+    paintings: {type: [componentInstanceSchema], default: undefined},
+    electrical_wiring: {type: [componentInstanceSchema], default: undefined},
+    sanitary_fittings: {type: [componentInstanceSchema], default: undefined},
+    railings: {type: [componentInstanceSchema], default: undefined},
+    water_tanks: {type: [componentInstanceSchema], default: undefined},
+    plumbing: {type: [componentInstanceSchema], default: undefined},
+    sewage_system: {type: [componentInstanceSchema], default: undefined},
+    panel_board: {type: [componentInstanceSchema], default: undefined},
+    lifts: {type: [componentInstanceSchema], default: undefined},
+
+    // Retain steel and legacy industrial-specific fields for compatibility.
     walls_cladding:{type: [componentInstanceSchema], default: undefined},
     industrial_flooring: {type: [componentInstanceSchema], default: undefined},
     ventilation:{type: [componentInstanceSchema], default: undefined},
@@ -265,19 +280,10 @@ const industrialBlockSchema = {
     drainage: {type: [componentInstanceSchema], default: undefined},
     overhead_cranes: {type: [componentInstanceSchema], default: undefined},
     loading_docks: {type: [componentInstanceSchema], default: undefined},
-    
-    // NEW: For steel structures
     cladding_partition_panels: {type: [componentInstanceSchema], default: undefined},
     roof_sheeting: {type: [componentInstanceSchema], default: undefined},
     chequered_plate: {type: [componentInstanceSchema], default: undefined},
-    doors_windows: {type: [componentInstanceSchema], default: undefined},
     flooring: {type: [componentInstanceSchema], default: undefined},
-    electrical_wiring: {type: [componentInstanceSchema], default: undefined},
-    sanitary_fittings: {type: [componentInstanceSchema], default: undefined},
-    railings: {type: [componentInstanceSchema], default: undefined},
-    water_tanks: {type: [componentInstanceSchema], default: undefined},
-    plumbing: {type: [componentInstanceSchema], default: undefined},
-    sewage_system: {type: [componentInstanceSchema], default: undefined},
     panel_board_transformer: {type: [componentInstanceSchema], default: undefined},
     lift: {type: [componentInstanceSchema], default: undefined},
     

@@ -64,6 +64,54 @@ const RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES = RCC_FLAT_NON_STRUCTURAL_COMPONEN
   ({ key }) => key
 );
 
+const RCC_BLOCK_STRUCTURAL_COMPONENT_OPTIONS = [
+  { key: 'beams', label: 'Beams' },
+  { key: 'columns', label: 'Columns' },
+  { key: 'slab', label: 'Slab' },
+  { key: 'foundation', label: 'Foundation' }
+];
+
+const STEEL_STRUCTURAL_COMPONENT_OPTIONS = [
+  { key: 'foundation', label: 'Foundation (RCC)' },
+  { key: 'columns', label: 'Columns (Steel)' },
+  { key: 'beams', label: 'Beams (Steel)' },
+  { key: 'roof_truss', label: 'Roof Trusses' },
+  { key: 'steel_flooring', label: 'Steel Flooring' },
+  { key: 'connections', label: 'Connections' },
+  { key: 'bracings', label: 'Bracings' },
+  { key: 'purlins', label: 'Purlins' },
+  { key: 'channels', label: 'Channels' }
+];
+
+const STEEL_NON_STRUCTURAL_COMPONENT_OPTIONS = [
+  { key: 'cladding_partition_panels', label: 'Cladding/Partition Panels' },
+  { key: 'roof_sheeting', label: 'Roof Sheeting' },
+  { key: 'chequered_plate', label: 'Chequered Plate' },
+  { key: 'doors_windows', label: 'Doors & Windows' },
+  { key: 'flooring', label: 'Flooring' },
+  { key: 'walls', label: 'Walls' },
+  { key: 'paintings', label: 'Paintings' },
+  { key: 'electrical_wiring', label: 'Electrical Wiring' },
+  { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
+  { key: 'railings', label: 'Railings' },
+  { key: 'water_tanks', label: 'Water Tanks' },
+  { key: 'plumbing', label: 'Plumbing' },
+  { key: 'sewage_system', label: 'Sewage System' },
+  { key: 'panel_board_transformer', label: 'Panel/Board Transformer' },
+  { key: 'lift', label: 'Lift' }
+];
+
+const INDUSTRIAL_BLOCK_COMPONENT_OPTIONS_BY_SUBTYPE = {
+  rcc: {
+    structural: RCC_BLOCK_STRUCTURAL_COMPONENT_OPTIONS,
+    non_structural: RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS
+  },
+  steel: {
+    structural: STEEL_STRUCTURAL_COMPONENT_OPTIONS,
+    non_structural: STEEL_NON_STRUCTURAL_COMPONENT_OPTIONS
+  }
+};
+
 const FLOOR_NON_STRUCTURAL_COMPONENT_TYPES = [
   'walls',
   'paintings',
@@ -883,6 +931,8 @@ async saveAdministrativeScreen(req, res) {
       return sendErrorResponse(res, 'Floor not found', 404);
     }
 
+    const structureSubtype = structure.structural_identity?.structure_subtype || 'rcc';
+    const blockComponentOptions = this.getIndustrialBlockComponentsBySubtype(structureSubtype);
     const createdBlocks = [];
     
     blocks.forEach((blockData, index) => {
@@ -893,24 +943,8 @@ async saveAdministrativeScreen(req, res) {
         block_name: blockData.block_name || `Block ${index + 1}`,
         block_type: blockData.block_type || 'manufacturing',
         area_sq_mts: blockData.area_sq_mts || null,
-        // Initialize empty rating structures for industrial components
-        structural_rating: {
-          beams: { rating: null, condition_comment: '', photos: [] },
-          columns: { rating: null, condition_comment: '', photos: [] },
-          slab: { rating: null, condition_comment: '', photos: [] },
-          foundation: { rating: null, condition_comment: '', photos: [] },
-          roof_truss: { rating: null, condition_comment: '', photos: [] }
-        },
-        non_structural_rating: {
-          walls_cladding: { rating: null, condition_comment: '', photos: [] },
-          industrial_flooring: { rating: null, condition_comment: '', photos: [] },
-          ventilation: { rating: null, condition_comment: '', photos: [] },
-          electrical_system: { rating: null, condition_comment: '', photos: [] },
-          fire_safety: { rating: null, condition_comment: '', photos: [] },
-          drainage: { rating: null, condition_comment: '', photos: [] },
-          overhead_cranes: { rating: null, condition_comment: '', photos: [] },
-          loading_docks: { rating: null, condition_comment: '', photos: [] }
-        },
+        structural_rating: this.createEmptyRatingTemplate(blockComponentOptions.structural),
+        non_structural_rating: this.createEmptyRatingTemplate(blockComponentOptions.non_structural),
         block_notes: blockData.block_notes || ''
       };
       
@@ -951,6 +985,9 @@ async saveBlockRatings(req, res) {
     if (structure.structural_identity?.type_of_structure !== 'industrial') {
       return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
     }
+
+    const structureSubtype = structure.structural_identity?.structure_subtype || 'rcc';
+    const blockComponentOptions = this.getIndustrialBlockComponentsBySubtype(structureSubtype);
     
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
     if (!floor) {
@@ -966,25 +1003,16 @@ async saveBlockRatings(req, res) {
     
     // ✅ FIXED: Update structural ratings for industrial components with IDs
     if (structural_rating) {
-      block.structural_rating = {
-        beams: this.createRatingComponent(structural_rating.beams, inspectionDate, 'beams'),
-        columns: this.createRatingComponent(structural_rating.columns, inspectionDate, 'columns'),
-        slab: this.createRatingComponent(structural_rating.slab, inspectionDate, 'slab'),
-        foundation: this.createRatingComponent(structural_rating.foundation, inspectionDate, 'foundation'),
-        roof_truss: this.createRatingComponent(structural_rating.roof_truss, inspectionDate, 'roof_truss')
-      };
-      
-      // Calculate block structural average
-      const structuralRatings = [
-        block.structural_rating.beams?.rating,
-        block.structural_rating.columns?.rating,
-        block.structural_rating.slab?.rating,
-        block.structural_rating.foundation?.rating,
-        block.structural_rating.roof_truss?.rating
-      ].filter(r => r);
-      
-      if (structuralRatings.length > 0) {
-        block.structural_rating.overall_average = this.calculateAverage(structuralRatings);
+      const { ratingPayload, ratings } = this.buildLegacyBlockRatingPayload(
+        structural_rating,
+        blockComponentOptions.structural,
+        inspectionDate
+      );
+
+      block.structural_rating = ratingPayload;
+
+      if (ratings.length > 0) {
+        block.structural_rating.overall_average = this.calculateAverage(ratings);
         block.structural_rating.health_status = this.getHealthStatus(block.structural_rating.overall_average);
         block.structural_rating.assessment_date = inspectionDate;
       }
@@ -992,31 +1020,16 @@ async saveBlockRatings(req, res) {
     
     // ✅ FIXED: Update non-structural ratings for industrial components with IDs
     if (non_structural_rating) {
-      block.non_structural_rating = {
-        walls_cladding: this.createRatingComponent(non_structural_rating.walls_cladding, inspectionDate, 'walls_cladding'),
-        industrial_flooring: this.createRatingComponent(non_structural_rating.industrial_flooring, inspectionDate, 'industrial_flooring'),
-        ventilation: this.createRatingComponent(non_structural_rating.ventilation, inspectionDate, 'ventilation'),
-        electrical_system: this.createRatingComponent(non_structural_rating.electrical_system, inspectionDate, 'electrical_system'),
-        fire_safety: this.createRatingComponent(non_structural_rating.fire_safety, inspectionDate, 'fire_safety'),
-        drainage: this.createRatingComponent(non_structural_rating.drainage, inspectionDate, 'drainage'),
-        overhead_cranes: this.createRatingComponent(non_structural_rating.overhead_cranes, inspectionDate, 'overhead_cranes'),
-        loading_docks: this.createRatingComponent(non_structural_rating.loading_docks, inspectionDate, 'loading_docks')
-      };
-      
-      // Calculate block non-structural average
-      const nonStructuralRatings = [
-        block.non_structural_rating.walls_cladding?.rating,
-        block.non_structural_rating.industrial_flooring?.rating,
-        block.non_structural_rating.ventilation?.rating,
-        block.non_structural_rating.electrical_system?.rating,
-        block.non_structural_rating.fire_safety?.rating,
-        block.non_structural_rating.drainage?.rating,
-        block.non_structural_rating.overhead_cranes?.rating,
-        block.non_structural_rating.loading_docks?.rating
-      ].filter(r => r);
-      
-      if (nonStructuralRatings.length > 0) {
-        block.non_structural_rating.overall_average = this.calculateAverage(nonStructuralRatings);
+      const { ratingPayload, ratings } = this.buildLegacyBlockRatingPayload(
+        non_structural_rating,
+        blockComponentOptions.non_structural,
+        inspectionDate
+      );
+
+      block.non_structural_rating = ratingPayload;
+
+      if (ratings.length > 0) {
+        block.non_structural_rating.overall_average = this.calculateAverage(ratings);
         block.non_structural_rating.assessment_date = inspectionDate;
       }
     }
@@ -1826,6 +1839,67 @@ getAvailableComponentsBySubtype(structureSubtype, structureType) {
   }
 
   return availableComponents;
+}
+
+getIndustrialBlockComponentsBySubtype(structureSubtype) {
+  const subtypeKey = structureSubtype === 'steel' ? 'steel' : 'rcc';
+  const componentOptions = INDUSTRIAL_BLOCK_COMPONENT_OPTIONS_BY_SUBTYPE[subtypeKey];
+
+  return {
+    structural: componentOptions.structural.map(component => ({ ...component })),
+    non_structural: componentOptions.non_structural.map(component => ({ ...component }))
+  };
+}
+
+createEmptyRatingTemplate(componentOptions) {
+  return componentOptions.reduce((template, { key }) => {
+    template[key] = {
+      rating: null,
+      condition_comment: '',
+      photos: []
+    };
+    return template;
+  }, {});
+}
+
+validateIndustrialBlockComponentTypes(structureSubtype, componentsData, ratingCategory) {
+  const subtypeKey = structureSubtype === 'steel' ? 'steel' : 'rcc';
+  const availableComponents = this.getIndustrialBlockComponentsBySubtype(subtypeKey);
+  const allowedComponentKeys = new Set(
+    availableComponents[ratingCategory].map(({ key }) => key)
+  );
+
+  const errors = componentsData
+    .filter(({ component_type }) => !allowedComponentKeys.has(component_type))
+    .map(({ component_type }) => ({
+      component_type,
+      message: `Component type "${component_type}" is not available for industrial ${subtypeKey.toUpperCase()} ${ratingCategory} ratings`
+    }));
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    structureInfo: {
+      subtype: subtypeKey,
+      type: 'industrial',
+      rating_category: ratingCategory
+    }
+  };
+}
+
+buildLegacyBlockRatingPayload(ratingsData, componentOptions, inspectionDate) {
+  const ratingPayload = {};
+  const ratings = [];
+
+  componentOptions.forEach(({ key }) => {
+    const componentRating = this.createRatingComponent(ratingsData?.[key], inspectionDate, key);
+    if (componentRating) {
+      ratingPayload[key] = componentRating;
+      ratings.push(componentRating.rating);
+    }
+  });
+
+  return { ratingPayload, ratings };
 }
 
 /**
@@ -6375,6 +6449,22 @@ async saveBlockStructuralComponentsBulk(req, res) {
     if (structure.structural_identity?.type_of_structure !== 'industrial') {
       return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
     }
+
+    const structureSubtype = structure.structural_identity?.structure_subtype || 'rcc';
+    const validation = this.validateIndustrialBlockComponentTypes(
+      structureSubtype,
+      structures || [],
+      'structural'
+    );
+
+    if (!validation.isValid) {
+      return sendErrorResponse(res, 400, 'Invalid structural component types for this industrial structure', {
+        structure_subtype: validation.structureInfo.subtype,
+        structure_type: validation.structureInfo.type,
+        rating_category: validation.structureInfo.rating_category,
+        errors: validation.errors
+      });
+    }
     
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
     if (!floor) {
@@ -6416,7 +6506,7 @@ async saveBlockStructuralComponentsBulk(req, res) {
       });
     });
     
-    this.calculateBlockStructuralAverage(block);
+    this.calculateBlockStructuralAverage(block, structureSubtype);
     this.calculateBlockCombinedRating(block);
     
     structure.creation_info.last_updated_date = new Date();
@@ -6448,6 +6538,22 @@ async saveBlockNonStructuralComponentsBulk(req, res) {
     
     if (structure.structural_identity?.type_of_structure !== 'industrial') {
       return sendErrorResponse(res, 'Block ratings are only for industrial structures', 400);
+    }
+
+    const structureSubtype = structure.structural_identity?.structure_subtype || 'rcc';
+    const validation = this.validateIndustrialBlockComponentTypes(
+      structureSubtype,
+      structures || [],
+      'non_structural'
+    );
+
+    if (!validation.isValid) {
+      return sendErrorResponse(res, 400, 'Invalid non-structural component types for this industrial structure', {
+        structure_subtype: validation.structureInfo.subtype,
+        structure_type: validation.structureInfo.type,
+        rating_category: validation.structureInfo.rating_category,
+        errors: validation.errors
+      });
     }
     
     const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
@@ -6490,7 +6596,7 @@ async saveBlockNonStructuralComponentsBulk(req, res) {
       });
     });
     
-    this.calculateBlockNonStructuralAverage(block);
+    this.calculateBlockNonStructuralAverage(block, structureSubtype);
     this.calculateBlockCombinedRating(block);
     
     structure.creation_info.last_updated_date = new Date();
@@ -6511,19 +6617,22 @@ async saveBlockNonStructuralComponentsBulk(req, res) {
 }
 
 // Helper calculation methods for blocks
-calculateBlockStructuralAverage(block) {
+calculateBlockStructuralAverage(block, structureSubtype = 'rcc') {
   if (!block.structural_rating) return;
   
   const allRatings = [];
-  const types = ['beams', 'columns', 'slab', 'foundation', 'roof_truss'];
+  const types = this.getIndustrialBlockComponentsBySubtype(structureSubtype).structural.map(
+    ({ key }) => key
+  );
   
   types.forEach(type => {
-    const components = block.structural_rating[type];
-    if (components && Array.isArray(components)) {
-      components.forEach(comp => {
-        if (comp.rating) allRatings.push(comp.rating);
-      });
-    }
+    const components = this.normalizeRatingComponents(block.structural_rating[type]);
+    components.forEach(comp => {
+      const rating = Number(comp?.rating);
+      if (!Number.isNaN(rating) && rating > 0) {
+        allRatings.push(rating);
+      }
+    });
   });
   
   if (allRatings.length > 0) {
@@ -6534,22 +6643,22 @@ calculateBlockStructuralAverage(block) {
   }
 }
 
-calculateBlockNonStructuralAverage(block) {
+calculateBlockNonStructuralAverage(block, structureSubtype = 'rcc') {
   if (!block.non_structural_rating) return;
   
   const allRatings = [];
-  const types = [
-    'walls_cladding', 'industrial_flooring', 'ventilation', 'electrical_system',
-    'fire_safety', 'drainage', 'overhead_cranes', 'loading_docks'
-  ];
+  const types = this.getIndustrialBlockComponentsBySubtype(structureSubtype).non_structural.map(
+    ({ key }) => key
+  );
   
   types.forEach(type => {
-    const components = block.non_structural_rating[type];
-    if (components && Array.isArray(components)) {
-      components.forEach(comp => {
-        if (comp.rating) allRatings.push(comp.rating);
-      });
-    }
+    const components = this.normalizeRatingComponents(block.non_structural_rating[type]);
+    components.forEach(comp => {
+      const rating = Number(comp?.rating);
+      if (!Number.isNaN(rating) && rating > 0) {
+        allRatings.push(rating);
+      }
+    });
   });
   
   if (allRatings.length > 0) {
