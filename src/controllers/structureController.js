@@ -1784,58 +1784,21 @@ getAvailableComponentsBySubtype(structureSubtype, structureType) {
   };
 
   if (structureSubtype === 'rcc') {
-    availableComponents.structural = [
-      { key: 'beams', label: 'Beams', category: 'structural' },
-      { key: 'columns', label: 'Columns', category: 'structural' },
-      { key: 'slab', label: 'Slab', category: 'structural' },
-      { key: 'foundation', label: 'Foundation', category: 'structural' },
-      { key: 'roof_truss', label: 'Roof Truss', category: 'structural' }
-    ];
-
-    if (structureType === 'industrial') {
-      availableComponents.non_structural = [
-        { key: 'walls_cladding', label: 'Walls/Cladding' },
-        { key: 'industrial_flooring', label: 'Industrial Flooring' },
-        { key: 'ventilation', label: 'Ventilation' },
-        { key: 'electrical_system', label: 'Electrical System' },
-        { key: 'fire_safety', label: 'Fire Safety' },
-        { key: 'drainage', label: 'Drainage' },
-        { key: 'overhead_cranes', label: 'Overhead Cranes' },
-        { key: 'loading_docks', label: 'Loading Docks' }
-      ];
-    } else {
-      availableComponents.non_structural = RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS;
-    }
+    availableComponents.structural = RCC_BLOCK_STRUCTURAL_COMPONENT_OPTIONS.map(component => ({
+      ...component,
+      category: 'structural'
+    }));
+    availableComponents.non_structural = RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS.map(component => ({
+      ...component
+    }));
   } else if (structureSubtype === 'steel') {
-    availableComponents.structural = [
-      { key: 'foundation', label: 'Foundation (RCC)' },
-      { key: 'columns', label: 'Columns (Steel)' },
-      { key: 'beams', label: 'Beams (Steel)' },
-      { key: 'roof_truss', label: 'Roof Trusses' },
-      { key: 'steel_flooring', label: 'Steel Flooring' },
-      { key: 'connections', label: 'Connections' },
-      { key: 'bracings', label: 'Bracings' },
-      { key: 'purlins', label: 'Purlins' },
-      { key: 'channels', label: 'Channels' }
-    ];
-
-    availableComponents.non_structural = [
-      { key: 'cladding_partition_panels', label: 'Cladding/Partition Panels' },
-      { key: 'roof_sheeting', label: 'Roof Sheeting' },
-      { key: 'chequered_plate', label: 'Chequered Plate' },
-      { key: 'doors_windows', label: 'Doors & Windows' },
-      { key: 'flooring', label: 'Flooring' },
-      { key: 'walls', label: 'Walls' },
-      { key: 'paintings', label: 'Paintings' },
-      { key: 'electrical_wiring', label: 'Electrical Wiring' },
-      { key: 'sanitary_fittings', label: 'Sanitary Fittings' },
-      { key: 'railings', label: 'Railings' },
-      { key: 'water_tanks', label: 'Water Tanks' },
-      { key: 'plumbing', label: 'Plumbing' },
-      { key: 'sewage_system', label: 'Sewage System' },
-      { key: 'panel_board_transformer', label: 'Panel/Board Transformer' },
-      { key: 'lift', label: 'Lift' }
-    ];
+    availableComponents.structural = STEEL_STRUCTURAL_COMPONENT_OPTIONS.map(component => ({
+      ...component,
+      category: 'structural'
+    }));
+    availableComponents.non_structural = STEEL_NON_STRUCTURAL_COMPONENT_OPTIONS.map(component => ({
+      ...component
+    }));
   }
 
   return availableComponents;
@@ -5349,15 +5312,18 @@ calculateFloorStructuralAverage(floor) {
   if (!floor.structural_rating) return;
   
   const allRatings = [];
-  const types = ['beams', 'columns', 'slab', 'foundation'];
+  const types = Object.keys(floor.structural_rating).filter(type =>
+    !['overall_average', 'health_status', 'assessment_date'].includes(type)
+  );
   
   types.forEach(type => {
-    const components = floor.structural_rating[type];
-    if (components && Array.isArray(components)) {
-      components.forEach(comp => {
-        if (comp.rating) allRatings.push(comp.rating);
-      });
-    }
+    const components = this.normalizeRatingComponents(floor.structural_rating[type]);
+    components.forEach(comp => {
+      const rating = Number(comp?.rating);
+      if (!Number.isNaN(rating) && rating > 0) {
+        allRatings.push(rating);
+      }
+    });
   });
   
   if (allRatings.length > 0) {
@@ -5372,14 +5338,18 @@ calculateFloorNonStructuralAverage(floor) {
   if (!floor.non_structural_rating) return;
   
   const allRatings = [];
-  
-  FLOOR_NON_STRUCTURAL_COMPONENT_TYPES.forEach(type => {
-    const components = floor.non_structural_rating[type];
-    if (components && Array.isArray(components)) {
-      components.forEach(comp => {
-        if (comp.rating) allRatings.push(comp.rating);
-      });
-    }
+  const types = Object.keys(floor.non_structural_rating).filter(type =>
+    !['custom_components', 'overall_average', 'assessment_date'].includes(type)
+  );
+
+  types.forEach(type => {
+    const components = this.normalizeRatingComponents(floor.non_structural_rating[type]);
+    components.forEach(comp => {
+      const rating = Number(comp?.rating);
+      if (!Number.isNaN(rating) && rating > 0) {
+        allRatings.push(rating);
+      }
+    });
   });
   
   if (allRatings.length > 0) {

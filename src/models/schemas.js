@@ -525,6 +525,12 @@ const floorSchema = {
     columns: { type: [componentInstanceSchema], default: undefined },
     slab: { type: [componentInstanceSchema], default: undefined },
     foundation: { type: [componentInstanceSchema], default: undefined },
+    roof_truss: { type: [componentInstanceSchema], default: undefined },
+    connections: { type: [componentInstanceSchema], default: undefined },
+    bracings: { type: [componentInstanceSchema], default: undefined },
+    purlins: { type: [componentInstanceSchema], default: undefined },
+    channels: { type: [componentInstanceSchema], default: undefined },
+    steel_flooring: { type: [componentInstanceSchema], default: undefined },
     
     overall_average: {
       type: Number,
@@ -543,12 +549,28 @@ const floorSchema = {
   
   // FLOOR-LEVEL NON-STRUCTURAL RATINGS
   non_structural_rating: {
+    brick_plaster: { type: [componentInstanceSchema], default: undefined },
+    doors_windows: { type: [componentInstanceSchema], default: undefined },
+    flooring_tiles: { type: [componentInstanceSchema], default: undefined },
     walls: { type: [componentInstanceSchema], default: undefined },
     paintings: { type: [componentInstanceSchema], default: undefined },
+    electrical_wiring: { type: [componentInstanceSchema], default: undefined },
+    sanitary_fittings: { type: [componentInstanceSchema], default: undefined },
+    railings: { type: [componentInstanceSchema], default: undefined },
+    water_tanks: { type: [componentInstanceSchema], default: undefined },
+    plumbing: { type: [componentInstanceSchema], default: undefined },
+    sewage_system: { type: [componentInstanceSchema], default: undefined },
+    panel_board: { type: [componentInstanceSchema], default: undefined },
+    lifts: { type: [componentInstanceSchema], default: undefined },
     flooring: { type: [componentInstanceSchema], default: undefined },
     electrical_system: { type: [componentInstanceSchema], default: undefined },
     fire_safety: { type: [componentInstanceSchema], default: undefined },
     drainage: { type: [componentInstanceSchema], default: undefined },
+    cladding_partition_panels: { type: [componentInstanceSchema], default: undefined },
+    roof_sheeting: { type: [componentInstanceSchema], default: undefined },
+    chequered_plate: { type: [componentInstanceSchema], default: undefined },
+    panel_board_transformer: { type: [componentInstanceSchema], default: undefined },
+    lift: { type: [componentInstanceSchema], default: undefined },
     
     // Dynamic/custom non-structural components
     custom_components: {
