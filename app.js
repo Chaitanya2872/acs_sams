@@ -2,15 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const mongoose = require('mongoose');
 require('dotenv').config();
-
 
 const app = express();
 
-// ===== ESSENTIAL MIDDLEWARE SETUP =====
-// This MUST come before your routes!
-
-// 1. Security middleware
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
@@ -18,12 +14,11 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"]
+      imgSrc: ["'self'", 'data:', 'https:']
     }
   }
 }));
 
-// 2. CORS configuration
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
@@ -31,64 +26,39 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// 3. Request logging (development only)
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// 4. **CRITICAL**: Body parsing middleware - MUST be before routes
-app.use(express.json({ 
+app.use(express.json({
   limit: '50mb',
   strict: true,
   type: 'application/json'
 }));
 
-app.use(express.urlencoded({ 
-  extended: true, 
+app.use(express.urlencoded({
+  extended: true,
   limit: '50mb',
   type: 'application/x-www-form-urlencoded'
 }));
 
-// 5. Additional middleware for better request handling
 app.use((req, res, next) => {
-  // Log request details for debugging
   if (process.env.NODE_ENV === 'development') {
-    console.log(`\n📥 ${req.method} ${req.path}`);
-    console.log('├─ Content-Type:', req.headers['content-type'] || 'Not set');
-    console.log('├─ Body exists:', !!req.body);
-    console.log('└─ Body type:', typeof req.body);
+    console.log(`\n[REQ] ${req.method} ${req.path}`);
+    console.log('[REQ] Content-Type:', req.headers['content-type'] || 'Not set');
+    console.log('[REQ] Body exists:', !!req.body);
+    console.log('[REQ] Body type:', typeof req.body);
   }
+
   next();
 });
 
-// ===== DATABASE CONNECTION =====
-const mongoose = require('mongoose');
-
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => {
-  console.log('✅ Connected to MongoDB');
-  console.log('📊 Database:', mongoose.connection.name);
-})
-.catch((error) => {
-  console.error('❌ MongoDB connection error:', error.message);
-  process.exit(1);
-});
-
-// ===== ROUTES =====
-// Import your routes
 const authRoutes = require('./src/routes/authRoutes');
-const adminRoutes = require('./src/routes/admin');        // MOVE THIS UP
+const adminRoutes = require('./src/routes/admin');
 const structuresRoutes = require('./src/routes/structures');
 const userRoutes = require('./src/routes/users');
 const reportsRoutes = require('./src/routes/reports');
-// Add other routes as needed
-// const structureRoutes = require('./src/routes/structures');
-// const adminRoutes = require('./src/routes/admin');
 
-// Health check endpoint
 app.get('/', (req, res) => {
   res.json({
     success: true,
@@ -99,41 +69,48 @@ app.get('/', (req, res) => {
   });
 });
 
-// API routes
-// API routes - ORDER IS CRITICAL!
-app.use('/api/auth', authRoutes);           // 1. Public auth routes
-app.use('/api/admin', adminRoutes);         // 2. Admin routes BEFORE structures
-app.use('/api/users', userRoutes);          // 3. User routes
-app.use('/api/structures', structuresRoutes); // 4. Structure routes
-app.use('/api/reports', reportsRoutes);     // 5. Reports routes
-// app.use('/api/users', userRoutes)
-// app.use('/api/structures', structureRoutes);
-// app.use('/api/admin', adminRoutes);
-//test commit on 4th
+app.get('/api/health', (req, res) => {
+  const isDatabaseConnected = mongoose.connection.readyState === 1;
 
-// ===== ERROR HANDLING =====
+  res.status(isDatabaseConnected ? 200 : 503).json({
+    success: isDatabaseConnected,
+    message: isDatabaseConnected ? 'SAMS API is healthy' : 'SAMS API is starting up',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    port: process.env.PORT,
+    database: {
+      connected: isDatabaseConnected,
+      readyState: mongoose.connection.readyState,
+      name: mongoose.connection.name || null
+    }
+  });
+});
 
-// Handle 404 for API routes
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/structures', structuresRoutes);
+app.use('/api/reports', reportsRoutes);
+
 app.use('/api/*', (req, res) => {
   res.status(404).json({
     success: false,
     error: `API endpoint ${req.method} ${req.originalUrl} not found`,
     availableEndpoints: {
       auth: '/api/auth/*',
-      users: '/api/users/*'
+      users: '/api/users/*',
+      health: '/api/health'
     }
   });
 });
 
-// Global error handler
 app.use((error, req, res, next) => {
-  console.error('💥 Global Error Handler:');
-  console.error('├─ Error:', error.message);
-  console.error('├─ Stack:', error.stack);
-  console.error('├─ Request:', req.method, req.path);
-  console.error('└─ Body:', req.body);
+  console.error('[ERR] Global Error Handler');
+  console.error('[ERR] Error:', error.message);
+  console.error('[ERR] Stack:', error.stack);
+  console.error('[ERR] Request:', req.method, req.path);
+  console.error('[ERR] Body:', req.body);
 
-  // Handle specific error types
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({
       success: false,
@@ -150,44 +127,14 @@ app.use((error, req, res, next) => {
     });
   }
 
-  // Default error response
-  res.status(error.status || 500).json({
+  return res.status(error.status || 500).json({
     success: false,
     error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { 
+    ...(process.env.NODE_ENV === 'development' && {
       stack: error.stack,
       details: error
     })
   });
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 Unhandled Promise Rejection:');
-  console.error('├─ Reason:', reason);
-  console.error('└─ Promise:', promise);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('💥 Uncaught Exception:');
-  console.error('├─ Error:', error.message);
-  console.error('└─ Stack:', error.stack);
-  process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('🛑 SIGTERM received. Shutting down gracefully...');
-  try {
-    await mongoose.connection.close();
-    console.log('📊 MongoDB connection closed.');
-    process.exit(0);
-  } catch (error) {
-    console.error('❌ Error closing MongoDB connection:', error.message);
-    console.log('Forcing shutdown...');
-    process.exit(1);
-  }
 });
 
 module.exports = app;
