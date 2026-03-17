@@ -30,8 +30,108 @@ const normalizePhotoList = (photosInput, photoInput) => {
   return Array.from(new Set(combined));
 };
 
+const normalizePdfList = (pdfInput) => {
+  if (!pdfInput) return [];
+  if (Array.isArray(pdfInput)) return pdfInput;
+  return [pdfInput];
+};
+
+const buildPdfObjects = (pdfList, resolveDoc) => {
+  return pdfList
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        const trimmed = entry.trim();
+        if (!trimmed) return null;
+        const resolved = resolveDoc(trimmed) || trimmed;
+        if (!resolved) return null;
+        return {
+          filename: trimmed.split(/[\\/]/).pop(),
+          file_path: resolved
+        };
+      }
+      if (entry && typeof entry === 'object') {
+        const rawPath = entry.file_path || entry.filename || '';
+        const resolved = resolveDoc(rawPath) || rawPath;
+        if (!resolved) return null;
+        return {
+          filename: entry.filename || (typeof rawPath === 'string' ? rawPath.split(/[\\/]/).pop() : 'document'),
+          file_path: resolved,
+          ...(entry.file_size ? { file_size: entry.file_size } : {})
+        };
+      }
+      return null;
+    })
+    .filter(Boolean);
+};
+
+const generateQuantificationId = () =>
+  `quant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const toNumber = (value) => {
+  if (value === null || typeof value === 'undefined') return 0;
+  const parsed = typeof value === 'string' ? Number(value.trim()) : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const computeQuantificationQuantity = ({ nos, length, breadth, height }) => {
+  const n = Number.isFinite(nos) ? nos : 1;
+  const l = Number.isFinite(length) ? length : 0;
+  const b = Number.isFinite(breadth) ? breadth : 0;
+  const h = Number.isFinite(height) ? height : 0;
+
+  const hasDim = l > 0 || b > 0 || h > 0;
+  const dimMultiplier = (l > 0 ? l : 1) * (b > 0 ? b : 1) * (h > 0 ? h : 1);
+  const quantity = hasDim ? n * dimMultiplier : n;
+
+  let unit = "NO'S";
+  if (h > 0) unit = 'CUM';
+  else if (b > 0) unit = 'SQM';
+  else if (l > 0) unit = 'RM';
+
+  return { quantity, unit };
+};
+
+const normalizeQuantificationEntry = (entry) => {
+  if (!entry || typeof entry !== 'object') return null;
+  const nos = toNumber(entry.nos);
+  const length = toNumber(entry.length);
+  const breadth = toNumber(entry.breadth);
+  const height = toNumber(entry.height);
+  const { quantity, unit } = computeQuantificationQuantity({ nos, length, breadth, height });
+
+  return {
+    entry_id: entry.entry_id || generateQuantificationId(),
+    category: (entry.category || '').toString().trim(),
+    location_of_distress: (entry.location_of_distress || '').toString().trim(),
+    nos,
+    length,
+    breadth,
+    height,
+    quantity,
+    unit,
+    repair_methodology: (entry.repair_methodology || '').toString().trim(),
+    updated_at: new Date()
+  };
+};
+
+const normalizeQuantificationList = (entries) => {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map(normalizeQuantificationEntry)
+    .filter(Boolean);
+};
+
 const normalizeDistressTypes = (distressTypesInput) => {
-  const allowedDistressTypes = new Set(['physical', 'chemical', 'mechanical', 'none']);
+  const allowedDistressTypes = new Set([
+    'physical',
+    'chemical',
+    'mechanical',
+    'corrosion',
+    'section_loss',
+    'section loss',
+    'warping',
+    'none'
+  ]);
   const raw = Array.isArray(distressTypesInput)
     ? distressTypesInput.flat(Infinity)
     : [distressTypesInput];
@@ -39,6 +139,7 @@ const normalizeDistressTypes = (distressTypesInput) => {
   const normalized = raw
     .filter((value) => typeof value === 'string')
     .map((value) => value.trim().toLowerCase())
+    .map((value) => (value === 'section loss' ? 'section_loss' : value))
     .filter((value) => allowedDistressTypes.has(value));
 
   return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
@@ -153,17 +254,21 @@ class StructureController {
   this.getFloorStructuralComponents = this.getFloorStructuralComponents.bind(this);
   this.getFloorNonStructuralComponents = this.getFloorNonStructuralComponents.bind(this);
 
-  this.getFloorRatings = this.getFloorRatings.bind(this);
-  this.saveFloorRatings = this.saveFloorRatings.bind(this);
-  this.saveFloorStructuralComponents = this.saveFloorStructuralComponents.bind(this);
-  this.saveFloorNonStructuralComponents = this.saveFloorNonStructuralComponents.bind(this);
-  this.hasFloorStructuralRating = this.hasFloorStructuralRating.bind(this);
- this.hasFloorNonStructuralRating = this.hasFloorNonStructuralRating.bind(this);
+this.getFloorRatings = this.getFloorRatings.bind(this);
+this.saveFloorRatings = this.saveFloorRatings.bind(this);
+this.saveFloorStructuralComponents = this.saveFloorStructuralComponents.bind(this);
+this.saveFloorNonStructuralComponents = this.saveFloorNonStructuralComponents.bind(this);
+this.hasFloorStructuralRating = this.hasFloorStructuralRating.bind(this);
+this.hasFloorNonStructuralRating = this.hasFloorNonStructuralRating.bind(this);
 this.calculateComponentAverage = this.calculateComponentAverage.bind(this);
 this.calculateNonStructuralAverages = this.calculateNonStructuralAverages.bind(this);
 this.countComponentsWithPhotos = this.countComponentsWithPhotos.bind(this);
 this.countLowRatedComponents = this.countLowRatedComponents.bind(this);
 this.extractFloorRatingImages = this.extractFloorRatingImages.bind(this);
+this.getFloorQuantifications = this.getFloorQuantifications.bind(this);
+this.saveFloorQuantifications = this.saveFloorQuantifications.bind(this);
+this.getFlatQuantifications = this.getFlatQuantifications.bind(this);
+this.saveFlatQuantifications = this.saveFlatQuantifications.bind(this);
 
 // In the constructor, add these lines:
 this.getAvailableComponentsBySubtype = this.getAvailableComponentsBySubtype.bind(this);
@@ -5758,8 +5863,87 @@ async saveFlatStructuralComponentsBulk(req, res) {
     const { structures } = req.body;
     
     console.log(`📦 Saving multiple structural component types for flat ${flatId}`);
-    
+
+    const testingRequired = req.body.testing_required;
+
+    // ✅ Build filename → URL maps for images and docs separately.
+    const uploadedPhotoMap = {};
+    const uploadedPhotoQueue = [];
+    const uploadedDocMap = {};
+    const uploadedDocQueue = [];
+
+    if (req.files && typeof req.files === 'object') {
+      const allFiles = Object.values(req.files).flat();
+      console.log(`📎 ${allFiles.length} file(s) uploaded to Cloudinary`);
+      allFiles.forEach(file => {
+        const cloudinaryUrl = file.path || file.secure_url || (file.filename && `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}`);
+        if (!cloudinaryUrl) return;
+
+        const isImage = file.mimetype && file.mimetype.startsWith('image/');
+        if (isImage) {
+          uploadedPhotoMap[file.originalname] = cloudinaryUrl;
+          uploadedPhotoQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Photo: ${file.originalname} → ${cloudinaryUrl}`);
+        } else {
+          uploadedDocMap[file.originalname] = cloudinaryUrl;
+          uploadedDocQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Doc: ${file.originalname} → ${cloudinaryUrl}`);
+        }
+      });
+    }
+
+    let photoQueueIndex = 0;
+    let docQueueIndex = 0;
+
+    const resolvePhoto = (photoValue) => {
+      if (typeof photoValue !== 'string' || !photoValue.trim()) return null;
+      const trimmed = photoValue.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedPhotoMap[basename]) return uploadedPhotoMap[basename];
+      if (uploadedPhotoMap[trimmed]) return uploadedPhotoMap[trimmed];
+      if (photoQueueIndex < uploadedPhotoQueue.length) {
+        const url = uploadedPhotoQueue[photoQueueIndex];
+        photoQueueIndex++;
+        console.log(`   ⚡ Photo fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
+    const resolveDoc = (docValue) => {
+      if (typeof docValue !== 'string' || !docValue.trim()) return null;
+      const trimmed = docValue.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedDocMap[basename]) return uploadedDocMap[basename];
+      if (uploadedDocMap[trimmed]) return uploadedDocMap[trimmed];
+      if (docQueueIndex < uploadedDocQueue.length) {
+        const url = uploadedDocQueue[docQueueIndex];
+        docQueueIndex++;
+        console.log(`   ⚡ Doc fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
+    if (!structures || structures.length === 0) {
+      return sendErrorResponse(res, 400, 'No component structures provided');
+    }
+
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+
+    // ✅ Validate components against structure subtype
+    const validation = await this.validateComponentsForStructureType(structure, structures);
+    if (!validation.isValid) {
+      console.log('❌ Component validation failed:', validation.errors);
+      return sendErrorResponse(res, 400, 'Invalid component types for this structure', {
+        structure_subtype: validation.structureInfo.subtype,
+        structure_type: validation.structureInfo.type,
+        errors: validation.errors,
+        message: 'The components you are trying to save are not valid for this structure type. Please select appropriate components.'
+      });
+    }
     
     // Find the flat
     let targetFlat = null;
@@ -5787,25 +5971,38 @@ async saveFlatStructuralComponentsBulk(req, res) {
     let totalComponentsSaved = 0;
     const savedComponentTypes = [];
     
+    // Apply testing_required at flat level (structural only)
+    if (typeof testingRequired !== 'undefined') {
+      targetFlat.testing_required = testingRequired === true || testingRequired === 'true';
+    }
+
     // Process each component type
     structures.forEach(({ component_type, components }) => {
-      // Validate it's a structural component
-      const structuralComponents = ['beams', 'columns', 'slab', 'foundation'];
-      if (!structuralComponents.includes(component_type)) {
-        throw new Error(`Invalid structural component type: ${component_type}`);
-      }
-      
-      // ✅ FIXED: Auto-generate component IDs if not provided
-      const formattedComponents = components.map(comp => ({
-        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
-        name: comp.name,
-        rating: parseInt(comp.rating),
-        photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
-        photos: normalizePhotoList(comp.photos, comp.photo),
-        condition_comment: comp.condition_comment,
-        inspector_notes: comp.inspector_notes || '',
-        inspection_date: inspectionDate
-      }));
+      // ✅ Auto-generate component IDs and resolve uploads
+      const formattedComponents = components.map(comp => {
+        const componentId = comp._id || this.generateComponentId(component_type);
+        const rawPhotos = normalizePhotoList(comp.photos, comp.photo);
+        const resolvedPhotos = rawPhotos.map(resolvePhoto).filter(Boolean);
+        const resolvedDocs = buildPdfObjects(
+          normalizePdfList(comp.pdf_files),
+          resolveDoc
+        );
+
+        return {
+          _id: componentId,
+          name: comp.name,
+          rating: parseInt(comp.rating),
+          photo: resolvedPhotos[0] || undefined,
+          photos: resolvedPhotos.length > 0 ? resolvedPhotos : undefined,
+          condition_comment: comp.condition_comment,
+          inspector_notes: comp.inspector_notes || '',
+          inspection_date: inspectionDate,
+          distress_dimensions: comp.distress_dimensions || undefined,
+          repair_methodology: comp.repair_methodology || undefined,
+          distress_types: normalizeDistressTypes(comp.distress_types),
+          pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
+        };
+      });
       
       // Save to flat
       targetFlat.structural_rating[component_type] = formattedComponents;
@@ -5851,8 +6048,85 @@ async saveFlatNonStructuralComponentsBulk(req, res) {
     const { structures } = req.body;
     
     console.log(`📦 Saving multiple non-structural component types for flat ${flatId}`);
+
+    // ✅ Build filename → URL maps for images and docs separately.
+    const uploadedPhotoMap = {};
+    const uploadedPhotoQueue = [];
+    const uploadedDocMap = {};
+    const uploadedDocQueue = [];
+
+    if (req.files && typeof req.files === 'object') {
+      const allFiles = Object.values(req.files).flat();
+      console.log(`📎 ${allFiles.length} file(s) uploaded to Cloudinary`);
+      allFiles.forEach(file => {
+        const cloudinaryUrl = file.path || file.secure_url || (file.filename && `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}`);
+        if (!cloudinaryUrl) return;
+
+        const isImage = file.mimetype && file.mimetype.startsWith('image/');
+        if (isImage) {
+          uploadedPhotoMap[file.originalname] = cloudinaryUrl;
+          uploadedPhotoQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Photo: ${file.originalname} → ${cloudinaryUrl}`);
+        } else {
+          uploadedDocMap[file.originalname] = cloudinaryUrl;
+          uploadedDocQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Doc: ${file.originalname} → ${cloudinaryUrl}`);
+        }
+      });
+    }
+
+    let photoQueueIndex = 0;
+    let docQueueIndex = 0;
+
+    const resolvePhoto = (photoValue) => {
+      if (typeof photoValue !== 'string' || !photoValue.trim()) return null;
+      const trimmed = photoValue.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedPhotoMap[basename]) return uploadedPhotoMap[basename];
+      if (uploadedPhotoMap[trimmed]) return uploadedPhotoMap[trimmed];
+      if (photoQueueIndex < uploadedPhotoQueue.length) {
+        const url = uploadedPhotoQueue[photoQueueIndex];
+        photoQueueIndex++;
+        console.log(`   ⚡ Photo fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
+    const resolveDoc = (docValue) => {
+      if (typeof docValue !== 'string' || !docValue.trim()) return null;
+      const trimmed = docValue.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedDocMap[basename]) return uploadedDocMap[basename];
+      if (uploadedDocMap[trimmed]) return uploadedDocMap[trimmed];
+      if (docQueueIndex < uploadedDocQueue.length) {
+        const url = uploadedDocQueue[docQueueIndex];
+        docQueueIndex++;
+        console.log(`   ⚡ Doc fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
+    if (!structures || structures.length === 0) {
+      return sendErrorResponse(res, 400, 'No component structures provided');
+    }
     
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+
+    // ✅ Validate components against structure subtype
+    const validation = await this.validateComponentsForStructureType(structure, structures);
+    if (!validation.isValid) {
+      console.log('❌ Component validation failed:', validation.errors);
+      return sendErrorResponse(res, 400, 'Invalid component types for this structure', {
+        structure_subtype: validation.structureInfo.subtype,
+        structure_type: validation.structureInfo.type,
+        errors: validation.errors,
+        message: 'The components you are trying to save are not valid for this structure type. Please select appropriate components.'
+      });
+    }
     
     // Find the flat
     let targetFlat = null;
@@ -5880,22 +6154,29 @@ async saveFlatNonStructuralComponentsBulk(req, res) {
     
     // Process each component type
     structures.forEach(({ component_type, components }) => {
-      // Validate it's a non-structural component
-      if (!RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES.includes(component_type)) {
-        throw new Error(`Invalid non-structural component type: ${component_type}`);
-      }
-      
-      // ✅ FIXED: Auto-generate component IDs if not provided
-      const formattedComponents = components.map(comp => ({
-        _id: comp._id || this.generateComponentId(component_type),  // Auto-generate if missing
-        name: comp.name,
-        rating: parseInt(comp.rating),
-        photo: normalizePhotoList(comp.photos, comp.photo)[0] || '',
-        photos: normalizePhotoList(comp.photos, comp.photo),
-        condition_comment: comp.condition_comment,
-        inspector_notes: comp.inspector_notes || '',
-        inspection_date: inspectionDate
-      }));
+      const formattedComponents = components.map(comp => {
+        const componentId = comp._id || this.generateComponentId(component_type);
+        const rawPhotos = normalizePhotoList(comp.photos, comp.photo);
+        const resolvedPhotos = rawPhotos.map(resolvePhoto).filter(Boolean);
+        const resolvedDocs = buildPdfObjects(
+          normalizePdfList(comp.pdf_files),
+          resolveDoc
+        );
+
+        return {
+          _id: componentId,
+          name: comp.name,
+          rating: parseInt(comp.rating),
+          photo: resolvedPhotos[0] || undefined,
+          photos: resolvedPhotos.length > 0 ? resolvedPhotos : undefined,
+          condition_comment: comp.condition_comment,
+          inspector_notes: comp.inspector_notes || '',
+          inspection_date: inspectionDate,
+          distress_dimensions: comp.distress_dimensions || undefined,
+          repair_methodology: comp.repair_methodology || undefined,
+          pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
+        };
+      });
       
       // Save to flat
       targetFlat.non_structural_rating[component_type] = formattedComponents;
@@ -6009,43 +6290,62 @@ async saveFloorStructuralComponentsBulk(req, res) {
     console.log('Floor ID:', floorId);
     console.log('Structures data:', JSON.stringify(structures, null, 2));
 
-    // ✅ Build a filename → Cloudinary URL map from uploaded files.
-    //    upload.fields() sets req.files as an object: { photo: [...], photos: [...] }
-    //    Flatten all fields into a single ordered array for sequential fallback.
-    const uploadedFileMap = {};
-    const uploadedFileQueue = []; // ordered Cloudinary URLs for sequential assignment
+    // ✅ Build filename → URL maps for images and docs separately.
+    const uploadedPhotoMap = {};
+    const uploadedPhotoQueue = [];
+    const uploadedDocMap = {};
+    const uploadedDocQueue = [];
+
     if (req.files && typeof req.files === 'object') {
       const allFiles = Object.values(req.files).flat();
-      console.log(`📸 ${allFiles.length} file(s) uploaded to Cloudinary`);
+      console.log(`📎 ${allFiles.length} file(s) uploaded to Cloudinary`);
       allFiles.forEach(file => {
         const cloudinaryUrl = file.path || file.secure_url || (file.filename && `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}`);
-        if (cloudinaryUrl) {
-          uploadedFileMap[file.originalname] = cloudinaryUrl;
-          uploadedFileQueue.push(cloudinaryUrl);
-          console.log(`   ✅ Mapped: ${file.originalname} → ${cloudinaryUrl}`);
+        if (!cloudinaryUrl) return;
+
+        const isImage = file.mimetype && file.mimetype.startsWith('image/');
+        if (isImage) {
+          uploadedPhotoMap[file.originalname] = cloudinaryUrl;
+          uploadedPhotoQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Photo: ${file.originalname} → ${cloudinaryUrl}`);
+        } else {
+          uploadedDocMap[file.originalname] = cloudinaryUrl;
+          uploadedDocQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Doc: ${file.originalname} → ${cloudinaryUrl}`);
         }
       });
     }
-    let fileQueueIndex = 0; // tracks next unassigned file for sequential fallback
 
-    // ✅ Helper: resolve a photo value to a Cloudinary URL.
-    //    Priority: (1) already a remote URL → keep as-is
-    //              (2) filename matches an uploaded file → use that URL
-    //              (3) any non-empty placeholder → assign next uploaded file sequentially
+    let photoQueueIndex = 0;
+    let docQueueIndex = 0;
+
     const resolvePhoto = (photoValue) => {
       if (typeof photoValue !== 'string' || !photoValue.trim()) return null;
       const trimmed = photoValue.trim();
-      // Already a remote URL — keep it
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-      // Exact filename match
       const basename = trimmed.split(/[\\/]/).pop();
-      if (uploadedFileMap[basename]) return uploadedFileMap[basename];
-      if (uploadedFileMap[trimmed]) return uploadedFileMap[trimmed];
-      // Fallback: assign next uploaded file sequentially (handles filename mismatch)
-      if (fileQueueIndex < uploadedFileQueue.length) {
-        const url = uploadedFileQueue[fileQueueIndex];
-        fileQueueIndex++;
-        console.log(`   ⚡ Sequential fallback: "${trimmed}" → ${url}`);
+      if (uploadedPhotoMap[basename]) return uploadedPhotoMap[basename];
+      if (uploadedPhotoMap[trimmed]) return uploadedPhotoMap[trimmed];
+      if (photoQueueIndex < uploadedPhotoQueue.length) {
+        const url = uploadedPhotoQueue[photoQueueIndex];
+        photoQueueIndex++;
+        console.log(`   ⚡ Photo fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
+    const resolveDoc = (docValue) => {
+      if (typeof docValue !== 'string' || !docValue.trim()) return null;
+      const trimmed = docValue.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedDocMap[basename]) return uploadedDocMap[basename];
+      if (uploadedDocMap[trimmed]) return uploadedDocMap[trimmed];
+      if (docQueueIndex < uploadedDocQueue.length) {
+        const url = uploadedDocQueue[docQueueIndex];
+        docQueueIndex++;
+        console.log(`   ⚡ Doc fallback: "${trimmed}" → ${url}`);
         return url;
       }
       return null;
@@ -6083,6 +6383,8 @@ async saveFloorStructuralComponentsBulk(req, res) {
     
     console.log('✅ Floor found:', floor.floor_label_name);
     
+    const testingRequired = req.body.testing_required;
+
     // Initialize structural_rating if it doesn't exist
     if (!floor.structural_rating) {
       floor.structural_rating = {};
@@ -6092,6 +6394,11 @@ async saveFloorStructuralComponentsBulk(req, res) {
     let totalComponentsSaved = 0;
     const savedComponentTypes = [];
     
+    // Apply testing_required at floor level (structural only)
+    if (typeof testingRequired !== 'undefined') {
+      floor.testing_required = testingRequired === true || testingRequired === 'true';
+    }
+
     // Process each component type
     structures.forEach(({ component_type, components }) => {
       console.log(`📝 Processing component type: ${component_type}`);
@@ -6109,6 +6416,11 @@ async saveFloorStructuralComponentsBulk(req, res) {
 
         console.log(`   📸 Component "${comp.name}" — raw photos: ${JSON.stringify(rawPhotos)} → resolved: ${JSON.stringify(resolvedPhotos)}`);
         
+        const resolvedDocs = buildPdfObjects(
+          normalizePdfList(comp.pdf_files),
+          resolveDoc
+        );
+
         return {
           _id: componentId,
           name: comp.name,
@@ -6121,8 +6433,7 @@ async saveFloorStructuralComponentsBulk(req, res) {
           // ⭐ NEW: Add distress fields if provided
           distress_dimensions: comp.distress_dimensions || undefined,
           repair_methodology: comp.repair_methodology || undefined,
-          distress_types: normalizeDistressTypes(comp.distress_types),
-          pdf_files: comp.pdf_files || undefined
+          pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
         };
       });
       
@@ -6159,7 +6470,7 @@ async saveFloorStructuralComponentsBulk(req, res) {
           rating: c.rating,
           photo: c.photo || null,
           photos: c.photos || [],
-          distress_types: (c.distress_types && c.distress_types[0]) || ''
+          // distress types intentionally omitted for non-structural
         }))
       });
 
@@ -6235,43 +6546,62 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
     console.log('Floor ID:', floorId);
     console.log('Structures data:', JSON.stringify(structures, null, 2));
 
-    // ✅ Build a filename → Cloudinary URL map from uploaded files.
-    //    upload.fields() sets req.files as an object: { photo: [...], photos: [...] }
-    //    Flatten all fields into a single ordered array for sequential fallback.
-    const uploadedFileMap = {};
-    const uploadedFileQueue = []; // ordered Cloudinary URLs for sequential assignment
+    // ✅ Build filename → URL maps for images and docs separately.
+    const uploadedPhotoMap = {};
+    const uploadedPhotoQueue = [];
+    const uploadedDocMap = {};
+    const uploadedDocQueue = [];
+
     if (req.files && typeof req.files === 'object') {
       const allFiles = Object.values(req.files).flat();
-      console.log(`📸 ${allFiles.length} file(s) uploaded to Cloudinary`);
+      console.log(`📎 ${allFiles.length} file(s) uploaded to Cloudinary`);
       allFiles.forEach(file => {
         const cloudinaryUrl = file.path || file.secure_url || (file.filename && `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}`);
-        if (cloudinaryUrl) {
-          uploadedFileMap[file.originalname] = cloudinaryUrl;
-          uploadedFileQueue.push(cloudinaryUrl);
-          console.log(`   ✅ Mapped: ${file.originalname} → ${cloudinaryUrl}`);
+        if (!cloudinaryUrl) return;
+
+        const isImage = file.mimetype && file.mimetype.startsWith('image/');
+        if (isImage) {
+          uploadedPhotoMap[file.originalname] = cloudinaryUrl;
+          uploadedPhotoQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Photo: ${file.originalname} → ${cloudinaryUrl}`);
+        } else {
+          uploadedDocMap[file.originalname] = cloudinaryUrl;
+          uploadedDocQueue.push(cloudinaryUrl);
+          console.log(`   ✅ Doc: ${file.originalname} → ${cloudinaryUrl}`);
         }
       });
     }
-    let fileQueueIndex = 0; // tracks next unassigned file for sequential fallback
 
-    // ✅ Helper: resolve a photo value to a Cloudinary URL.
-    //    Priority: (1) already a remote URL → keep as-is
-    //              (2) filename matches an uploaded file → use that URL
-    //              (3) any non-empty placeholder → assign next uploaded file sequentially
+    let photoQueueIndex = 0;
+    let docQueueIndex = 0;
+
     const resolvePhoto = (photoValue) => {
       if (typeof photoValue !== 'string' || !photoValue.trim()) return null;
       const trimmed = photoValue.trim();
-      // Already a remote URL — keep it
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-      // Exact filename match
       const basename = trimmed.split(/[\\/]/).pop();
-      if (uploadedFileMap[basename]) return uploadedFileMap[basename];
-      if (uploadedFileMap[trimmed]) return uploadedFileMap[trimmed];
-      // Fallback: assign next uploaded file sequentially (handles filename mismatch)
-      if (fileQueueIndex < uploadedFileQueue.length) {
-        const url = uploadedFileQueue[fileQueueIndex];
-        fileQueueIndex++;
-        console.log(`   ⚡ Sequential fallback: "${trimmed}" → ${url}`);
+      if (uploadedPhotoMap[basename]) return uploadedPhotoMap[basename];
+      if (uploadedPhotoMap[trimmed]) return uploadedPhotoMap[trimmed];
+      if (photoQueueIndex < uploadedPhotoQueue.length) {
+        const url = uploadedPhotoQueue[photoQueueIndex];
+        photoQueueIndex++;
+        console.log(`   ⚡ Photo fallback: "${trimmed}" → ${url}`);
+        return url;
+      }
+      return null;
+    };
+
+    const resolveDoc = (docValue) => {
+      if (typeof docValue !== 'string' || !docValue.trim()) return null;
+      const trimmed = docValue.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+      const basename = trimmed.split(/[\\/]/).pop();
+      if (uploadedDocMap[basename]) return uploadedDocMap[basename];
+      if (uploadedDocMap[trimmed]) return uploadedDocMap[trimmed];
+      if (docQueueIndex < uploadedDocQueue.length) {
+        const url = uploadedDocQueue[docQueueIndex];
+        docQueueIndex++;
+        console.log(`   ⚡ Doc fallback: "${trimmed}" → ${url}`);
         return url;
       }
       return null;
@@ -6335,6 +6665,11 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
 
         console.log(`   📸 Component "${comp.name}" — raw photos: ${JSON.stringify(rawPhotos)} → resolved: ${JSON.stringify(resolvedPhotos)}`);
         
+        const resolvedDocs = buildPdfObjects(
+          normalizePdfList(comp.pdf_files),
+          resolveDoc
+        );
+
         return {
           _id: componentId,
           name: comp.name,
@@ -6348,7 +6683,7 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
           distress_dimensions: comp.distress_dimensions || undefined,
           repair_methodology: comp.repair_methodology || undefined,
           distress_types: normalizeDistressTypes(comp.distress_types),
-          pdf_files: comp.pdf_files || undefined
+          pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
         };
       });
       
@@ -6364,8 +6699,7 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
           name: c.name,
           rating: c.rating,
           photo: c.photo || null,
-          photos: c.photos || [],
-          distress_types: (c.distress_types && c.distress_types[0]) || ''
+          photos: c.photos || []
         }))
       });
       
@@ -6640,15 +6974,160 @@ calculateBlockNonStructuralAverage(block, structureSubtype = 'rcc') {
 
 calculateBlockCombinedRating(block) {
   if (block.structural_rating?.overall_average && block.non_structural_rating?.overall_average) {
-    const combinedScore = (block.structural_rating.overall_average * 0.7) + 
-                         (block.non_structural_rating.overall_average * 0.3);
-    
+    const combinedScore =
+        (block.structural_rating.overall_average * 0.7) +
+        (block.non_structural_rating.overall_average * 0.3);
+
     block.block_overall_rating = {
       combined_score: Math.round(combinedScore * 10) / 10,
       health_status: this.getHealthStatus(combinedScore),
       priority: this.getPriority(combinedScore),
       last_assessment_date: new Date()
     };
+  }
+}
+
+// =================== QUANTIFICATION METHODS ===================
+
+/**
+ * Get floor quantifications
+ * @route GET /api/structures/:id/floors/:floorId/quantifications
+ */
+async getFloorQuantifications(req, res) {
+  try {
+    const { id, floorId } = req.params;
+
+    const { structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+
+    if (!floor) {
+      return sendErrorResponse(res, 404, 'Floor not found');
+    }
+
+    const quantifications = floor.quantifications || { structural: [], non_structural: [] };
+
+    return sendSuccessResponse(res, 'Floor quantifications retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      quantifications
+    });
+  } catch (error) {
+    console.error('❌ Get floor quantifications error:', error);
+    return sendErrorResponse(res, 'Failed to get floor quantifications', 500, error.message);
+  }
+}
+
+/**
+ * Save floor quantifications
+ * @route POST /api/structures/:id/floors/:floorId/quantifications
+ */
+async saveFloorQuantifications(req, res) {
+  try {
+    const { id, floorId } = req.params;
+    const payload = req.body?.quantifications ? req.body.quantifications : req.body;
+    const structural = normalizeQuantificationList(payload?.structural || []);
+    const nonStructural = normalizeQuantificationList(payload?.non_structural || []);
+
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+
+    if (!floor) {
+      return sendErrorResponse(res, 404, 'Floor not found');
+    }
+
+    floor.quantifications = {
+      structural,
+      non_structural: nonStructural
+    };
+
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+
+    return sendSuccessResponse(res, 'Floor quantifications saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      total_structural: structural.length,
+      total_non_structural: nonStructural.length
+    });
+  } catch (error) {
+    console.error('❌ Save floor quantifications error:', error);
+    return sendErrorResponse(res, 'Failed to save floor quantifications', 500, error.message);
+  }
+}
+
+/**
+ * Get flat quantifications
+ * @route GET /api/structures/:id/floors/:floorId/flats/:flatId/quantifications
+ */
+async getFlatQuantifications(req, res) {
+  try {
+    const { id, floorId, flatId } = req.params;
+
+    const { structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 404, 'Floor not found');
+    }
+
+    const flat = floor.flats?.find(f => f.flat_id === flatId);
+    if (!flat) {
+      return sendErrorResponse(res, 404, 'Flat not found');
+    }
+
+    const quantifications = flat.quantifications || { structural: [], non_structural: [] };
+
+    return sendSuccessResponse(res, 'Flat quantifications retrieved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      flat_id: flatId,
+      quantifications
+    });
+  } catch (error) {
+    console.error('❌ Get flat quantifications error:', error);
+    return sendErrorResponse(res, 'Failed to get flat quantifications', 500, error.message);
+  }
+}
+
+/**
+ * Save flat quantifications
+ * @route POST /api/structures/:id/floors/:floorId/flats/:flatId/quantifications
+ */
+async saveFlatQuantifications(req, res) {
+  try {
+    const { id, floorId, flatId } = req.params;
+    const payload = req.body?.quantifications ? req.body.quantifications : req.body;
+    const structural = normalizeQuantificationList(payload?.structural || []);
+    const nonStructural = normalizeQuantificationList(payload?.non_structural || []);
+
+    const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
+    if (!floor) {
+      return sendErrorResponse(res, 404, 'Floor not found');
+    }
+
+    const flat = floor.flats?.find(f => f.flat_id === flatId);
+    if (!flat) {
+      return sendErrorResponse(res, 404, 'Flat not found');
+    }
+
+    flat.quantifications = {
+      structural,
+      non_structural: nonStructural
+    };
+
+    structure.creation_info.last_updated_date = new Date();
+    await user.save();
+
+    return sendSuccessResponse(res, 'Flat quantifications saved successfully', {
+      structure_id: id,
+      floor_id: floorId,
+      flat_id: flatId,
+      total_structural: structural.length,
+      total_non_structural: nonStructural.length
+    });
+  } catch (error) {
+    console.error('❌ Save flat quantifications error:', error);
+    return sendErrorResponse(res, 'Failed to save flat quantifications', 500, error.message);
   }
 }
 

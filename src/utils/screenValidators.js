@@ -221,29 +221,34 @@ const multiComponentRatingValidation = [
   
   body('structures.*.components.*.distress_types.*')
     .if(body('structures.*.components.*.distress_types').exists())
-    .isIn(['physical', 'chemical', 'mechanical', 'none'])
-    .withMessage('Distress type must be one of: physical, chemical, mechanical'),
+    .isIn(['physical', 'chemical', 'mechanical', 'corrosion', 'section_loss', 'section loss', 'warping', 'none'])
+    .withMessage('Distress type must be one of: physical, chemical, mechanical, corrosion, section_loss, warping, none'),
 
   // NEW: PDF files validation
   body('structures.*.components.*.pdf_files')
     .optional()
     .isArray()
     .withMessage('PDF files must be an array'),
-  
-  body('structures.*.components.*.pdf_files.*.filename')
+
+  body('structures.*.components.*.pdf_files.*')
     .if(body('structures.*.components.*.pdf_files').exists())
-    .notEmpty()
-    .withMessage('PDF filename is required'),
-  
-  body('structures.*.components.*.pdf_files.*.file_path')
-    .if(body('structures.*.components.*.pdf_files').exists())
-    .notEmpty()
-    .withMessage('PDF file path is required'),
+    .custom((value) => {
+      if (typeof value === 'string') return true;
+      if (value && typeof value === 'object') {
+        if (value.filename && value.file_path) return true;
+      }
+      throw new Error('Each pdf_files entry must be a string (filename/URL) or an object with filename and file_path');
+    }),
 
   // Custom validation: photo required for ratings 1-5; extra details required for ratings 1-3
   body().custom((requestBody) => {
     const errors = [];
     
+    const structuralTypes = new Set([
+      'beams', 'columns', 'slab', 'foundation',
+      'roof_truss', 'connections', 'bracings', 'purlins', 'channels', 'steel_flooring'
+    ]);
+
     if (requestBody.structures && Array.isArray(requestBody.structures)) {
       requestBody.structures.forEach((structure, structureIndex) => {
         if (structure.components && Array.isArray(structure.components)) {
@@ -270,9 +275,11 @@ const multiComponentRatingValidation = [
                 errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Repair methodology must be a non-empty string (min 10 chars) for ratings 1-3`);
               }
               
-              // NEW: Check for distress types
-              if (!component.distress_types || component.distress_types.length === 0) {
-                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): At least one distress type (physical/chemical/mechanical) is required for ratings 1-3`);
+              // NEW: Check for distress types (structural only)
+              if (structuralTypes.has(structure.component_type)) {
+                if (!component.distress_types || component.distress_types.length === 0) {
+                  errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): At least one distress type is required for ratings 1-3`);
+                }
               }
             }
           });
@@ -1808,6 +1815,87 @@ const pdfFilesValidation = [
     .withMessage('File size must be a positive integer')
 ];
 
+// =================== QUANTIFICATION VALIDATION ===================
+const quantificationValidation = [
+  body('structural')
+    .optional()
+    .isArray()
+    .withMessage('Structural quantifications must be an array'),
+
+  body('non_structural')
+    .optional()
+    .isArray()
+    .withMessage('Non-structural quantifications must be an array'),
+
+  body('structural.*.location_of_distress')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Location of distress cannot exceed 1000 characters'),
+
+  body('non_structural.*.location_of_distress')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Location of distress cannot exceed 1000 characters'),
+
+  body('structural.*.repair_methodology')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Repair methodology cannot exceed 2000 characters'),
+
+  body('non_structural.*.repair_methodology')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Repair methodology cannot exceed 2000 characters'),
+
+  body('structural.*.nos')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Nos must be a non-negative number'),
+
+  body('non_structural.*.nos')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Nos must be a non-negative number'),
+
+  body('structural.*.length')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Length must be a non-negative number'),
+
+  body('structural.*.breadth')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Breadth must be a non-negative number'),
+
+  body('structural.*.height')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Height must be a non-negative number'),
+
+  body('non_structural.*.length')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Length must be a non-negative number'),
+
+  body('non_structural.*.breadth')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Breadth must be a non-negative number'),
+
+  body('non_structural.*.height')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Height must be a non-negative number')
+];
+
 
 
 // =================== FLOOR-LEVEL RATINGS VALIDATION ===================
@@ -2254,6 +2342,7 @@ module.exports = {
   // Distress & Repair Validations
   distressDimensionsValidation,
   pdfFilesValidation,
+  quantificationValidation,
   
   // Utilities
   structureNumberValidation,

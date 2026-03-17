@@ -15,12 +15,22 @@ const isValidPhotoReference = (value) => {
 };
 
 const normalizeDistressTypes = (value) => {
-  const allowedDistressTypes = new Set(['physical', 'chemical', 'mechanical', 'none']);
+  const allowedDistressTypes = new Set([
+    'physical',
+    'chemical',
+    'mechanical',
+    'corrosion',
+    'section_loss',
+    'section loss',
+    'warping',
+    'none'
+  ]);
   const rawValues = Array.isArray(value) ? value.flat(Infinity) : [value];
 
   const normalized = rawValues
     .filter((item) => typeof item === 'string')
     .map((item) => item.trim().toLowerCase())
+    .map((item) => (item === 'section loss' ? 'section_loss' : item))
     .filter((item) => allowedDistressTypes.has(item));
 
   return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
@@ -116,10 +126,20 @@ const componentInstanceSchema = {
     validate: {
       validator: function(v) {
         if (!v) return true;
-        const allowed = new Set(['physical', 'chemical', 'mechanical', 'none']);
+        const allowed = new Set([
+          'physical',
+          'chemical',
+          'mechanical',
+          'corrosion',
+          'section_loss',
+          'section loss',
+          'warping',
+          'none'
+        ]);
         return Array.isArray(v) && v.every(item => allowed.has(item));
       },
-      message: 'Distress types must be one or more of: physical, chemical, mechanical, none'
+      message:
+        'Distress types must be one or more of: physical, chemical, mechanical, corrosion, section_loss, warping, none'
     }
   },
   
@@ -140,6 +160,68 @@ const componentInstanceSchema = {
       default: Date.now
     }
   }]
+};
+
+// =================== QUANTIFICATION ENTRY SCHEMA ===================
+const quantificationEntrySchema = {
+  entry_id: {
+    type: String,
+    required: true
+  },
+  category: {
+    type: String,
+    trim: true,
+    maxlength: 100
+  },
+  location_of_distress: {
+    type: String,
+    trim: true,
+    maxlength: 1000
+  },
+  nos: {
+    type: Number,
+    min: [0, 'Nos cannot be negative'],
+    default: 1
+  },
+  length: {
+    type: Number,
+    min: [0, 'Length cannot be negative'],
+    default: 0
+  },
+  breadth: {
+    type: Number,
+    min: [0, 'Breadth cannot be negative'],
+    default: 0
+  },
+  height: {
+    type: Number,
+    min: [0, 'Height cannot be negative'],
+    default: 0
+  },
+  quantity: {
+    type: Number,
+    min: [0, 'Quantity cannot be negative'],
+    default: 0
+  },
+  unit: {
+    type: String,
+    trim: true,
+    maxlength: 20,
+    default: ''
+  },
+  repair_methodology: {
+    type: String,
+    trim: true,
+    maxlength: 2000
+  },
+  created_at: {
+    type: Date,
+    default: Date.now
+  },
+  updated_at: {
+    type: Date,
+    default: Date.now
+  }
 };
 
 // =================== TEST RESULT SCHEMA ===================
@@ -451,6 +533,12 @@ const flatSchema = {
       default: Date.now
     }
   },
+
+  // Quantification observations (structural & non-structural)
+  quantifications: {
+    structural: { type: [quantificationEntrySchema], default: [] },
+    non_structural: { type: [quantificationEntrySchema], default: [] }
+  },
   
   // NEW: Testing requirements for flat (only for structural members)
   testing_required: {
@@ -514,6 +602,12 @@ const floorSchema = {
     type: Number,
     min: [0, 'Number of blocks cannot be negative'],
     max: [50, 'Number of blocks cannot exceed 50 per floor']
+  },
+
+  // Quantification observations (structural & non-structural)
+  quantifications: {
+    structural: { type: [quantificationEntrySchema], default: [] },
+    non_structural: { type: [quantificationEntrySchema], default: [] }
   },
   
   flats: [flatSchema],

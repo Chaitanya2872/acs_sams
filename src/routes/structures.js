@@ -18,6 +18,7 @@ const {
   componentRatingValidation,
   componentUpdateValidation,
   multiComponentRatingValidation,
+  quantificationValidation,
   parameterValidations
 } = require('../utils/screenValidators');
 
@@ -53,6 +54,7 @@ router.post(
   authenticateToken,
   uploadMultiple,        // ✅ Upload files to Cloudinary before hitting controller
   handleUploadError,     // ✅ Handle multer/Cloudinary errors gracefully
+  parseStructuresBody,   // ✅ Parse structures string → array for form-data requests
   parameterValidations.structureId,
   parameterValidations.flatId,
   multiComponentRatingValidation,
@@ -291,6 +293,43 @@ router.post('/:id/floors/:floorId/ratings',
 );
 router.get('/:id/floors/:floorId/ratings', 
   structureController.getFloorRatings
+);
+
+// =================== QUANTIFICATIONS ===================
+router.get(
+  '/:id/floors/:floorId/quantifications',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  handleValidationErrors,
+  structureController.getFloorQuantifications
+);
+
+router.post(
+  '/:id/floors/:floorId/quantifications',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  quantificationValidation,
+  handleValidationErrors,
+  structureController.saveFloorQuantifications
+);
+
+router.get(
+  '/:id/floors/:floorId/flats/:flatId/quantifications',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  handleValidationErrors,
+  structureController.getFlatQuantifications
+);
+
+router.post(
+  '/:id/floors/:floorId/flats/:flatId/quantifications',
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  quantificationValidation,
+  handleValidationErrors,
+  structureController.saveFlatQuantifications
 );
 
 // =================== LEGACY FLAT RATINGS ===================
