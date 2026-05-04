@@ -1,5 +1,6 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
+const PDFDocument = require('pdfkit');
 const mongoose = require('mongoose');
 const { User } = require('../models/schemas');
 const { authenticateToken } = require('../middlewares/auth');
@@ -84,6 +85,7 @@ const TEST_NAME_LABELS = {
 };
 
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const PDF_MIME = 'application/pdf';
 
 const safeText = (value, fallback = '') => {
   if (value === null || value === undefined) return fallback;
@@ -900,6 +902,257 @@ const buildFilterSummary = (query = {}) => {
   return parts.join(', ');
 };
 
+const ensurePdfSpace = (doc, requiredHeight = 24) => {
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + requiredHeight > bottomLimit) {
+    doc.addPage();
+  }
+};
+
+const pdfSectionTitle = (doc, title) => {
+  ensurePdfSpace(doc, 26);
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(12)
+    .fillColor('#1F4E78')
+    .text(title, { underline: false });
+  doc.moveDown(0.4);
+  doc.fillColor('#000000');
+};
+
+const pdfKeyValue = (doc, label, value) => {
+  ensurePdfSpace(doc, 18);
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(10)
+    .text(`${label}: `, { continued: true });
+  doc
+    .font('Helvetica')
+    .text(safeText(value, 'N/A'));
+};
+
+const pdfBullet = (doc, text, indent = 14) => {
+  ensurePdfSpace(doc, 20);
+  doc
+    .font('Helvetica')
+    .fontSize(10)
+    .text(`• ${safeText(text, 'N/A')}`, { indent });
+};
+
+const pdfTableRow = (doc, columns, widths, options = {}) => {
+  const startX = doc.page.margins.left;
+  const lineHeight = options.lineHeight || 14;
+  const font = options.font || 'Helvetica';
+  const fontSize = options.fontSize || 9;
+  const isHeader = Boolean(options.header);
+
+  const heights = columns.map((value, index) => {
+    const width = widths[index] - 6;
+    return doc.heightOfString(safeText(value, ''), { width, align: 'left' });
+  });
+  const rowHeight = Math.max(lineHeight, ...heights) + 6;
+  ensurePdfSpace(doc, rowHeight + 2);
+
+  let currentX = startX;
+  columns.forEach((value, index) => {
+    const width = widths[index];
+    doc
+      .rect(currentX, doc.y, width, rowHeight)
+      .lineWidth(0.5)
+      .strokeColor('#BFBFBF')
+      .stroke();
+
+    doc
+      .font(isHeader ? 'Helvetica-Bold' : font)
+      .fontSize(fontSize)
+      .fillColor('#000000')
+      .text(safeText(value, ''), currentX + 3, doc.y + 3, {
+        width: width - 6,
+        align: 'left'
+      });
+
+    currentX += width;
+  });
+
+  doc.y += rowHeight;
+};
+
+const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) => {
+  const observations = collectStructureObservations(structureExport.structure);
+  const quantifications = collectQuantifications(structureExport.structure);
+  const tests = collectTests(structureExport.structure);
+  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
+  const structure = structureExport.structure;
+
+  if (index > 0) doc.addPage();
+
+  doc.font('Helvetica-Bold').fontSize(16).fillColor('#1F1F1F').text('SAMS');
+  doc.moveDown(0.2);
+  doc.font('Helvetica-Bold').fontSize(13).fillColor('#1F4E78').text('OUTPUT / REPORT FORMAT');
+  doc.moveDown(0.5);
+  doc.fillColor('#000000');
+
+  pdfKeyValue(doc, 'Structure ID', structure.structural_identity?.structural_identity_number);
+  pdfKeyValue(doc, 'UID', structure.structural_identity?.uid);
+  pdfKeyValue(doc, 'Structure Type', structure.structural_identity?.type_of_structure);
+  pdfKeyValue(doc, 'Structure Subtype', structure.structural_identity?.structure_subtype);
+  pdfKeyValue(doc, 'Owner / Employee', `${buildOwnerLabel(structureExport.owner)}${structureExport.owner?.profile?.employee_id ? ` (${structureExport.owner.profile.employee_id})` : ''}`);
+  pdfKeyValue(doc, 'Organization', structureExport.owner?.profile?.organization || structure.administration?.organization);
+  pdfKeyValue(
+    doc,
+    'Location',
+    [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code]
+      .filter(Boolean)
+      .join(' / ')
+  );
+  pdfKeyValue(doc, 'Created Date', formatDate(structure.creation_info?.created_date));
+  pdfKeyValue(doc, 'Last Updated', formatDate(structure.creation_info?.last_updated_date));
+  pdfKeyValue(doc, 'Applied Filters', filtersApplied || 'None');
+  pdfKeyValue(doc, 'Report Position', `${index + 1} of ${total}`);
+  doc.moveDown(0.6);
+
+  pdfSectionTitle(doc, 'OBSERVATIONS');
+  if (!observations.length) {
+    pdfBullet(doc, 'No observations recorded');
+  } else {
+    const grouped = observations.reduce((acc, item) => {
+      if (!acc.has(item.location)) acc.set(item.location, []);
+      acc.get(item.location).push(item);
+      return acc;
+    }, new Map());
+
+    grouped.forEach((locationObservations, location) => {
+      ensurePdfSpace(doc, 18);
+      doc.font('Helvetica-Bold').fontSize(10).text(location.toUpperCase());
+      ['STRUCTURAL DISTRESS', 'NON-STRUCTURAL DISTRESS'].forEach((category) => {
+        const rows = locationObservations.filter((item) => item.category === category);
+        if (!rows.length) return;
+        ensurePdfSpace(doc, 16);
+        doc.font('Helvetica-Bold').fontSize(9).text(category);
+        rows.forEach((item, rowIndex) => {
+          pdfBullet(doc, `${rowIndex + 1}. ${item.component}: ${item.remarks}`);
+        });
+      });
+      doc.moveDown(0.3);
+    });
+  }
+
+  pdfSectionTitle(doc, 'INSPECTION IMAGES');
+  if (!inspectionImages.length) {
+    pdfBullet(doc, 'No inspection image references attached');
+  } else {
+    pdfTableRow(doc, ['S. No', 'Caption', 'Location', 'Image Reference'], [40, 170, 140, 150], { header: true });
+    inspectionImages.forEach((row, rowIndex) => {
+      pdfTableRow(doc, [String(rowIndex + 1), row.caption, row.location, row.source], [40, 170, 140, 150]);
+    });
+  }
+
+  pdfSectionTitle(doc, 'TEST RESULTS');
+  if (!tests.length) {
+    pdfBullet(doc, 'No test results recorded');
+  } else {
+    const groupedTests = tests.reduce((acc, item) => {
+      if (!acc.has(item.test_name)) acc.set(item.test_name, []);
+      acc.get(item.test_name).push(item);
+      return acc;
+    }, new Map());
+
+    let testIndex = 1;
+    groupedTests.forEach((rows, testName) => {
+      ensurePdfSpace(doc, 16);
+      doc.font('Helvetica-Bold').fontSize(10).text(`${testIndex}. ${testName}`);
+      pdfTableRow(doc, ['S. No', 'Location', 'Component', 'Date', 'Remarks / Result'], [40, 150, 110, 70, 180], { header: true });
+      rows.forEach((row, rowIndex) => {
+        pdfTableRow(
+          doc,
+          [
+            String(rowIndex + 1),
+            row.scopeLabel,
+            [row.component_type, row.component_id].filter(Boolean).join(' / '),
+            row.test_date || '',
+            [row.result_summary, row.remarks].filter(Boolean).join(' | ') || 'N/A'
+          ],
+          [40, 150, 110, 70, 180]
+        );
+      });
+      testIndex += 1;
+      doc.moveDown(0.2);
+    });
+  }
+
+  pdfSectionTitle(doc, 'TESTING IMAGES');
+  if (!testingImages.length) {
+    pdfBullet(doc, 'No testing file references attached');
+  } else {
+    pdfTableRow(doc, ['S. No', 'Test Name', 'Location', 'File Reference'], [40, 170, 150, 140], { header: true });
+    testingImages.forEach((row, rowIndex) => {
+      pdfTableRow(doc, [String(rowIndex + 1), row.test_name, row.scopeLabel, row.source], [40, 170, 150, 140]);
+    });
+  }
+
+  pdfSectionTitle(doc, 'QUANTIFICATION');
+  if (!quantifications.length) {
+    pdfBullet(doc, 'No quantification entries recorded');
+  } else {
+    const groupedQuantifications = quantifications.reduce((acc, item) => {
+      if (!acc.has(item.category)) acc.set(item.category, []);
+      acc.get(item.category).push(item);
+      return acc;
+    }, new Map());
+
+    groupedQuantifications.forEach((rows, category) => {
+      ensurePdfSpace(doc, 16);
+      doc.font('Helvetica-Bold').fontSize(10).text(category);
+      pdfTableRow(
+        doc,
+        ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Quantity', 'Repair Methodology'],
+        [32, 120, 78, 35, 35, 35, 35, 70, 100],
+        { header: true, fontSize: 8 }
+      );
+      rows.forEach((row, rowIndex) => {
+        pdfTableRow(
+          doc,
+          [
+            String(rowIndex + 1),
+            row.location_of_distress,
+            row.distress,
+            String(row.nos),
+            row.length ?? '',
+            row.breadth ?? '',
+            row.height ?? '',
+            `${row.quantity} ${row.unit}`.trim(),
+            row.repair_methodology
+          ],
+          [32, 120, 78, 35, 35, 35, 35, 70, 100],
+          { fontSize: 8 }
+        );
+      });
+      doc.moveDown(0.2);
+    });
+  }
+
+  pdfSectionTitle(doc, 'REPAIR METHODOLOGY SUMMARY');
+  const summaryRows = summarizeMethodology(quantifications);
+  if (!summaryRows.length) {
+    pdfBullet(doc, 'No methodology summary available');
+  } else {
+    pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], [40, 320, 90, 90], { header: true });
+    summaryRows.forEach((row, rowIndex) => {
+      pdfTableRow(doc, [String(rowIndex + 1), row.description, String(row.quantity), row.units], [40, 320, 90, 90]);
+    });
+  }
+
+  doc.moveDown(0.4);
+  doc
+    .font('Helvetica-Oblique')
+    .fontSize(8)
+    .fillColor('#555555')
+    .text(
+      'Note: Observation-to-quantification linkage depends on saved quantification rows. TODO: add explicit observation linkage in the data model if one-to-one traceability is required.'
+    );
+  doc.fillColor('#000000');
+};
+
 const writeStructureWorksheet = (worksheet, structureExport, filtersApplied) => {
   ensureColumns(worksheet);
 
@@ -933,12 +1186,29 @@ const createWorkbook = (reqUser) => {
   return workbook;
 };
 
+const createPdfDocument = () =>
+  new PDFDocument({
+    size: 'A4',
+    margin: 36,
+    bufferPages: true
+  });
+
 const sendWorkbook = async (res, workbook, fileName) => {
   res.setHeader('Content-Type', EXCEL_MIME);
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
   await workbook.xlsx.write(res);
   res.end();
 };
+
+const sendPdf = (res, doc, fileName) =>
+  new Promise((resolve, reject) => {
+    res.setHeader('Content-Type', PDF_MIME);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    doc.on('error', reject);
+    res.on('finish', resolve);
+    doc.pipe(res);
+    doc.end();
+  });
 
 router.get('/structures/download', authenticateToken, checkExportPermissions, async (req, res) => {
   try {
@@ -948,6 +1218,18 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
         success: false,
         message: 'No structures found matching the criteria'
       });
+    }
+
+    const filterSummary = buildFilterSummary(req.query);
+    const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
+
+    if (requestedFormat === 'pdf') {
+      const doc = createPdfDocument();
+      structures.forEach((structureExport, index) => {
+        renderStructurePdf(doc, structureExport, filterSummary, index, structures.length);
+      });
+      const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
+      return sendPdf(res, doc, fileName);
     }
 
     const workbook = createWorkbook(req.user);
@@ -961,8 +1243,6 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
       { header: 'Worksheet', key: 'worksheet', width: 24 }
     ];
     addTableHeader(indexSheet, 1, ['S. No', 'Structure ID', 'Owner', 'Location', 'Status', 'Worksheet'], COLORS.PRIMARY);
-
-    const filterSummary = buildFilterSummary(req.query);
 
     structures.forEach((structureExport, index) => {
       const structureId = safeText(
@@ -1009,6 +1289,16 @@ router.get('/structures/complete-download', authenticateToken, checkExportPermis
       });
     }
 
+    const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
+    if (requestedFormat === 'pdf') {
+      const doc = createPdfDocument();
+      structures.forEach((structureExport, index) => {
+        renderStructurePdf(doc, structureExport, 'Complete export', index, structures.length);
+      });
+      const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
+      return sendPdf(res, doc, fileName);
+    }
+
     const workbook = createWorkbook(req.user);
     structures.forEach((structureExport, index) => {
       const structureId = safeText(
@@ -1048,12 +1338,21 @@ router.get('/structures/:id/download', authenticateToken, checkExportPermissions
       });
     }
 
-    const workbook = createWorkbook(req.user);
     const structureExport = structures[0];
     const structureId = safeText(
       structureExport.structure.structural_identity?.structural_identity_number,
       String(structureExport.structure._id)
     );
+    const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
+
+    if (requestedFormat === 'pdf') {
+      const doc = createPdfDocument();
+      renderStructurePdf(doc, structureExport, buildFilterSummary(req.query), 0, 1);
+      const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.pdf`;
+      return sendPdf(res, doc, fileName);
+    }
+
+    const workbook = createWorkbook(req.user);
     const worksheet = workbook.addWorksheet(sanitizeWorksheetName(structureId, 'Structure Report'));
     writeStructureWorksheet(worksheet, structureExport, buildFilterSummary(req.query));
 
@@ -1141,7 +1440,7 @@ router.get('/structures/metadata', authenticateToken, checkExportPermissions, as
         },
         users,
         organizations: Array.from(new Set(users.map((user) => user.organization).filter(Boolean))).sort(),
-        pdf_export_supported: false
+        pdf_export_supported: true
       },
       message: 'Report metadata retrieved successfully'
     });
