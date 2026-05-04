@@ -212,7 +212,11 @@ const checkExportPermissions = (req, res, next) => {
     });
   }
 
-  const hasPermission = isAdminUser(req.user) || Boolean(req.user.permissions?.can_export_reports);
+  const hasOwnReportAccess = ['FE', 'field_engineer'].includes(req.user.role);
+  const hasPermission =
+    isAdminUser(req.user) ||
+    hasOwnReportAccess ||
+    Boolean(req.user.permissions?.can_export_reports);
   if (!hasPermission) {
     return res.status(403).json({
       success: false,
