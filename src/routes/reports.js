@@ -1,1125 +1,1149 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
-const { User } = require('../models/schemas'); // Adjust path to your schemas
-const { authenticateToken, authorizeRole } = require('../middlewares/auth'); // Use your existing auth
-const router = express.Router();
 const mongoose = require('mongoose');
+const { User } = require('../models/schemas');
+const { authenticateToken } = require('../middlewares/auth');
 
-// =================== EXCEL STYLING CONSTANTS ===================
+const router = express.Router();
 
 const COLORS = {
-  PRIMARY: 'FF2E86AB',      // Professional blue
-  SECONDARY: 'FF1B998B',    // Teal accent
-  SUCCESS: 'FF52B788',      // Green
-  WARNING: 'FFFBB13C',      // Yellow
-  DANGER: 'FFFF6B6B',       // Red
-  LIGHT_GRAY: 'FFF8F9FA',   // Light background
-  DARK_GRAY: 'FF495057',    // Dark text
-  WHITE: 'FFFFFFFF'
+  PRIMARY: 'FF1F4E78',
+  SECONDARY: 'FF4F81BD',
+  SECTION: 'FFD9E2F3',
+  SUBSECTION: 'FFE2F0D9',
+  BORDER: 'FFBFBFBF',
+  TEXT: 'FF1F1F1F',
+  WHITE: 'FFFFFFFF',
+  NOTE: 'FFFCE4D6'
 };
 
 const FONTS = {
-  HEADER: { name: 'Segoe UI', size: 12, bold: true },
-  SUBHEADER: { name: 'Segoe UI', size: 11, bold: true },
-  BODY: { name: 'Segoe UI', size: 10 },
-  SMALL: { name: 'Segoe UI', size: 9 }
+  TITLE: { name: 'Calibri', size: 14, bold: true },
+  HEADER: { name: 'Calibri', size: 11, bold: true },
+  BODY: { name: 'Calibri', size: 10 },
+  SMALL: { name: 'Calibri', size: 9 }
 };
 
-// =================== UTILITY FUNCTIONS ===================
+const STRUCTURAL_COMPONENTS = [
+  ['beams', 'Beams'],
+  ['columns', 'Columns'],
+  ['slab', 'Slab'],
+  ['foundation', 'Foundation'],
+  ['roof_truss', 'Roof Truss'],
+  ['connections', 'Connections'],
+  ['bracings', 'Bracings'],
+  ['purlins', 'Purlins'],
+  ['channels', 'Channels'],
+  ['steel_flooring', 'Steel Flooring']
+];
 
-const createHeaderStyle = (color = COLORS.PRIMARY) => ({
-  font: { ...FONTS.HEADER, color: { argb: COLORS.WHITE } },
-  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: color } },
-  alignment: { vertical: 'middle', horizontal: 'center', wrapText: true },
-  border: {
-    top: { style: 'medium' },
-    left: { style: 'medium' },
-    bottom: { style: 'medium' },
-    right: { style: 'medium' }
-  }
-});
+const NON_STRUCTURAL_COMPONENTS = [
+  ['brick_plaster', 'Brick / Plaster'],
+  ['doors_windows', 'Doors / Windows'],
+  ['flooring_tiles', 'Flooring / Tiles'],
+  ['walls', 'Walls'],
+  ['paintings', 'Paintings'],
+  ['electrical_wiring', 'Electrical Wiring'],
+  ['sanitary_fittings', 'Sanitary Fittings'],
+  ['railings', 'Railings'],
+  ['water_tanks', 'Water Tanks'],
+  ['plumbing', 'Plumbing'],
+  ['sewage_system', 'Sewage System'],
+  ['panel_board', 'Panel Board'],
+  ['lifts', 'Lifts'],
+  ['walls_cladding', 'Walls / Cladding'],
+  ['industrial_flooring', 'Industrial Flooring'],
+  ['ventilation', 'Ventilation'],
+  ['electrical_system', 'Electrical System'],
+  ['fire_safety', 'Fire Safety'],
+  ['drainage', 'Drainage'],
+  ['overhead_cranes', 'Overhead Cranes'],
+  ['loading_docks', 'Loading Docks'],
+  ['cladding_partition_panels', 'Cladding / Partition Panels'],
+  ['roof_sheeting', 'Roof Sheeting'],
+  ['chequered_plate', 'Chequered Plate'],
+  ['flooring', 'Flooring'],
+  ['panel_board_transformer', 'Panel Board / Transformer'],
+  ['lift', 'Lift']
+];
 
-const createSubHeaderStyle = (color = COLORS.SECONDARY) => ({
-  font: { ...FONTS.SUBHEADER, color: { argb: COLORS.WHITE } },
-  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: color } },
-  alignment: { vertical: 'middle', horizontal: 'center', wrapText: true },
-  border: {
-    top: { style: 'thin' },
-    left: { style: 'thin' },
-    bottom: { style: 'thin' },
-    right: { style: 'thin' }
-  }
-});
-
-const createDataCellStyle = (isAlternate = false) => ({
-  font: FONTS.BODY,
-  fill: isAlternate ? 
-    { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.LIGHT_GRAY } } : 
-    undefined,
-  alignment: { vertical: 'middle', wrapText: true },
-  border: {
-    top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-    left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-    bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-    right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
-  }
-});
-
-const getStatusColor = (status) => {
-  switch (status?.toLowerCase()) {
-    case 'active': case 'good': case 'completed': return COLORS.SUCCESS;
-    case 'pending': case 'in progress': case 'moderate': return COLORS.WARNING;
-    case 'inactive': case 'poor': case 'critical': return COLORS.DANGER;
-    default: return COLORS.DARK_GRAY;
-  }
+const TEST_NAME_LABELS = {
+  rebound_hammer: 'REBOUND HAMMER TEST',
+  ultra_pulse_velocity: 'ULTRAPULSE VELOCITY TEST',
+  half_cell_potential: 'HALF CELL POTENTIAL TEST',
+  carbonation_depth: 'CARBONATION DEPTH TEST',
+  cover_meter: 'COVER METER TEST',
+  core_cutting: 'CORE CUTTING TEST',
+  pull_out: 'PULLOUT TEST',
+  chemical_analysis: 'CHEMICAL ANALYSIS TEST',
+  ultrasonic_thickness_gauge: 'ULTRASONIC THICKNESS GAUGE TEST',
+  magnetic_particle: 'MAGNETIC PARTICLE TEST',
+  liquid_penetration: 'LIQUID PENETRATION TEST',
+  hardness_test: 'HARDNESS TEST',
+  custom: 'CUSTOM TEST'
 };
 
-const getPriorityColor = (priority) => {
-  switch (priority?.toLowerCase()) {
-    case 'high': case 'urgent': return COLORS.DANGER;
-    case 'medium': case 'moderate': return COLORS.WARNING;
-    case 'low': return COLORS.SUCCESS;
-    default: return COLORS.DARK_GRAY;
-  }
+const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+const safeText = (value, fallback = '') => {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
 };
 
-// =================== MIDDLEWARE FOR REPORTS ===================
+const formatDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+const flattenMixedObject = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => flattenMixedObject(item)).filter(Boolean).join(', ');
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .filter(([, current]) => current !== null && current !== undefined && current !== '')
+      .map(([key, current]) => `${key}: ${flattenMixedObject(current)}`)
+      .join(' | ');
+  }
+  return String(value);
+};
+
+const toNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const inferQuantityValue = (entry) => {
+  const explicit = toNumber(entry.quantity);
+  if (explicit !== null) return explicit;
+
+  const length = toNumber(entry.length);
+  const breadth = toNumber(entry.breadth);
+  const height = toNumber(entry.height);
+  const nos = toNumber(entry.nos) || 1;
+
+  if (length !== null && breadth !== null && height !== null) {
+    return nos * length * breadth * height;
+  }
+
+  if (length !== null && breadth !== null) {
+    return nos * length * breadth;
+  }
+
+  if (length !== null) {
+    return nos * length;
+  }
+
+  return nos;
+};
+
+const inferUnit = (entry) => {
+  const provided = safeText(entry.unit).toUpperCase();
+  if (provided) return provided;
+
+  const breadth = toNumber(entry.breadth);
+  const height = toNumber(entry.height);
+  if (height !== null) return 'CUM';
+  if (breadth !== null) return 'SQM';
+  if (toNumber(entry.length) !== null) return 'RM';
+  return "NO'S";
+};
+
+const summarizeMethodology = (rows) => {
+  const summaryMap = new Map();
+
+  rows.forEach((row) => {
+    const method = safeText(row.repair_methodology, 'Not Specified');
+    const key = method.toLowerCase();
+    const baseQuantity = inferQuantityValue(row);
+    let quantity = baseQuantity;
+    let units = inferUnit(row);
+
+    if (key.includes('epoxy grouting')) {
+      quantity = baseQuantity * 8;
+      units = 'KGS';
+    } else if (key.includes('cement grouting')) {
+      quantity = baseQuantity * 8;
+      units = 'KGS';
+    }
+
+    if (!summaryMap.has(key)) {
+      summaryMap.set(key, {
+        description: method,
+        quantity: 0,
+        units
+      });
+    }
+
+    const current = summaryMap.get(key);
+    current.quantity += quantity;
+    if (!current.units) current.units = units;
+  });
+
+  return Array.from(summaryMap.values()).map((item) => ({
+    ...item,
+    quantity: Number(item.quantity.toFixed(2))
+  }));
+};
+
+const isAdminUser = (user) => {
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
+  return ['admin', 'AD'].includes(user?.role) || roles.includes('admin') || roles.includes('AD');
+};
+
+const canViewAllStructures = (user) => {
+  return isAdminUser(user) || Boolean(user?.permissions?.can_view_all_structures);
+};
 
 const checkExportPermissions = (req, res, next) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
-    }
-
-    const user = req.user;
-    const hasPermission = user.role === 'admin' || 
-                         user.role === 'supervisor' ||
-                         (user.permissions && user.permissions.can_export_reports);
-
-    if (!hasPermission) {
-      return res.status(403).json({
-        success: false,
-        error: 'Insufficient permissions to export reports'
-      });
-    }
-
-    console.log('✅ Export permission granted for user:', user.email);
-    next();
-  } catch (error) {
-    console.error('Export permission check error:', error);
-    return res.status(500).json({
+  if (!req.user) {
+    return res.status(401).json({
       success: false,
-      error: 'Permission check failed'
+      error: 'Authentication required'
     });
+  }
+
+  const hasPermission = isAdminUser(req.user) || Boolean(req.user.permissions?.can_export_reports);
+  if (!hasPermission) {
+    return res.status(403).json({
+      success: false,
+      error: 'Insufficient permissions to export reports'
+    });
+  }
+
+  return next();
+};
+
+const buildOwnerLabel = (userInfo) => {
+  const firstName = safeText(userInfo?.profile?.first_name);
+  const lastName = safeText(userInfo?.profile?.last_name);
+  const fullName = safeText(`${firstName} ${lastName}`.trim());
+  return fullName || safeText(userInfo?.username) || safeText(userInfo?.email) || 'N/A';
+};
+
+const sanitizeWorksheetName = (name, fallback) => {
+  const cleaned = safeText(name, fallback).replace(/[\\/*?:[\]]/g, ' ').trim();
+  return (cleaned || fallback).slice(0, 31);
+};
+
+const getUserMatch = (reqUser, query) => {
+  const match = { is_active: true };
+
+  if (!canViewAllStructures(reqUser)) {
+    match._id = new mongoose.Types.ObjectId(reqUser.userId);
+    return match;
+  }
+
+  if (query.user_id && mongoose.Types.ObjectId.isValid(query.user_id)) {
+    match._id = new mongoose.Types.ObjectId(query.user_id);
+  }
+
+  if (query.employee_id) {
+    match['profile.employee_id'] = query.employee_id;
+  }
+
+  if (query.organization) {
+    match['profile.organization'] = new RegExp(query.organization, 'i');
+  }
+
+  return match;
+};
+
+const getStructureMatch = (query) => {
+  const match = {};
+
+  if (query.structure_id) {
+    if (mongoose.Types.ObjectId.isValid(query.structure_id)) {
+      match['structures._id'] = new mongoose.Types.ObjectId(query.structure_id);
+    } else {
+      match['structures.structural_identity.structural_identity_number'] = query.structure_id;
+    }
+  }
+
+  if (query.structure_ids) {
+    const rawIds = query.structure_ids
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const objectIds = rawIds
+      .filter((value) => mongoose.Types.ObjectId.isValid(value))
+      .map((value) => new mongoose.Types.ObjectId(value));
+    const structureNumbers = rawIds.filter((value) => !mongoose.Types.ObjectId.isValid(value));
+
+    if (objectIds.length > 0 || structureNumbers.length > 0) {
+      const filters = [];
+      if (objectIds.length > 0) filters.push({ 'structures._id': { $in: objectIds } });
+      if (structureNumbers.length > 0) {
+        filters.push({
+          'structures.structural_identity.structural_identity_number': { $in: structureNumbers }
+        });
+      }
+      match.$or = [...(match.$or || []), ...filters];
+    }
+  }
+
+  if (query.state_code) match['structures.location.state_code'] = safeText(query.state_code).toUpperCase();
+  if (query.district_code) match['structures.location.district_code'] = safeText(query.district_code);
+  if (query.city_name) match['structures.location.city_name'] = new RegExp(query.city_name, 'i');
+  if (query.location_code) match['structures.location.location_code'] = safeText(query.location_code).toUpperCase();
+  if (query.type_of_structure) match['structures.structural_identity.type_of_structure'] = query.type_of_structure;
+  if (query.structure_subtype) match['structures.structural_identity.structure_subtype'] = query.structure_subtype;
+  if (query.status) match['structures.status'] = query.status;
+  if (query.health_status) {
+    match['structures.geometric_details.floors.floor_overall_rating.health_status'] = query.health_status;
+  }
+  if (query.priority) {
+    match['structures.geometric_details.floors.floor_overall_rating.priority'] = query.priority;
+  }
+
+  if (query.date_from || query.date_to) {
+    const dateRange = {};
+    if (query.date_from) {
+      const fromDate = new Date(query.date_from);
+      if (!Number.isNaN(fromDate.getTime())) dateRange.$gte = fromDate;
+    }
+    if (query.date_to) {
+      const toDate = new Date(query.date_to);
+      if (!Number.isNaN(toDate.getTime())) {
+        toDate.setHours(23, 59, 59, 999);
+        dateRange.$lte = toDate;
+      }
+    }
+    if (Object.keys(dateRange).length > 0) {
+      match['structures.creation_info.created_date'] = dateRange;
+    }
+  }
+
+  return match;
+};
+
+const buildAggregationPipeline = (reqUser, query = {}, singleStructureMatch = null) => {
+  const userMatch = getUserMatch(reqUser, query);
+  const structureMatch = singleStructureMatch || getStructureMatch(query);
+
+  return [
+    { $match: userMatch },
+    { $unwind: '$structures' },
+    { $match: structureMatch },
+    {
+      $project: {
+        owner: {
+          _id: '$_id',
+          username: '$username',
+          email: '$email',
+          role: '$role',
+          profile: '$profile'
+        },
+        structure: '$structures'
+      }
+    }
+  ];
+};
+
+const fetchStructuresForExport = async (reqUser, query = {}, singleStructureMatch = null) => {
+  return User.aggregate(buildAggregationPipeline(reqUser, query, singleStructureMatch));
+};
+
+const getCustomComponentEntries = (value) => {
+  if (!value) return [];
+
+  const source = value instanceof Map ? Array.from(value.entries()) : Object.entries(value);
+  return source.flatMap(([key, entries]) => {
+    const arr = Array.isArray(entries) ? entries : [];
+    return arr.map((entry) => ({
+      componentKey: key,
+      componentLabel: safeText(entry?.name, key),
+      entry
+    }));
+  });
+};
+
+const getComponentEntries = (componentContainer, componentMap) => {
+  if (!componentContainer) return [];
+
+  const namedEntries = componentMap.flatMap(([componentKey, componentLabel]) => {
+    const entries = Array.isArray(componentContainer[componentKey]) ? componentContainer[componentKey] : [];
+    return entries.map((entry) => ({ componentKey, componentLabel, entry }));
+  });
+
+  return namedEntries.concat(getCustomComponentEntries(componentContainer.custom_components));
+};
+
+const buildLocationLabel = (scopeType, scope) => {
+  if (scopeType === 'floor') {
+    return safeText(scope.floor_label_name, `Floor ${scope.floor_number}`);
+  }
+  if (scopeType === 'flat') {
+    const floorLabel = safeText(scope.floorLabel, `Floor ${scope.floor_number}`);
+    return `${floorLabel} / Flat ${safeText(scope.flat_number, scope.flat_id || 'N/A')}`;
+  }
+  if (scopeType === 'block') {
+    const floorLabel = safeText(scope.floorLabel, `Floor ${scope.floor_number}`);
+    return `${floorLabel} / Block ${safeText(scope.block_name || scope.block_number, scope.block_id || 'N/A')}`;
+  }
+  return 'Structure';
+};
+
+const collectObservationsFromScope = (scopeType, scope, structuralContainer, nonStructuralContainer) => {
+  const observations = [];
+  const locationLabel = buildLocationLabel(scopeType, scope);
+
+  const appendEntries = (entries, category) => {
+    entries.forEach(({ componentLabel, entry }) => {
+      const remarks = safeText(entry?.inspector_notes || entry?.condition_comment || entry?.remarks);
+      const distressTypes = Array.isArray(entry?.distress_types) ? entry.distress_types.join(', ') : '';
+      const note = remarks || distressTypes;
+      const photos = Array.isArray(entry?.photos) ? entry.photos.filter(Boolean) : [];
+
+      if (!note && photos.length === 0) {
+        return;
+      }
+
+      observations.push({
+        location: locationLabel,
+        category,
+        component: componentLabel,
+        remarks: note || `${componentLabel} observation recorded`,
+        photos,
+        repair_methodology: safeText(entry?.repair_methodology),
+        distress: distressTypes || componentLabel
+      });
+    });
+  };
+
+  appendEntries(getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS), 'STRUCTURAL DISTRESS');
+  appendEntries(getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS), 'NON-STRUCTURAL DISTRESS');
+
+  return observations;
+};
+
+const collectStructureObservations = (structure) => {
+  const observations = [];
+  const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
+
+  floors.forEach((floor) => {
+    observations.push(
+      ...collectObservationsFromScope('floor', floor, floor.structural_rating, floor.non_structural_rating)
+    );
+
+    const flats = Array.isArray(floor.flats) ? floor.flats : [];
+    flats.forEach((flat) => {
+      observations.push(
+        ...collectObservationsFromScope(
+          'flat',
+          { ...flat, floor_number: floor.floor_number, floorLabel: floor.floor_label_name },
+          flat.structural_rating,
+          flat.non_structural_rating
+        )
+      );
+    });
+
+    const blocks = Array.isArray(floor.blocks) ? floor.blocks : [];
+    blocks.forEach((block) => {
+      observations.push(
+        ...collectObservationsFromScope(
+          'block',
+          { ...block, floor_number: floor.floor_number, floorLabel: floor.floor_label_name },
+          block.structural_rating,
+          block.non_structural_rating
+        )
+      );
+    });
+  });
+
+  return observations;
+};
+
+const collectQuantifications = (structure) => {
+  const rows = [];
+  const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
+
+  const addRows = (entries, scopeLabel, category) => {
+    (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      rows.push({
+        scopeLabel,
+        category,
+        location_of_distress: safeText(entry.location_of_distress, scopeLabel),
+        distress: safeText(entry.category, category),
+        nos: toNumber(entry.nos) ?? 1,
+        length: toNumber(entry.length),
+        breadth: toNumber(entry.breadth),
+        height: toNumber(entry.height),
+        quantity: inferQuantityValue(entry),
+        unit: inferUnit(entry),
+        repair_methodology: safeText(entry.repair_methodology, 'Not Specified')
+      });
+    });
+  };
+
+  floors.forEach((floor) => {
+    const floorLabel = safeText(floor.floor_label_name, `Floor ${floor.floor_number}`);
+    addRows(floor.quantifications?.structural, floorLabel, 'STRUCTURAL DISTRESS');
+    addRows(floor.quantifications?.non_structural, floorLabel, 'NON-STRUCTURAL DISTRESS');
+
+    (Array.isArray(floor.flats) ? floor.flats : []).forEach((flat) => {
+      const flatLabel = `${floorLabel} / Flat ${safeText(flat.flat_number, flat.flat_id || 'N/A')}`;
+      addRows(flat.quantifications?.structural, flatLabel, 'STRUCTURAL DISTRESS');
+      addRows(flat.quantifications?.non_structural, flatLabel, 'NON-STRUCTURAL DISTRESS');
+    });
+  });
+
+  return rows;
+};
+
+const collectTests = (structure) => {
+  const tests = [];
+
+  const addTests = (entries, scopeLabel) => {
+    (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      tests.push({
+        scopeLabel,
+        test_name: safeText(TEST_NAME_LABELS[entry.test_name], safeText(entry.test_name, 'TEST')),
+        tested_by: safeText(entry.tested_by),
+        test_date: formatDate(entry.test_date),
+        remarks: safeText(entry.remarks),
+        component_type: safeText(entry.component_type),
+        component_id: safeText(entry.component_id),
+        result_summary: flattenMixedObject(entry.test_results),
+        attachment: safeText(entry.test_report_pdf?.file_path || entry.test_report_pdf?.filename)
+      });
+    });
+  };
+
+  addTests(structure.structure_test_results, 'Structure');
+
+  const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
+  floors.forEach((floor) => {
+    const floorLabel = safeText(floor.floor_label_name, `Floor ${floor.floor_number}`);
+    addTests(floor.test_results, floorLabel);
+
+    (Array.isArray(floor.flats) ? floor.flats : []).forEach((flat) => {
+      addTests(flat.test_results, `${floorLabel} / Flat ${safeText(flat.flat_number, flat.flat_id || 'N/A')}`);
+    });
+
+    (Array.isArray(floor.blocks) ? floor.blocks : []).forEach((block) => {
+      addTests(
+        block.test_results,
+        `${floorLabel} / Block ${safeText(block.block_name || block.block_number, block.block_id || 'N/A')}`
+      );
+    });
+  });
+
+  return tests;
+};
+
+const collectPhotoRows = (observations, tests) => {
+  const inspectionImages = observations.flatMap((observation) =>
+    observation.photos.map((photo, index) => ({
+      location: observation.location,
+      caption: observation.remarks || observation.component,
+      source: photo,
+      serial: index + 1
+    }))
+  );
+
+  const testingImages = tests
+    .filter((test) => test.attachment)
+    .map((test, index) => ({
+      serial: index + 1,
+      test_name: test.test_name,
+      scopeLabel: test.scopeLabel,
+      source: test.attachment
+    }));
+
+  return { inspectionImages, testingImages };
+};
+
+const setCellBorder = (cell) => {
+  cell.border = {
+    top: { style: 'thin', color: { argb: COLORS.BORDER } },
+    left: { style: 'thin', color: { argb: COLORS.BORDER } },
+    bottom: { style: 'thin', color: { argb: COLORS.BORDER } },
+    right: { style: 'thin', color: { argb: COLORS.BORDER } }
+  };
+};
+
+const styleRowCells = (worksheet, rowNumber, fromCol, toCol, options = {}) => {
+  for (let col = fromCol; col <= toCol; col += 1) {
+    const cell = worksheet.getCell(rowNumber, col);
+    cell.font = options.font || FONTS.BODY;
+    cell.alignment = options.alignment || { vertical: 'middle', wrapText: true };
+    if (options.fill) cell.fill = options.fill;
+    setCellBorder(cell);
   }
 };
 
-// =================== ENHANCED REPORT ENDPOINTS ===================
+const addMergedSectionRow = (worksheet, rowNumber, text, fillColor, columnCount) => {
+  worksheet.mergeCells(rowNumber, 1, rowNumber, columnCount);
+  const cell = worksheet.getCell(rowNumber, 1);
+  cell.value = text;
+  cell.font = FONTS.HEADER;
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+  cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+  setCellBorder(cell);
+  worksheet.getRow(rowNumber).height = 20;
+};
 
-/**
- * @route GET /api/reports/structures/download
- * @desc Download enhanced structure details report in Excel format
- * @access Private (Authenticated users with export permissions)
- */
-router.get('/structures/download', 
-  authenticateToken,
-  checkExportPermissions,
-  async (req, res) => {
+const addTableHeader = (worksheet, rowNumber, headers, fillColor = COLORS.SECONDARY) => {
+  headers.forEach((header, index) => {
+    const cell = worksheet.getCell(rowNumber, index + 1);
+    cell.value = header;
+    cell.font = { ...FONTS.HEADER, color: { argb: COLORS.WHITE } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    setCellBorder(cell);
+  });
+  worksheet.getRow(rowNumber).height = 22;
+};
+
+const ensureColumns = (worksheet) => {
+  worksheet.columns = [
+    { width: 8 },
+    { width: 34 },
+    { width: 20 },
+    { width: 10 },
+    { width: 10 },
+    { width: 10 },
+    { width: 10 },
+    { width: 16 },
+    { width: 30 }
+  ];
+};
+
+const addObservationSection = (worksheet, startRow, observations) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'OBSERVATIONS', COLORS.SECTION, 3);
+  row += 1;
+  addTableHeader(worksheet, row, ['S. No', 'Location / Remarks', 'Category'], COLORS.PRIMARY);
+  row += 1;
+
+  if (observations.length === 0) {
+    worksheet.addRow(['', 'No observations recorded', '']);
+    styleRowCells(worksheet, row, 1, 3);
+    return row + 1;
+  }
+
+  const grouped = observations.reduce((acc, item) => {
+    if (!acc.has(item.location)) acc.set(item.location, []);
+    acc.get(item.location).push(item);
+    return acc;
+  }, new Map());
+
+  grouped.forEach((locationObservations, location) => {
+    addMergedSectionRow(worksheet, row, safeText(location).toUpperCase(), COLORS.SUBSECTION, 3);
+    row += 1;
+
+    ['STRUCTURAL DISTRESS', 'NON-STRUCTURAL DISTRESS'].forEach((category) => {
+      const categoryRows = locationObservations.filter((item) => item.category === category);
+      if (categoryRows.length === 0) return;
+
+      addMergedSectionRow(worksheet, row, category, COLORS.SUBSECTION, 3);
+      row += 1;
+
+      categoryRows.forEach((item, index) => {
+        worksheet.getCell(row, 1).value = index + 1;
+        worksheet.getCell(row, 2).value = `${item.component}: ${item.remarks}`;
+        worksheet.getCell(row, 3).value = category;
+        styleRowCells(worksheet, row, 1, 3);
+        row += 1;
+      });
+    });
+  });
+
+  return row;
+};
+
+const addImageSection = (worksheet, startRow, title, rows, isTesting = false) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, title, COLORS.SECTION, 4);
+  row += 1;
+
+  const headers = isTesting
+    ? ['S. No', 'Test Name', 'Location', 'File Reference']
+    : ['S. No', 'Caption', 'Location', 'Image Reference'];
+  addTableHeader(worksheet, row, headers, COLORS.PRIMARY);
+  row += 1;
+
+  if (rows.length === 0) {
+    worksheet.addRow(['', 'No files attached', '', '']);
+    styleRowCells(worksheet, row, 1, 4);
+    return row + 1;
+  }
+
+  rows.forEach((entry, index) => {
+    worksheet.getCell(row, 1).value = index + 1;
+    if (isTesting) {
+      worksheet.getCell(row, 2).value = entry.test_name;
+      worksheet.getCell(row, 3).value = entry.scopeLabel;
+      worksheet.getCell(row, 4).value = entry.source;
+    } else {
+      worksheet.getCell(row, 2).value = entry.caption;
+      worksheet.getCell(row, 3).value = entry.location;
+      worksheet.getCell(row, 4).value = entry.source;
+    }
+    styleRowCells(worksheet, row, 1, 4);
+    row += 1;
+  });
+
+  return row;
+};
+
+const addTestSection = (worksheet, startRow, tests) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'TEST RESULTS', COLORS.SECTION, 6);
+  row += 1;
+
+  if (tests.length === 0) {
+    addTableHeader(worksheet, row, ['S. No', 'Test Name', 'Location', 'Tested By', 'Date', 'Remarks / Result'], COLORS.PRIMARY);
+    row += 1;
+    worksheet.addRow(['', 'No test results recorded', '', '', '', '']);
+    styleRowCells(worksheet, row, 1, 6);
+    return row + 1;
+  }
+
+  const grouped = tests.reduce((acc, item) => {
+    if (!acc.has(item.test_name)) acc.set(item.test_name, []);
+    acc.get(item.test_name).push(item);
+    return acc;
+  }, new Map());
+
+  let testIndex = 1;
+  grouped.forEach((testRows, testName) => {
+    addMergedSectionRow(worksheet, row, `${testIndex}. ${testName}`, COLORS.SUBSECTION, 6);
+    row += 1;
+    addTableHeader(worksheet, row, ['S. No', 'Location', 'Component', 'Tested By', 'Date', 'Remarks / Result'], COLORS.PRIMARY);
+    row += 1;
+
+    testRows.forEach((item, index) => {
+      worksheet.getCell(row, 1).value = index + 1;
+      worksheet.getCell(row, 2).value = item.scopeLabel;
+      worksheet.getCell(row, 3).value = [item.component_type, item.component_id].filter(Boolean).join(' / ');
+      worksheet.getCell(row, 4).value = item.tested_by || 'N/A';
+      worksheet.getCell(row, 5).value = item.test_date || '';
+      worksheet.getCell(row, 6).value = [item.result_summary, item.remarks].filter(Boolean).join(' | ') || 'N/A';
+      styleRowCells(worksheet, row, 1, 6);
+      row += 1;
+    });
+
+    testIndex += 1;
+  });
+
+  return row;
+};
+
+const addQuantificationSection = (worksheet, startRow, quantifications) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'QUANTIFICATION', COLORS.SECTION, 9);
+  row += 1;
+  addTableHeader(
+    worksheet,
+    row,
+    ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Quantity', 'Repair Methodology'],
+    COLORS.PRIMARY
+  );
+  row += 1;
+
+  if (quantifications.length === 0) {
+    worksheet.addRow(['', 'No quantification entries recorded', '', '', '', '', '', '', '']);
+    styleRowCells(worksheet, row, 1, 9);
+    return row + 1;
+  }
+
+  const grouped = quantifications.reduce((acc, item) => {
+    if (!acc.has(item.category)) acc.set(item.category, []);
+    acc.get(item.category).push(item);
+    return acc;
+  }, new Map());
+
+  grouped.forEach((entries, category) => {
+    addMergedSectionRow(worksheet, row, category, COLORS.SUBSECTION, 9);
+    row += 1;
+
+    entries.forEach((entry, index) => {
+      worksheet.getCell(row, 1).value = index + 1;
+      worksheet.getCell(row, 2).value = entry.location_of_distress;
+      worksheet.getCell(row, 3).value = entry.distress;
+      worksheet.getCell(row, 4).value = entry.nos;
+      worksheet.getCell(row, 5).value = entry.length ?? '';
+      worksheet.getCell(row, 6).value = entry.breadth ?? '';
+      worksheet.getCell(row, 7).value = entry.height ?? '';
+      worksheet.getCell(row, 8).value = `${entry.quantity} ${entry.unit}`.trim();
+      worksheet.getCell(row, 9).value = entry.repair_methodology;
+      styleRowCells(worksheet, row, 1, 9);
+      row += 1;
+    });
+  });
+
+  return row;
+};
+
+const addMethodologySummary = (worksheet, startRow, quantifications) => {
+  let row = startRow;
+  const summaryRows = summarizeMethodology(quantifications);
+
+  addMergedSectionRow(
+    worksheet,
+    row,
+    'Quantities in the above table are summarized by repair methodology.',
+    COLORS.NOTE,
+    4
+  );
+  row += 1;
+  addTableHeader(worksheet, row, ['S. No', 'Description', 'Quantity', 'Units'], COLORS.PRIMARY);
+  row += 1;
+
+  if (summaryRows.length === 0) {
+    worksheet.addRow(['', 'No methodology summary available', '', '']);
+    styleRowCells(worksheet, row, 1, 4);
+    return row + 1;
+  }
+
+  summaryRows.forEach((entry, index) => {
+    worksheet.getCell(row, 1).value = index + 1;
+    worksheet.getCell(row, 2).value = entry.description;
+    worksheet.getCell(row, 3).value = entry.quantity;
+    worksheet.getCell(row, 4).value = entry.units;
+    styleRowCells(worksheet, row, 1, 4);
+    row += 1;
+  });
+
+  addMergedSectionRow(
+    worksheet,
+    row,
+    'Note: Observation-to-quantification linkage depends on saved quantification rows. TODO: add explicit observation linkage in the data model if the client needs one-to-one traceability.',
+    COLORS.NOTE,
+    4
+  );
+
+  return row + 1;
+};
+
+const addStructureHeader = (worksheet, structureExport, filtersApplied) => {
+  const { structure, owner } = structureExport;
+
+  worksheet.mergeCells('A1:F1');
+  worksheet.getCell('A1').value = 'SAMS';
+  worksheet.getCell('A1').font = FONTS.TITLE;
+  worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' };
+
+  worksheet.mergeCells('A2:F2');
+  worksheet.getCell('A2').value = 'OUTPUT / REPORT FORMAT';
+  worksheet.getCell('A2').font = FONTS.HEADER;
+  worksheet.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SECTION } };
+  worksheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left' };
+
+  const summaryRows = [
+    ['Structure ID', safeText(structure.structural_identity?.structural_identity_number, 'N/A')],
+    ['UID', safeText(structure.structural_identity?.uid, 'N/A')],
+    ['Structure Type', safeText(structure.structural_identity?.type_of_structure, 'N/A')],
+    ['Structure Subtype', safeText(structure.structural_identity?.structure_subtype, 'N/A')],
+    ['Owner / Employee', `${buildOwnerLabel(owner)}${owner?.profile?.employee_id ? ` (${owner.profile.employee_id})` : ''}`],
+    ['Organization', safeText(owner?.profile?.organization || structure.administration?.organization, 'N/A')],
+    ['Location', [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code].filter(Boolean).join(' / ') || 'N/A'],
+    ['Created Date', formatDate(structure.creation_info?.created_date) || 'N/A'],
+    ['Last Updated', formatDate(structure.creation_info?.last_updated_date) || 'N/A'],
+    ['Applied Filters', filtersApplied || 'None']
+  ];
+
+  let row = 4;
+  summaryRows.forEach(([label, value]) => {
+    worksheet.getCell(row, 1).value = label;
+    worksheet.getCell(row, 2).value = value;
+    styleRowCells(worksheet, row, 1, 2, {
+      fill: row % 2 === 0
+        ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F7' } }
+        : undefined
+    });
+    worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
+    row += 1;
+  });
+
+  return row + 1;
+};
+
+const buildFilterSummary = (query = {}) => {
+  const keys = [
+    'user_id',
+    'employee_id',
+    'organization',
+    'structure_id',
+    'structure_ids',
+    'state_code',
+    'district_code',
+    'city_name',
+    'location_code',
+    'type_of_structure',
+    'structure_subtype',
+    'status',
+    'date_from',
+    'date_to'
+  ];
+
+  const parts = keys
+    .filter((key) => query[key] !== undefined && query[key] !== null && query[key] !== '')
+    .map((key) => `${key}=${query[key]}`);
+
+  return parts.join(', ');
+};
+
+const writeStructureWorksheet = (worksheet, structureExport, filtersApplied) => {
+  ensureColumns(worksheet);
+
+  const observations = collectStructureObservations(structureExport.structure);
+  const quantifications = collectQuantifications(structureExport.structure);
+  const tests = collectTests(structureExport.structure);
+  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
+
+  let row = addStructureHeader(worksheet, structureExport, filtersApplied);
+  row = addObservationSection(worksheet, row, observations);
+  row += 1;
+  row = addImageSection(worksheet, row, 'INSPECTION IMAGES', inspectionImages, false);
+  row += 1;
+  row = addTestSection(worksheet, row, tests);
+  row += 1;
+  row = addImageSection(worksheet, row, 'TESTING IMAGES', testingImages, true);
+  row += 1;
+  row = addQuantificationSection(worksheet, row, quantifications);
+  row += 1;
+  addMethodologySummary(worksheet, row, quantifications);
+
+  worksheet.views = [{ state: 'frozen', ySplit: 3 }];
+};
+
+const createWorkbook = (reqUser) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = safeText(reqUser?.username || reqUser?.email, 'SAMS');
+  workbook.lastModifiedBy = safeText(reqUser?.username || reqUser?.email, 'SAMS');
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  return workbook;
+};
+
+const sendWorkbook = async (res, workbook, fileName) => {
+  res.setHeader('Content-Type', EXCEL_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  await workbook.xlsx.write(res);
+  res.end();
+};
+
+router.get('/structures/download', authenticateToken, checkExportPermissions, async (req, res) => {
   try {
-    console.log('📊 Enhanced structure report export requested by:', req.user.email);
-
-    // =================== QUERY PARAMETERS EXTRACTION ===================
-    const {
-      user_id,
-      structure_ids,
-      state_code,
-      district_code,
-      city_name,
-      type_of_structure,
-      status,
-      health_status,
-      priority,
-      date_from,
-      date_to,
-      include_photos = false,
-      format = 'detailed'
-    } = req.query;
-
-    // =================== BUILD QUERY FILTERS ===================
-    let userQuery = { is_active: true };
-    let structureFilters = {};
-
-    if (user_id) userQuery._id = user_id;
-    if (req.user.role !== 'admin') userQuery._id = req.user.userId;
-
-    if (structure_ids) {
-      const ids = structure_ids.split(',').map(id => id.trim());
-      structureFilters['structures._id'] = { $in: ids };
-    }
-
-    if (state_code) structureFilters['structures.structural_identity.state_code'] = state_code.toUpperCase();
-    if (district_code) structureFilters['structures.structural_identity.district_code'] = district_code;
-    if (city_name) structureFilters['structures.structural_identity.city_name'] = new RegExp(city_name, 'i');
-    if (type_of_structure) structureFilters['structures.structural_identity.type_of_structure'] = type_of_structure;
-    if (status) structureFilters['structures.status'] = status;
-    if (health_status) structureFilters['structures.overall_structural_rating.health_status'] = health_status;
-    if (priority) structureFilters['structures.overall_structural_rating.priority'] = priority;
-
-    if (date_from || date_to) {
-      const dateFilter = {};
-      if (date_from) dateFilter.$gte = new Date(date_from);
-      if (date_to) dateFilter.$lte = new Date(date_to);
-      structureFilters['structures.creation_info.created_date'] = dateFilter;
-    }
-
-    // =================== DATABASE QUERY ===================
-    const aggregationPipeline = [
-      { $match: userQuery },
-      { $unwind: '$structures' },
-      { $match: structureFilters },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'user_info'
-        }
-      },
-      {
-        $project: {
-          user_info: { $arrayElemAt: ['$user_info', 0] },
-          structure: '$structures'
-        }
-      }
-    ];
-
-    const results = await User.aggregate(aggregationPipeline);
-
-    if (!results || results.length === 0) {
+    const structures = await fetchStructuresForExport(req.user, req.query);
+    if (!structures.length) {
       return res.status(404).json({
         success: false,
         message: 'No structures found matching the criteria'
       });
     }
 
-    console.log('📊 Found', results.length, 'structures for export');
-
-    // =================== EXCEL WORKBOOK CREATION ===================
-    const workbook = new ExcelJS.Workbook();
-    
-    workbook.creator = req.user.username || req.user.email;
-    workbook.lastModifiedBy = req.user.username || req.user.email;
-    workbook.created = new Date();
-    workbook.modified = new Date();
-
-    // =================== ENHANCED SUMMARY SHEET ===================
-    const summarySheet = workbook.addWorksheet('📊 Structure Summary', {
-      properties: { tabColor: { argb: COLORS.PRIMARY } }
-    });
-
-    // Create grouped columns for better organization
-    const columnGroups = [
-      {
-        title: 'STRUCTURE IDENTIFICATION',
-        color: COLORS.PRIMARY,
-        columns: [
-          { header: 'S.No', key: 'serial', width: 8 },
-          { header: 'Structure ID', key: 'structure_id', width: 18 },
-          { header: 'UID', key: 'uid', width: 16 },
-          { header: 'Type', key: 'type', width: 14 }
-        ]
-      },
-      {
-        title: 'LOCATION DETAILS',
-        color: COLORS.SECONDARY,
-        columns: [
-          { header: 'State', key: 'state', width: 12 },
-          { header: 'District', key: 'district', width: 12 },
-          { header: 'City', key: 'city', width: 15 },
-          { header: 'Location Code', key: 'location', width: 12 }
-        ]
-      },
-      {
-        title: 'STRUCTURE METRICS',
-        color: COLORS.SUCCESS,
-        columns: [
-          { header: 'Total Floors', key: 'floors', width: 10 },
-          { header: 'Total Units', key: 'flats', width: 10 },
-          { header: 'Status', key: 'status', width: 12 }
-        ]
-      },
-      {
-        title: 'HEALTH ASSESSMENT',
-        color: COLORS.WARNING,
-        columns: [
-          { header: 'Health Status', key: 'health_status', width: 14 },
-          { header: 'Priority Level', key: 'priority', width: 12 },
-          { header: 'Overall Score', key: 'overall_score', width: 12 }
-        ]
-      },
-      {
-        title: 'RATINGS',
-        color: COLORS.DANGER,
-        columns: [
-          { header: 'Structural Rating', key: 'structural_rating', width: 15 },
-          { header: 'Non-Structural Rating', key: 'non_structural_rating', width: 18 }
-        ]
-      },
-      {
-        title: 'TIMELINE',
-        color: COLORS.DARK_GRAY,
-        columns: [
-          { header: 'Created Date', key: 'created_date', width: 15 },
-          { header: 'Last Updated', key: 'updated_date', width: 15 }
-        ]
-      }
+    const workbook = createWorkbook(req.user);
+    const indexSheet = workbook.addWorksheet('Report Index');
+    indexSheet.columns = [
+      { header: 'S. No', key: 'serial', width: 8 },
+      { header: 'Structure ID', key: 'structureId', width: 24 },
+      { header: 'Owner', key: 'owner', width: 24 },
+      { header: 'Location', key: 'location', width: 24 },
+      { header: 'Status', key: 'status', width: 16 },
+      { header: 'Worksheet', key: 'worksheet', width: 24 }
     ];
+    addTableHeader(indexSheet, 1, ['S. No', 'Structure ID', 'Owner', 'Location', 'Status', 'Worksheet'], COLORS.PRIMARY);
 
-    // Create header rows
-    let currentCol = 1;
-    
-    // Group headers (row 1)
-    columnGroups.forEach(group => {
-      const startCol = currentCol;
-      const endCol = currentCol + group.columns.length - 1;
-      summarySheet.mergeCells(1, startCol, 1, endCol);
-      
-      const groupCell = summarySheet.getCell(1, startCol);
-      groupCell.value = group.title;
-      Object.assign(groupCell, createHeaderStyle(group.color));
-      groupCell.font = { ...FONTS.HEADER, size: 11 };
-      
-      currentCol += group.columns.length;
-    });
+    const filterSummary = buildFilterSummary(req.query);
 
-    // Column headers (row 2)
-    currentCol = 1;
-    columnGroups.forEach(group => {
-      group.columns.forEach(col => {
-        const headerCell = summarySheet.getCell(2, currentCol);
-        headerCell.value = col.header;
-        Object.assign(headerCell, createSubHeaderStyle());
-        summarySheet.getColumn(currentCol).width = col.width;
-        summarySheet.getColumn(currentCol).key = col.key;
-        currentCol++;
-      });
-    });
+    structures.forEach((structureExport, index) => {
+      const structureId = safeText(
+        structureExport.structure.structural_identity?.structural_identity_number,
+        String(structureExport.structure._id)
+      );
+      const sheetName = sanitizeWorksheetName(`${index + 1}_${structureId}`, `Structure_${index + 1}`);
+      const worksheet = workbook.addWorksheet(sheetName);
+      writeStructureWorksheet(worksheet, structureExport, filterSummary);
 
-    // Set row heights
-    summarySheet.getRow(1).height = 25;
-    summarySheet.getRow(2).height = 20;
-
-    // Add data with enhanced styling
-    results.forEach((result, index) => {
-      const structure = result.structure;
-      const totalFlats = structure.geometric_details?.floors?.reduce((total, floor) => 
-        total + (floor.flats?.length || 0), 0) || 0;
-
-      const rowNum = index + 3; // Start from row 3
-      const isAlternate = index % 2 === 1;
-
-      const rowData = {
+      indexSheet.addRow({
         serial: index + 1,
-        structure_id: structure.structural_identity?.structural_identity_number || 'N/A',
-        uid: structure.structural_identity?.uid || 'N/A',
-        type: structure.structural_identity?.type_of_structure || 'N/A',
-        state: structure.structural_identity?.state_code || 'N/A',
-        district: structure.structural_identity?.district_code || 'N/A',
-        city: structure.structural_identity?.city_name || 'N/A',
-        location: structure.structural_identity?.location_code || 'N/A',
-        floors: structure.geometric_details?.number_of_floors || 0,
-        flats: totalFlats,
-        status: structure.status || 'N/A',
-        health_status: structure.overall_structural_rating?.health_status || 'N/A',
-        priority: structure.overall_structural_rating?.priority || 'N/A',
-        overall_score: structure.final_health_assessment?.overall_score || 'N/A',
-        structural_rating: structure.overall_structural_rating?.overall_average || 'N/A',
-        non_structural_rating: structure.overall_non_structural_rating?.overall_average || 'N/A',
-        created_date: structure.creation_info?.created_date ? 
-          new Date(structure.creation_info.created_date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: '2-digit'
-          }) : 'N/A',
-        updated_date: structure.creation_info?.last_updated_date ? 
-          new Date(structure.creation_info.last_updated_date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: '2-digit'
-          }) : 'N/A'
-      };
-
-      summarySheet.addRow(rowData);
-      
-      // Apply row styling
-      const row = summarySheet.getRow(rowNum);
-      row.height = 18;
-      
-      row.eachCell((cell, colNumber) => {
-        Object.assign(cell, createDataCellStyle(isAlternate));
-        
-        // Special styling for status columns
-        if (cell.value === rowData.status) {
-          cell.font = { ...FONTS.BODY, bold: true, color: { argb: getStatusColor(rowData.status) } };
-        }
-        if (cell.value === rowData.priority) {
-          cell.font = { ...FONTS.BODY, bold: true, color: { argb: getPriorityColor(rowData.priority) } };
-        }
-        if (cell.value === rowData.health_status) {
-          cell.font = { ...FONTS.BODY, bold: true, color: { argb: getStatusColor(rowData.health_status) } };
-        }
-        
-        // Numeric cell alignment
-        if (typeof cell.value === 'number') {
-          cell.alignment = { ...cell.alignment, horizontal: 'center' };
-        }
+        structureId,
+        owner: buildOwnerLabel(structureExport.owner),
+        location: [
+          structureExport.structure.location?.state_code,
+          structureExport.structure.location?.district_code,
+          structureExport.structure.location?.city_name
+        ].filter(Boolean).join(' / '),
+        status: safeText(structureExport.structure.status, 'N/A'),
+        worksheet: sheetName
       });
     });
 
-    // Add summary statistics at the bottom
-    const statsRow = results.length + 4;
-    summarySheet.mergeCells(statsRow, 1, statsRow, 4);
-    const statsCell = summarySheet.getCell(statsRow, 1);
-    statsCell.value = `📈 SUMMARY: Total Structures: ${results.length} | Generated: ${new Date().toLocaleString()}`;
-    Object.assign(statsCell, {
-      font: { ...FONTS.BODY, bold: true, color: { argb: COLORS.DARK_GRAY } },
-      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F8FF' } },
-      alignment: { vertical: 'middle', horizontal: 'left' }
-    });
-
-    // =================== DETAILED STRUCTURE SHEET ===================
-    if (format === 'detailed') {
-      const detailSheet = workbook.addWorksheet('🏗️ Detailed Analysis', {
-        properties: { tabColor: { argb: COLORS.SECONDARY } }
-      });
-
-      // Detailed column structure
-      detailSheet.columns = [
-        // Structure Info
-        { header: 'Structure ID', key: 'structure_id', width: 18 },
-        { header: 'Floor No.', key: 'floor_no', width: 10 },
-        { header: 'Unit No.', key: 'flat_no', width: 12 },
-        { header: 'Unit Type', key: 'flat_type', width: 12 },
-        { header: 'Area (m²)', key: 'flat_area', width: 12 },
-        { header: 'Occupancy', key: 'occupancy', width: 12 },
-        
-        // Structural Components
-        { header: 'Beams', key: 'beams', width: 10 },
-        { header: 'Columns', key: 'columns', width: 10 },
-        { header: 'Slab', key: 'slab', width: 10 },
-        { header: 'Foundation', key: 'foundation', width: 12 },
-        
-        // Non-Structural Components
-        { header: 'Electrical', key: 'wiring', width: 10 },
-        { header: 'Flooring', key: 'tiles', width: 10 },
-        { header: 'Sanitary', key: 'sanitary', width: 10 },
-        { header: 'Doors/Windows', key: 'doors', width: 12 },
-        { header: 'Sewage', key: 'sewage', width: 10 },
-        { header: 'Panel Board', key: 'panel', width: 12 },
-        { header: 'Water Tank', key: 'tank', width: 12 },
-        { header: 'Elevators', key: 'lift', width: 10 },
-        
-        // Overall Assessment
-        { header: 'Health Status', key: 'health', width: 14 },
-        { header: 'Priority', key: 'priority', width: 12 },
-        { header: 'Score', key: 'score', width: 10 }
-      ];
-
-      // Style detailed sheet headers
-      detailSheet.getRow(1).font = { ...FONTS.HEADER, color: { argb: COLORS.WHITE } };
-      detailSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SECONDARY } };
-      detailSheet.getRow(1).height = 22;
-
-      // Add detailed data
-      let detailRowIndex = 2;
-      results.forEach((result) => {
-        const structure = result.structure;
-        const floors = structure.geometric_details?.floors || [];
-
-        floors.forEach(floor => {
-          const flats = floor.flats || [];
-          flats.forEach(flat => {
-            const rowData = {
-              structure_id: structure.structural_identity?.structural_identity_number,
-              floor_no: floor.floor_number,
-              flat_no: flat.flat_number,
-              flat_type: flat.flat_type,
-              flat_area: flat.area_sq_mts,
-              occupancy: flat.occupancy_status,
-              beams: flat.structural_rating?.beams?.rating,
-              columns: flat.structural_rating?.columns?.rating,
-              slab: flat.structural_rating?.slab?.rating,
-              foundation: flat.structural_rating?.foundation?.rating,
-              wiring: flat.non_structural_rating?.electrical_wiring?.rating,
-              tiles: flat.non_structural_rating?.flooring_tiles?.rating,
-              sanitary: flat.non_structural_rating?.sanitary_fittings?.rating,
-              doors: flat.non_structural_rating?.doors_windows?.rating,
-              sewage: flat.non_structural_rating?.sewage_system?.rating,
-              panel: flat.non_structural_rating?.panel_board?.rating,
-              tank: flat.non_structural_rating?.water_tanks?.rating,
-              lift: flat.non_structural_rating?.lifts?.rating,
-              health: flat.flat_overall_rating?.health_status,
-              priority: flat.flat_overall_rating?.priority,
-              score: flat.flat_overall_rating?.combined_score
-            };
-
-            detailSheet.addRow(rowData);
-            
-            // Apply styling
-            const row = detailSheet.getRow(detailRowIndex);
-            const isAlternate = detailRowIndex % 2 === 0;
-            
-            row.eachCell((cell) => {
-              Object.assign(cell, createDataCellStyle(isAlternate));
-              
-              // Rating-based coloring
-              if (typeof cell.value === 'number' && cell.value >= 1 && cell.value <= 5) {
-                if (cell.value <= 2) cell.font = { ...FONTS.BODY, color: { argb: COLORS.DANGER } };
-                else if (cell.value <= 3) cell.font = { ...FONTS.BODY, color: { argb: COLORS.WARNING } };
-                else cell.font = { ...FONTS.BODY, color: { argb: COLORS.SUCCESS } };
-              }
-            });
-            
-            detailRowIndex++;
-          });
-        });
-      });
-    }
-
-    // =================== FINALIZE AND SEND ===================
-    const fileName = `SAMS_Enhanced_Report_${new Date().toISOString().split('T')[0]}_${Date.now()}.xlsx`;
-    
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    
-    await workbook.xlsx.write(res);
-    
-    console.log(`📊 Enhanced structure report exported by user ${req.user.email} - ${results.length} structures`);
-    res.end();
-
+    const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
+    return sendWorkbook(res, workbook, fileName);
   } catch (error) {
-    console.error('💥 Enhanced structure report export error:', error);
-    res.status(500).json({
+    console.error('Report export error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'Failed to generate enhanced structure report',
+      message: 'Failed to generate report export',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
-// =================== COMPLETE DOWNLOAD WITH ENHANCED STYLING ===================
-router.get('/structures/complete-download',
-  authenticateToken,
-  checkExportPermissions,
-  async (req, res) => {
-    try {
-      const results = await User.aggregate([
-        { $match: { _id: req.user.userId, is_active: true } },
-        { $unwind: '$structures' },
-        {
-          $project: {
-            structure: '$structures',
-            user_email: '$email',
-            username: '$username'
-          }
-        }
-      ]);
-
-      if (!results || results.length === 0) {
-        return res.status(404).json({ success: false, message: 'No structures found' });
-      }
-
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet('🏢 Complete Structure Report', {
-        properties: { tabColor: { argb: COLORS.PRIMARY } }
+router.get('/structures/complete-download', authenticateToken, checkExportPermissions, async (req, res) => {
+  try {
+    const structures = await fetchStructuresForExport(req.user, {});
+    if (!structures.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'No structures found'
       });
+    }
 
-      // Enhanced column structure with better organization
-      const columnConfig = [
-        // Structure Identity Group
-        { header: 'Structure ID', key: 'structure_id', width: 20, group: 'identity' },
-        { header: 'UID', key: 'uid', width: 16, group: 'identity' },
-        { header: 'Type', key: 'type', width: 14, group: 'identity' },
-        { header: 'Status', key: 'status', width: 12, group: 'identity' },
-        
-        // Location Group
-        { header: 'State', key: 'state_code', width: 10, group: 'location' },
-        { header: 'District', key: 'district_code', width: 12, group: 'location' },
-        { header: 'City', key: 'city_name', width: 15, group: 'location' },
-        { header: 'Location', key: 'location_code', width: 12, group: 'location' },
-        
-        // Administration Group
-        { header: 'Client', key: 'client_name', width: 20, group: 'admin' },
-        { header: 'Custodian', key: 'custodian', width: 18, group: 'admin' },
-        { header: 'Engineer', key: 'engineer', width: 18, group: 'admin' },
-        { header: 'Email', key: 'email', width: 25, group: 'admin' },
-        
-        // Geometry Group
-        { header: 'Floors', key: 'total_floors', width: 8, group: 'geometry' },
-        { header: 'Width (m)', key: 'width', width: 10, group: 'geometry' },
-        { header: 'Length (m)', key: 'length', width: 10, group: 'geometry' },
-        { header: 'Height (m)', key: 'height', width: 10, group: 'geometry' },
-        
-        // Unit Details Group
-        { header: 'Floor#', key: 'floor_number', width: 8, group: 'unit' },
-        { header: 'Floor Name', key: 'floor_label_name', width: 12, group: 'unit' },
-        { header: 'Floor Height', key: 'floor_height', width: 10, group: 'unit' },
-        { header: 'Floor Area', key: 'floor_area', width: 10, group: 'unit' },
-        { header: 'Unit#', key: 'flat_number', width: 10, group: 'unit' },
-        { header: 'Unit Type', key: 'flat_type', width: 12, group: 'unit' },
-        { header: 'Unit Area', key: 'flat_area', width: 10, group: 'unit' },
-        { header: 'Facing', key: 'facing', width: 10, group: 'unit' },
-        { header: 'Occupancy', key: 'occupancy', width: 12, group: 'unit' },
-        
-        // Structural Assessment Group
-        { header: 'Beams', key: 'beams', width: 8, group: 'structural' },
-        { header: 'Columns', key: 'columns', width: 8, group: 'structural' },
-        { header: 'Slab', key: 'slab', width: 8, group: 'structural' },
-        { header: 'Foundation', key: 'foundation', width: 10, group: 'structural' },
-        
-        // Non-Structural Assessment Group
-        { header: 'Electrical', key: 'wiring', width: 10, group: 'non_structural' },
-        { header: 'Flooring', key: 'tiles', width: 10, group: 'non_structural' },
-        { header: 'Sanitary', key: 'sanitary', width: 10, group: 'non_structural' },
-        { header: 'Doors/Win', key: 'doors', width: 10, group: 'non_structural' },
-        { header: 'Sewage', key: 'sewage', width: 8, group: 'non_structural' },
-        { header: 'Panel', key: 'panel', width: 10, group: 'non_structural' },
-        { header: 'Water Tank', key: 'tank', width: 10, group: 'non_structural' },
-        { header: 'Elevator', key: 'lift', width: 10, group: 'non_structural' },
-        
-        // Overall Assessment Group
-        { header: 'Health Status', key: 'health_status', width: 14, group: 'assessment' },
-        { header: 'Priority', key: 'priority', width: 10, group: 'assessment' },
-        { header: 'Combined Score', key: 'combined_score', width: 12, group: 'assessment' }
-      ];
+    const workbook = createWorkbook(req.user);
+    structures.forEach((structureExport, index) => {
+      const structureId = safeText(
+        structureExport.structure.structural_identity?.structural_identity_number,
+        String(structureExport.structure._id)
+      );
+      const worksheet = workbook.addWorksheet(
+        sanitizeWorksheetName(`${index + 1}_${structureId}`, `Structure_${index + 1}`)
+      );
+      writeStructureWorksheet(worksheet, structureExport, 'Complete export');
+    });
 
-      sheet.columns = columnConfig;
+    const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
+    return sendWorkbook(res, workbook, fileName);
+  } catch (error) {
+    console.error('Complete report export error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate complete report export',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
 
-      // Apply enhanced header styling
-      const headerRow = sheet.getRow(1);
-      headerRow.height = 25;
-      
-      columnConfig.forEach((col, index) => {
-        const cell = headerRow.getCell(index + 1);
-        let groupColor;
-        
-        switch (col.group) {
-          case 'identity': groupColor = COLORS.PRIMARY; break;
-          case 'location': groupColor = COLORS.SECONDARY; break;
-          case 'admin': groupColor = COLORS.SUCCESS; break;
-          case 'geometry': groupColor = COLORS.WARNING; break;
-          case 'unit': groupColor = '#FF8B5A'; break;
-          case 'structural': groupColor = COLORS.DANGER; break;
-          case 'non_structural': groupColor = '#FF6B9D'; break;
-          case 'assessment': groupColor = COLORS.DARK_GRAY; break;
-          default: groupColor = COLORS.PRIMARY;
-        }
-        
-        Object.assign(cell, createHeaderStyle(groupColor));
+router.get('/structures/:id/download', authenticateToken, checkExportPermissions, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const structureMatch = mongoose.Types.ObjectId.isValid(id)
+      ? { 'structures._id': new mongoose.Types.ObjectId(id) }
+      : { 'structures.structural_identity.structural_identity_number': id };
+
+    const structures = await fetchStructuresForExport(req.user, req.query, structureMatch);
+    if (!structures.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Structure not found'
       });
+    }
 
-      // Add data with enhanced formatting
-      let rowIndex = 2;
-      results.forEach(({ structure }) => {
-        const floors = structure?.geometric_details?.floors || [];
+    const workbook = createWorkbook(req.user);
+    const structureExport = structures[0];
+    const structureId = safeText(
+      structureExport.structure.structural_identity?.structural_identity_number,
+      String(structureExport.structure._id)
+    );
+    const worksheet = workbook.addWorksheet(sanitizeWorksheetName(structureId, 'Structure Report'));
+    writeStructureWorksheet(worksheet, structureExport, buildFilterSummary(req.query));
 
-        if (floors.length === 0) {
-          sheet.addRow({
-            structure_id: structure.structural_identity?.structural_identity_number,
-            uid: structure.structural_identity?.uid,
-            type: structure.structural_identity?.type_of_structure,
-            status: structure.status
-          });
-          return;
-        }
+    const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.xlsx`;
+    return sendWorkbook(res, workbook, fileName);
+  } catch (error) {
+    console.error('Single structure report export error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate structure report export',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
 
-        floors.forEach(floor => {
-          const flats = floor.flats || [];
+router.get('/structures/metadata', authenticateToken, checkExportPermissions, async (req, res) => {
+  try {
+    const userMatch = getUserMatch(req.user, req.query);
 
-          flats.forEach(flat => {
-            const rowData = {
-              structure_id: structure.structural_identity?.structural_identity_number,
-              uid: structure.structural_identity?.uid,
-              type: structure.structural_identity?.type_of_structure,
-              status: structure.status,
-              state_code: structure.structural_identity?.state_code,
-              district_code: structure.structural_identity?.district_code,
-              city_name: structure.structural_identity?.city_name,
-              location_code: structure.structural_identity?.location_code,
-              client_name: structure.administration?.client_name,
-              custodian: structure.administration?.custodian,
-              engineer: structure.administration?.engineer_designation,
-              email: structure.administration?.email_id,
-              total_floors: structure.geometric_details?.number_of_floors,
-              width: structure.geometric_details?.structure_width,
-              length: structure.geometric_details?.structure_length,
-              height: structure.geometric_details?.structure_height,
-              floor_number: floor.floor_number,
-              floor_label_name: floor.floor_label_name,
-              floor_height: floor.floor_height,
-              floor_area: floor.total_area_sq_mts,
-              flat_number: flat.flat_number,
-              flat_type: flat.flat_type,
-              flat_area: flat.area_sq_mts,
-              facing: flat.direction_facing,
-              occupancy: flat.occupancy_status,
-              beams: flat.structural_rating?.beams?.rating,
-              columns: flat.structural_rating?.columns?.rating,
-              slab: flat.structural_rating?.slab?.rating,
-              foundation: flat.structural_rating?.foundation?.rating,
-              wiring: flat.non_structural_rating?.electrical_wiring?.rating,
-              tiles: flat.non_structural_rating?.flooring_tiles?.rating,
-              sanitary: flat.non_structural_rating?.sanitary_fittings?.rating,
-              doors: flat.non_structural_rating?.doors_windows?.rating,
-              sewage: flat.non_structural_rating?.sewage_system?.rating,
-              panel: flat.non_structural_rating?.panel_board?.rating,
-              tank: flat.non_structural_rating?.water_tanks?.rating,
-              lift: flat.non_structural_rating?.lifts?.rating,
-              health_status: flat.flat_overall_rating?.health_status,
-              priority: flat.flat_overall_rating?.priority,
-              combined_score: flat.flat_overall_rating?.combined_score
-            };
-
-            sheet.addRow(rowData);
-            
-            // Apply enhanced row styling
-            const row = sheet.getRow(rowIndex);
-            row.height = 18;
-            const isAlternate = rowIndex % 2 === 0;
-            
-            row.eachCell((cell, colNumber) => {
-              Object.assign(cell, createDataCellStyle(isAlternate));
-              
-              // Apply conditional formatting based on data type and value
-              const columnKey = columnConfig[colNumber - 1]?.key;
-              
-              // Rating-based color coding for structural and non-structural ratings
-              if (['beams', 'columns', 'slab', 'foundation', 'wiring', 'tiles', 'sanitary', 'doors', 'sewage', 'panel', 'tank', 'lift'].includes(columnKey)) {
-                if (typeof cell.value === 'number') {
-                  if (cell.value <= 2) {
-                    cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.DANGER } };
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6E6' } };
-                  } else if (cell.value <= 3) {
-                    cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.WARNING } };
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF4E6' } };
-                  } else {
-                    cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.SUCCESS } };
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E8' } };
+    const [metadata] = await User.aggregate([
+      { $match: userMatch },
+      {
+        $facet: {
+          structures: [
+            { $unwind: '$structures' },
+            {
+              $group: {
+                _id: null,
+                states: { $addToSet: '$structures.location.state_code' },
+                districts: { $addToSet: '$structures.location.district_code' },
+                cities: { $addToSet: '$structures.location.city_name' },
+                location_codes: { $addToSet: '$structures.location.location_code' },
+                structure_types: { $addToSet: '$structures.structural_identity.type_of_structure' },
+                structure_subtypes: { $addToSet: '$structures.structural_identity.structure_subtype' },
+                statuses: { $addToSet: '$structures.status' },
+                total_structures: { $sum: 1 },
+                min_created_date: { $min: '$structures.creation_info.created_date' },
+                max_created_date: { $max: '$structures.creation_info.created_date' }
+              }
+            }
+          ],
+          users: [
+            {
+              $project: {
+                _id: 1,
+                username: 1,
+                email: 1,
+                employee_id: '$profile.employee_id',
+                organization: '$profile.organization',
+                full_name: {
+                  $trim: {
+                    input: {
+                      $concat: [
+                        { $ifNull: ['$profile.first_name', ''] },
+                        ' ',
+                        { $ifNull: ['$profile.last_name', ''] }
+                      ]
+                    }
                   }
-                  cell.alignment = { ...cell.alignment, horizontal: 'center' };
                 }
               }
-              
-              // Status-based color coding
-              if (columnKey === 'status') {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: getStatusColor(cell.value) } };
-              }
-              
-              if (columnKey === 'priority') {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: getPriorityColor(cell.value) } };
-              }
-              
-              if (columnKey === 'health_status') {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: getStatusColor(cell.value) } };
-              }
-              
-              // Numeric values center alignment
-              if (typeof cell.value === 'number') {
-                cell.alignment = { ...cell.alignment, horizontal: 'center' };
-              }
-              
-              // Long text values
-              if (typeof cell.value === 'string' && cell.value.length > 20) {
-                cell.alignment = { ...cell.alignment, wrapText: true };
-              }
-            });
-            
-            rowIndex++;
-          });
-        });
-      });
-
-      // Add freeze panes for better navigation
-      sheet.views = [{ state: 'frozen', xSplit: 4, ySplit: 1 }];
-
-      // Add auto-filter
-      sheet.autoFilter = {
-        from: 'A1',
-        to: `${String.fromCharCode(65 + columnConfig.length - 1)}1`
-      };
-
-      const fileName = `SAMS_Complete_Enhanced_Report_${new Date().toISOString().split('T')[0]}_${Date.now()}.xlsx`;
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      await workbook.xlsx.write(res);
-      res.end();
-
-    } catch (err) {
-      console.error('❌ Enhanced complete report generation failed:', err);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
-  }
-);
-
-// =================== SINGLE STRUCTURE ENHANCED REPORT ===================
-router.get('/structures/:id/download',
-  authenticateToken,
-  checkExportPermissions,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      const matchStage = mongoose.Types.ObjectId.isValid(id)
-        ? { 'structures._id': new mongoose.Types.ObjectId(id) }
-        : { 'structures.structural_identity.structural_identity_number': id };
-
-      const results = await User.aggregate([
-        { $match: { is_active: true, ...(req.user.role !== 'admin' && { _id: req.user.userId }) } },
-        { $unwind: '$structures' },
-        { $match: matchStage },
-        { $project: { structure: '$structures' } }
-      ]);
-
-      if (!results || results.length === 0) {
-        return res.status(404).json({ success: false, message: 'Structure not found' });
-      }
-
-      const structure = results[0].structure;
-      const workbook = new ExcelJS.Workbook();
-      
-      // =================== STRUCTURE OVERVIEW SHEET ===================
-      const overviewSheet = workbook.addWorksheet('📋 Structure Overview', {
-        properties: { tabColor: { argb: COLORS.PRIMARY } }
-      });
-
-      // Create overview with key-value pairs
-      const overviewData = [
-        ['STRUCTURE IDENTIFICATION', ''],
-        ['Structure ID', structure.structural_identity?.structural_identity_number || 'N/A'],
-        ['UID', structure.structural_identity?.uid || 'N/A'],
-        ['Type', structure.structural_identity?.type_of_structure || 'N/A'],
-        ['Status', structure.status || 'N/A'],
-        ['', ''],
-        ['LOCATION DETAILS', ''],
-        ['State', structure.structural_identity?.state_code || 'N/A'],
-        ['District', structure.structural_identity?.district_code || 'N/A'],
-        ['City', structure.structural_identity?.city_name || 'N/A'],
-        ['Location Code', structure.structural_identity?.location_code || 'N/A'],
-        ['', ''],
-        ['ADMINISTRATION', ''],
-        ['Client Name', structure.administration?.client_name || 'N/A'],
-        ['Custodian', structure.administration?.custodian || 'N/A'],
-        ['Engineer', structure.administration?.engineer_designation || 'N/A'],
-        ['Email', structure.administration?.email_id || 'N/A'],
-        ['', ''],
-        ['GEOMETRY', ''],
-        ['Total Floors', structure.geometric_details?.number_of_floors || 'N/A'],
-        ['Structure Width (m)', structure.geometric_details?.structure_width || 'N/A'],
-        ['Structure Length (m)', structure.geometric_details?.structure_length || 'N/A'],
-        ['Structure Height (m)', structure.geometric_details?.structure_height || 'N/A']
-      ];
-
-      overviewData.forEach((row, index) => {
-        const excelRow = overviewSheet.addRow(row);
-        
-        if (row[1] === '') { // Section headers
-          excelRow.getCell(1).font = { ...FONTS.HEADER, color: { argb: COLORS.WHITE } };
-          excelRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.PRIMARY } };
-          excelRow.height = 25;
-          overviewSheet.mergeCells(index + 1, 1, index + 1, 2);
-        } else if (row[0] !== '' && row[1] !== '') { // Data rows
-          excelRow.getCell(1).font = { ...FONTS.BODY, bold: true };
-          excelRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.LIGHT_GRAY } };
-          excelRow.getCell(2).font = FONTS.BODY;
-        }
-        
-        excelRow.eachCell(cell => {
-          cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
-          };
-        });
-      });
-
-      overviewSheet.getColumn(1).width = 25;
-      overviewSheet.getColumn(2).width = 30;
-
-      // =================== DETAILED ASSESSMENT SHEET ===================
-      const detailSheet = workbook.addWorksheet('🔍 Detailed Assessment', {
-        properties: { tabColor: { argb: COLORS.SECONDARY } }
-      });
-
-      // Enhanced column structure with better grouping
-      const detailColumns = [
-        // Location Info
-        { header: 'Floor#', key: 'floor_no', width: 8 },
-        { header: 'Unit#', key: 'flat_no', width: 10 },
-        { header: 'Unit Type', key: 'flat_type', width: 12 },
-        { header: 'Area (m²)', key: 'flat_area', width: 10 },
-        { header: 'Facing', key: 'facing', width: 10 },
-        { header: 'Occupancy', key: 'occupancy', width: 12 },
-        
-        // Structural Components (with visual indicators)
-        { header: '🏗️ Beams', key: 'beams', width: 10 },
-        { header: '🏗️ Columns', key: 'columns', width: 10 },
-        { header: '🏗️ Slab', key: 'slab', width: 10 },
-        { header: '🏗️ Foundation', key: 'foundation', width: 12 },
-        
-        // Non-Structural Components (with visual indicators)
-        { header: '⚡ Electrical', key: 'wiring', width: 10 },
-        { header: '🏠 Flooring', key: 'tiles', width: 10 },
-        { header: '🚿 Sanitary', key: 'sanitary', width: 10 },
-        { header: '🚪 Doors/Win', key: 'doors', width: 12 },
-        { header: '🌊 Sewage', key: 'sewage', width: 10 },
-        { header: '⚡ Panel', key: 'panel', width: 10 },
-        { header: '💧 Tank', key: 'tank', width: 10 },
-        { header: '🛗 Elevator', key: 'lift', width: 10 },
-        
-        // Overall Assessment
-        { header: '📊 Health', key: 'health', width: 12 },
-        { header: '⚠️ Priority', key: 'priority', width: 10 },
-        { header: '🎯 Score', key: 'score', width: 10 }
-      ];
-
-      detailSheet.columns = detailColumns;
-
-      // Apply multi-color header styling
-      const detailHeaderRow = detailSheet.getRow(1);
-      detailHeaderRow.height = 28;
-      
-      detailColumns.forEach((col, index) => {
-        const cell = detailHeaderRow.getCell(index + 1);
-        let headerColor;
-        
-        if (index < 6) headerColor = COLORS.PRIMARY; // Basic info
-        else if (index < 10) headerColor = COLORS.DANGER; // Structural
-        else if (index < 18) headerColor = COLORS.WARNING; // Non-structural
-        else headerColor = COLORS.SUCCESS; // Assessment
-        
-        Object.assign(cell, createHeaderStyle(headerColor));
-      });
-
-      const floors = structure.geometric_details?.floors || [];
-      let detailRowIndex = 2;
-
-      for (const floor of floors) {
-        const flats = floor.flats || [];
-        for (const flat of flats) {
-          const rowData = {
-            floor_no: floor.floor_number,
-            flat_no: flat.flat_number,
-            flat_type: flat.flat_type,
-            flat_area: flat.area_sq_mts,
-            facing: flat.direction_facing,
-            occupancy: flat.occupancy_status,
-            beams: flat.structural_rating?.beams?.rating,
-            columns: flat.structural_rating?.columns?.rating,
-            slab: flat.structural_rating?.slab?.rating,
-            foundation: flat.structural_rating?.foundation?.rating,
-            wiring: flat.non_structural_rating?.electrical_wiring?.rating,
-            tiles: flat.non_structural_rating?.flooring_tiles?.rating,
-            sanitary: flat.non_structural_rating?.sanitary_fittings?.rating,
-            doors: flat.non_structural_rating?.doors_windows?.rating,
-            sewage: flat.non_structural_rating?.sewage_system?.rating,
-            panel: flat.non_structural_rating?.panel_board?.rating,
-            tank: flat.non_structural_rating?.water_tanks?.rating,
-            lift: flat.non_structural_rating?.lifts?.rating,
-            health: flat.flat_overall_rating?.health_status,
-            priority: flat.flat_overall_rating?.priority,
-            score: flat.flat_overall_rating?.combined_score
-          };
-
-          detailSheet.addRow(rowData);
-          
-          // Enhanced row styling with conditional formatting
-          const row = detailSheet.getRow(detailRowIndex);
-          row.height = 20;
-          const isAlternate = detailRowIndex % 2 === 0;
-          
-          row.eachCell((cell, colNumber) => {
-            Object.assign(cell, createDataCellStyle(isAlternate));
-            
-            // Rating-based conditional formatting with progress bar effect
-            if (typeof cell.value === 'number' && cell.value >= 1 && cell.value <= 5) {
-              const percentage = (cell.value / 5) * 100;
-              
-              if (cell.value <= 2) {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.WHITE } };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.DANGER } };
-              } else if (cell.value <= 3) {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.DARK_GRAY } };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.WARNING } };
-              } else {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.WHITE } };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUCCESS } };
-              }
-              
-              cell.alignment = { ...cell.alignment, horizontal: 'center' };
             }
-            
-            // Status-based styling
-            if (typeof cell.value === 'string') {
-              if (['critical', 'poor', 'high'].includes(cell.value.toLowerCase())) {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.DANGER } };
-              } else if (['moderate', 'medium', 'fair'].includes(cell.value.toLowerCase())) {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.WARNING } };
-              } else if (['good', 'excellent', 'low'].includes(cell.value.toLowerCase())) {
-                cell.font = { ...FONTS.BODY, bold: true, color: { argb: COLORS.SUCCESS } };
-              }
-            }
-          });
-          
-          detailRowIndex++;
-        }
-      }
-
-      // Add freeze panes and auto-filter
-      detailSheet.views = [{ state: 'frozen', xSplit: 2, ySplit: 1 }];
-      detailSheet.autoFilter = {
-        from: 'A1',
-        to: `${String.fromCharCode(65 + detailColumns.length - 1)}1`
-      };
-
-      // =================== SUMMARY STATISTICS SHEET ===================
-      const statsSheet = workbook.addWorksheet('📈 Statistics', {
-        properties: { tabColor: { argb: COLORS.SUCCESS } }
-      });
-
-      // Calculate statistics
-      const totalFloors = floors.length;
-      const totalUnits = floors.reduce((sum, floor) => sum + (floor.flats?.length || 0), 0);
-      const avgStructuralRating = floors.reduce((sum, floor) => {
-        const floorAvg = floor.flats?.reduce((flatSum, flat) => {
-          const ratings = [
-            flat.structural_rating?.beams?.rating,
-            flat.structural_rating?.columns?.rating,
-            flat.structural_rating?.slab?.rating,
-            flat.structural_rating?.foundation?.rating
-          ].filter(r => r !== undefined);
-          return flatSum + (ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0);
-        }, 0) || 0;
-        return sum + (floor.flats?.length > 0 ? floorAvg / floor.flats.length : 0);
-      }, 0) / (totalFloors || 1);
-
-      const statsData = [
-        ['📊 STRUCTURE STATISTICS', ''],
-        ['Total Floors', totalFloors],
-        ['Total Units', totalUnits],
-        ['Average Structural Rating', avgStructuralRating.toFixed(2)],
-        ['Structure Area (m²)', structure.geometric_details?.structure_width * structure.geometric_details?.structure_length || 'N/A'],
-        ['', ''],
-        ['📋 REPORT DETAILS', ''],
-        ['Generated By', req.user.email],
-        ['Generation Date', new Date().toLocaleString()],
-        ['Report Version', '2.0 Enhanced']
-      ];
-
-      statsData.forEach((row, index) => {
-        const excelRow = statsSheet.addRow(row);
-        
-        if (row[1] === '') {
-          excelRow.getCell(1).font = { ...FONTS.HEADER, color: { argb: COLORS.WHITE } };
-          excelRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SUCCESS } };
-          excelRow.height = 25;
-          statsSheet.mergeCells(index + 1, 1, index + 1, 2);
-        } else if (row[0] !== '') {
-          excelRow.getCell(1).font = { ...FONTS.BODY, bold: true };
-          excelRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.LIGHT_GRAY } };
-          excelRow.getCell(2).font = FONTS.BODY;
-        }
-        
-        excelRow.eachCell(cell => {
-          cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
-          };
-        });
-      });
-
-      statsSheet.getColumn(1).width = 25;
-      statsSheet.getColumn(2).width = 20;
-
-      const fileName = `SAMS_Enhanced_Structure_${structure.structural_identity?.structural_identity_number || structure._id}_${Date.now()}.xlsx`;
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      await workbook.xlsx.write(res);
-      res.end();
-
-    } catch (err) {
-      console.error('❌ Enhanced Single Structure Export Failed:', err);
-      res.status(500).json({ success: false, message: 'Internal server error' });
-    }
-  }
-);
-
-/**
- * @route GET /api/reports/structures/metadata
- * @desc Get metadata for structure reports (for UI filters)
- * @access Private
- */
-router.get('/structures/metadata', 
-  authenticateToken,
-  checkExportPermissions,
-  async (req, res) => {
-  try {
-    console.log('📊 Report metadata requested by:', req.user.email);
-
-    let userQuery = { is_active: true };
-    
-    if (req.user.role !== 'admin') {
-      userQuery._id = req.user.userId;
-    }
-
-    const metadata = await User.aggregate([
-      { $match: userQuery },
-      { $unwind: '$structures' },
-      {
-        $group: {
-          _id: null,
-          states: { $addToSet: '$structures.structural_identity.state_code' },
-          districts: { $addToSet: '$structures.structural_identity.district_code' },
-          cities: { $addToSet: '$structures.structural_identity.city_name' },
-          structure_types: { $addToSet: '$structures.structural_identity.type_of_structure' },
-          statuses: { $addToSet: '$structures.status' },
-          health_statuses: { $addToSet: '$structures.overall_structural_rating.health_status' },
-          priorities: { $addToSet: '$structures.overall_structural_rating.priority' },
-          total_structures: { $sum: 1 },
-          date_range: {
-            $push: {
-              min: { $min: '$structures.creation_info.created_date' },
-              max: { $max: '$structures.creation_info.created_date' }
-            }
-          }
+          ]
         }
       }
     ]);
 
-    res.json({
+    const structureMetadata = metadata?.structures?.[0] || {};
+    const users = Array.isArray(metadata?.users) ? metadata.users : [];
+
+    return res.json({
       success: true,
-      data: metadata[0] || {
-        states: [],
-        districts: [],
-        cities: [],
-        structure_types: [],
-        statuses: [],
-        health_statuses: [],
-        priorities: [],
-        total_structures: 0,
-        date_range: []
+      data: {
+        states: (structureMetadata.states || []).filter(Boolean).sort(),
+        districts: (structureMetadata.districts || []).filter(Boolean).sort(),
+        cities: (structureMetadata.cities || []).filter(Boolean).sort(),
+        location_codes: (structureMetadata.location_codes || []).filter(Boolean).sort(),
+        structure_types: (structureMetadata.structure_types || []).filter(Boolean).sort(),
+        structure_subtypes: (structureMetadata.structure_subtypes || []).filter(Boolean).sort(),
+        statuses: (structureMetadata.statuses || []).filter(Boolean).sort(),
+        total_structures: structureMetadata.total_structures || 0,
+        date_range: {
+          from: structureMetadata.min_created_date || null,
+          to: structureMetadata.max_created_date || null
+        },
+        users,
+        organizations: Array.from(new Set(users.map((user) => user.organization).filter(Boolean))).sort(),
+        pdf_export_supported: false
       },
       message: 'Report metadata retrieved successfully'
     });
-
   } catch (error) {
-    console.error('💥 Report metadata error:', error);
-    res.status(500).json({
+    console.error('Report metadata error:', error);
+    return res.status(500).json({
       success: false,
       message: 'Failed to get report metadata'
     });
