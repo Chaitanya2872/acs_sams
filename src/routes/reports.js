@@ -1222,8 +1222,8 @@ const sendPdf = (res, doc, fileName) =>
     doc.end();
   });
 
-const renderWordTable = (headers, rows) => `
-  <table>
+const renderWordTable = (headers, rows, options = {}) => `
+  <table class="${options.className || ''}">
     <thead>
       <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
     </thead>
@@ -1232,7 +1232,7 @@ const renderWordTable = (headers, rows) => `
         rows.length
           ? rows
               .map(
-                (row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell) || '&nbsp;'}</td>`).join('')}</tr>`
+                (row) => `<tr>${row.map((cell) => `<td>${cell === null ? '&nbsp;' : escapeHtml(cell) || '&nbsp;'}</td>`).join('')}</tr>`
               )
               .join('')
           : `<tr><td colspan="${headers.length}">No records available</td></tr>`
@@ -1241,7 +1241,181 @@ const renderWordTable = (headers, rows) => `
   </table>
 `;
 
-const renderWordSection = (title, body) => `<h2>${escapeHtml(title)}</h2>${body}`;
+const renderWordSection = (title, body, subtitle = '') => `
+  <h2>${escapeHtml(title)}</h2>
+  ${subtitle ? `<p class="section-copy">${escapeHtml(subtitle)}</p>` : ''}
+  ${body}
+`;
+
+const toWordImageSource = (value) => {
+  const source = safeText(value);
+  if (!source) return '';
+  if (/^https?:\/\//i.test(source) || /^data:/i.test(source)) return source;
+  return encodeURI(`file:///${source.replace(/\\/g, '/')}`);
+};
+
+const groupObservationsForWord = (observations) =>
+  observations.reduce((acc, item) => {
+    if (!acc.has(item.location)) {
+      acc.set(item.location, {
+        structural: [],
+        nonStructural: []
+      });
+    }
+
+    const bucket = item.category === 'STRUCTURAL DISTRESS' ? 'structural' : 'nonStructural';
+    acc.get(item.location)[bucket].push(item);
+    return acc;
+  }, new Map());
+
+const groupTestsForWord = (tests) =>
+  tests.reduce((acc, test) => {
+    if (!acc.has(test.test_name)) acc.set(test.test_name, []);
+    acc.get(test.test_name).push(test);
+    return acc;
+  }, new Map());
+
+const groupQuantificationsForWord = (rows) =>
+  rows.reduce((acc, row) => {
+    const key = safeText(row.distress, 'OTHER');
+    if (!acc.has(key)) acc.set(key, []);
+    acc.get(key).push(row);
+    return acc;
+  }, new Map());
+
+const renderWordImageGrid = (rows, type) => {
+  if (!rows.length) {
+    return `<p class="empty-state">No ${type} images available.</p>`;
+  }
+
+  return `
+    <div class="image-grid">
+      ${rows
+        .map((row) => {
+          const imageSrc = toWordImageSource(row.source);
+          const caption = type === 'inspection' ? row.caption : row.test_name;
+          const meta = type === 'inspection' ? row.location : row.scopeLabel;
+
+          return `
+            <figure class="image-card">
+              ${
+                imageSrc
+                  ? `<img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(caption)}" />`
+                  : `<div class="image-missing">Image not available</div>`
+              }
+              <figcaption>
+                <div class="caption-title">${escapeHtml(caption)}</div>
+                <div class="caption-meta">${escapeHtml(meta)}</div>
+                ${!imageSrc ? `<div class="caption-ref">${escapeHtml(row.source)}</div>` : ''}
+              </figcaption>
+            </figure>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+};
+
+const renderObservationSectionWord = (observations) => {
+  const grouped = groupObservationsForWord(observations);
+
+  if (!grouped.size) {
+    return '<p class="empty-state">No observations recorded.</p>';
+  }
+
+  const rows = ['<table class="observation-table"><thead><tr><th style="width:70px;">S. No</th><th>Location/Remarks</th></tr></thead><tbody>'];
+  grouped.forEach((group, location) => {
+    rows.push(`<tr class="location-row"><td colspan="2">${escapeHtml(location)}</td></tr>`);
+
+    const categories = [
+      ['STRUCTURAL DISTRESS', group.structural],
+      ['NON-STRUCTURAL DISTRESS', group.nonStructural]
+    ];
+
+    categories.forEach(([label, items]) => {
+      if (!items.length) return;
+      rows.push(`<tr class="category-row"><td colspan="2">${escapeHtml(label)}</td></tr>`);
+      items.forEach((item, index) => {
+        const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
+        rows.push(`<tr><td class="center">${index + 1}</td><td>${escapeHtml(text)}</td></tr>`);
+      });
+    });
+  });
+  rows.push('</tbody></table>');
+  return rows.join('');
+};
+
+const renderTestResultsWord = (tests) => {
+  const grouped = groupTestsForWord(tests);
+
+  if (!grouped.size) {
+    return '<p class="empty-state">No test results recorded.</p>';
+  }
+
+  let testIndex = 1;
+  return Array.from(grouped.entries())
+    .map(([testName, rows]) => {
+      const table = renderWordTable(
+        ['Location', 'Component', 'Date', 'Result', 'Remarks', 'Attachment'],
+        rows.map((row) => [
+          row.scopeLabel,
+          [row.component_type, row.component_id].filter(Boolean).join(' / '),
+          row.test_date || '',
+          row.result_summary || 'N/A',
+          row.remarks || '',
+          row.attachment || ''
+        ]),
+        { className: 'test-table' }
+      );
+
+      const section = `<div class="test-block"><h3>${testIndex}. ${escapeHtml(testName)}</h3>${table}</div>`;
+      testIndex += 1;
+      return section;
+    })
+    .join('');
+};
+
+const renderQuantificationWord = (quantifications) => {
+  const grouped = groupQuantificationsForWord(quantifications);
+
+  if (!grouped.size) {
+    return '<p class="empty-state">No quantification entries recorded.</p>';
+  }
+
+  const rows = [
+    '<table class="quantification-table"><thead><tr><th style="width:60px;">S. No</th><th>Location of Distress</th><th>Distress</th><th style="width:48px;">Nos</th><th style="width:48px;">L (M)</th><th style="width:48px;">B (M)</th><th style="width:48px;">H (M)</th><th style="width:110px;">Length / Area / Volume</th><th>Repair Methodology</th></tr></thead><tbody>'
+  ];
+
+  grouped.forEach((items, groupName) => {
+    rows.push(`<tr class="quant-group"><td colspan="9">${escapeHtml(groupName)}</td></tr>`);
+    items.forEach((row, index) => {
+      rows.push(`
+        <tr>
+          <td class="center">${index + 1}</td>
+          <td>${escapeHtml(row.location_of_distress)}</td>
+          <td>${escapeHtml(row.distress)}</td>
+          <td class="center">${escapeHtml(String(row.nos))}</td>
+          <td class="center">${escapeHtml(row.length ?? '')}</td>
+          <td class="center">${escapeHtml(row.breadth ?? '')}</td>
+          <td class="center">${escapeHtml(row.height ?? '')}</td>
+          <td class="center">${escapeHtml(`${row.quantity} ${row.unit}`.trim())}</td>
+          <td>${escapeHtml(row.repair_methodology)}</td>
+        </tr>
+      `);
+    });
+  });
+
+  rows.push('</tbody></table>');
+  return rows.join('');
+};
+
+const renderSummaryNoteList = () => `
+  <div class="note-block">
+    <p>Note 1. The distress, L, B, H, and repair methodology entered in the structural rating screen should reflect in this table format.</p>
+    <p>Note 2. Structural and non-structural distress should reflect in this table separately.</p>
+    <p>Note 3. Output should remain suitable for final-report copy/paste into Word.</p>
+  </div>
+`;
 
 const renderStructureWord = (structureExport, filtersApplied, index, total) => {
   const observations = collectStructureObservations(structureExport.structure);
@@ -1267,70 +1441,36 @@ const renderStructureWord = (structureExport, filtersApplied, index, total) => {
 
   return `
     <section class="report-block">
-      <h1>SAMS Output / Report Format</h1>
-      ${renderWordTable(['Field', 'Value'], summaryItems)}
+      <div class="report-header">
+        <div class="report-brand">SAMS</div>
+      </div>
+      <div class="highlight-label">OUTPUT / REPORT FORMAT:</div>
+      ${renderWordTable(['Field', 'Value'], summaryItems, { className: 'meta-table' })}
       ${renderWordSection(
-        'Observations',
-        renderWordTable(
-          ['Location', 'Category', 'Component', 'Remarks', 'Repair Methodology'],
-          observations.map((item) => [item.location, item.category, item.component, item.remarks, item.repair_methodology || ''])
-        )
+        'OBSERVATIONS',
+        renderObservationSectionWord(observations),
+        'Observation given in the structural and non-structural entries should reflect in the table and images below the table in the output.'
+      )}
+      ${renderWordSection('INSPECTION IMAGES', renderWordImageGrid(inspectionImages, 'inspection'))}
+      ${renderWordSection(
+        'TEST RESULTS',
+        renderTestResultsWord(tests),
+        'Provision for uploading multiple image, PDF, or Excel files for each testing format.'
       )}
       ${renderWordSection(
-        'Inspection Images',
-        renderWordTable(
-          ['S. No', 'Caption', 'Location', 'Image Reference'],
-          inspectionImages.map((row, rowIndex) => [String(rowIndex + 1), row.caption, row.location, row.source])
-        )
+        'TESTING IMAGES',
+        renderWordImageGrid(testingImages, 'testing'),
+        'Images attached during testing should reflect below the test results in the output.'
       )}
+      ${renderWordSection('QUANTIFICATION', renderQuantificationWord(quantifications))}
       ${renderWordSection(
-        'Test Results',
-        renderWordTable(
-          ['S. No', 'Test Name', 'Location', 'Component', 'Date', 'Remarks / Result', 'Attachment'],
-          tests.map((row, rowIndex) => [
-            String(rowIndex + 1),
-            row.test_name,
-            row.scopeLabel,
-            [row.component_type, row.component_id].filter(Boolean).join(' / '),
-            row.test_date || '',
-            [row.result_summary, row.remarks].filter(Boolean).join(' | ') || 'N/A',
-            row.attachment || ''
-          ])
-        )
-      )}
-      ${renderWordSection(
-        'Testing Images',
-        renderWordTable(
-          ['S. No', 'Test Name', 'Location', 'File Reference'],
-          testingImages.map((row, rowIndex) => [String(rowIndex + 1), row.test_name, row.scopeLabel, row.source])
-        )
-      )}
-      ${renderWordSection(
-        'Quantification',
-        renderWordTable(
-          ['S. No', 'Category', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Quantity', 'Repair Methodology'],
-          quantifications.map((row, rowIndex) => [
-            String(rowIndex + 1),
-            row.category,
-            row.location_of_distress,
-            row.distress,
-            String(row.nos),
-            row.length ?? '',
-            row.breadth ?? '',
-            row.height ?? '',
-            `${row.quantity} ${row.unit}`.trim(),
-            row.repair_methodology
-          ])
-        )
-      )}
-      ${renderWordSection(
-        'Repair Methodology Summary',
+        'REPAIR METHODOLOGY SUMMARY',
         renderWordTable(
           ['S. No', 'Description', 'Quantity', 'Units'],
-          summaryRows.map((row, rowIndex) => [String(rowIndex + 1), row.description, String(row.quantity), row.units])
-        )
+          summaryRows.map((row, rowIndex) => [String(rowIndex + 1), row.description, String(row.quantity), row.units]),
+          { className: 'summary-table' }
+        ) + renderSummaryNoteList()
       )}
-      <p class="note">Note: Observation-to-quantification linkage depends on saved quantification rows.</p>
     </section>
   `;
 };
@@ -1340,15 +1480,31 @@ const buildWordDocument = (structures, filtersApplied) => `
     <head>
       <meta charset="utf-8" />
       <style>
-        body { font-family: Calibri, Arial, sans-serif; color: #1f1f1f; margin: 24px; }
-        h1 { color: #1f4e78; font-size: 20px; margin: 0 0 12px; }
-        h2 { background: #d9e2f3; color: #1f1f1f; padding: 8px 10px; font-size: 14px; margin: 18px 0 8px; }
+        body { font-family: 'Times New Roman', serif; color: #1f1f1f; margin: 20px; line-height: 1.3; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-        th, td { border: 1px solid #bfbfbf; padding: 6px 8px; font-size: 11px; vertical-align: top; text-align: left; }
-        th { background: #f3f6fb; }
+        th, td { border: 1px solid #7f7f7f; padding: 5px 6px; font-size: 11px; vertical-align: top; text-align: left; }
+        th { background: #ffffff; font-weight: 700; }
+        h2 { font-size: 16px; text-decoration: underline; margin: 22px 0 6px; }
+        h3 { font-size: 14px; margin: 10px 0 6px; font-weight: 400; }
+        .report-header { text-align: center; margin-bottom: 8px; }
+        .report-brand { font-family: Calibri, Arial, sans-serif; font-size: 22px; font-weight: 700; }
+        .highlight-label { display: inline-block; background: #fff200; font-weight: 700; padding: 2px 4px; margin: 8px 0 14px; }
+        .section-copy { margin: 0 0 10px; font-size: 11px; }
+        .meta-table th { width: 170px; }
+        .observation-table .location-row td { color: #0070c0; font-weight: 700; text-align: center; font-size: 12px; }
+        .observation-table .category-row td { font-weight: 700; text-align: center; font-size: 11px; }
+        .quantification-table .quant-group td { background: #fff200; font-weight: 700; text-align: center; }
+        .center { text-align: center; }
+        .image-grid { display: table; width: 100%; border-spacing: 10px 6px; margin-bottom: 12px; }
+        .image-card { display: inline-block; width: 48%; margin: 0 1% 12px 1%; vertical-align: top; text-align: center; }
+        .image-card img { width: 100%; height: 220px; object-fit: cover; border: 1px solid #999999; }
+        .image-missing { height: 220px; border: 1px solid #999999; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #666666; }
+        .caption-title { font-size: 10px; margin-top: 4px; }
+        .caption-meta, .caption-ref { font-size: 9px; color: #555555; }
+        .empty-state { font-size: 11px; color: #555555; margin: 6px 0 12px; }
+        .note-block p { margin: 3px 0; font-size: 11px; }
         .report-block { page-break-after: always; }
         .report-block:last-child { page-break-after: auto; }
-        .note { color: #555555; font-size: 10px; }
       </style>
     </head>
     <body>
