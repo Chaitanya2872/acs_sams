@@ -7,6 +7,29 @@ require('dotenv').config();
 
 const app = express();
 
+const resolveCorsOrigin = (origin, callback) => {
+  const configuredOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
+
+  if (!origin) {
+    return callback(null, configuredOrigin === '*' ? true : configuredOrigin);
+  }
+
+  if (configuredOrigin === '*') {
+    return callback(null, origin);
+  }
+
+  const allowedOrigins = configuredOrigin
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (allowedOrigins.includes(origin)) {
+    return callback(null, origin);
+  }
+
+  return callback(new Error(`CORS origin not allowed: ${origin}`));
+};
+
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
@@ -20,7 +43,7 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: resolveCorsOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']

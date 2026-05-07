@@ -5,6 +5,40 @@ const emailService = require('../services/emailService');
 const { authenticateToken } = require('../middlewares/auth');
 const rateLimit = require('express-rate-limit');
 
+const REFRESH_COOKIE_NAME = 'refreshToken';
+
+const parseCookies = (cookieHeader = '') =>
+  cookieHeader
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce((cookies, item) => {
+      const separatorIndex = item.indexOf('=');
+      if (separatorIndex === -1) return cookies;
+      const key = item.slice(0, separatorIndex).trim();
+      const value = item.slice(separatorIndex + 1).trim();
+      cookies[key] = decodeURIComponent(value);
+      return cookies;
+    }, {});
+
+const getRefreshTokenFromRequest = (req) => {
+  if (req.body && typeof req.body.refreshToken === 'string' && req.body.refreshToken.trim()) {
+    return req.body.refreshToken.trim();
+  }
+
+  const cookies = parseCookies(req.headers.cookie);
+  return cookies[REFRESH_COOKIE_NAME] || '';
+};
+
+const setRefreshTokenCookie = (res, refreshToken) => {
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+};
+
 // Rate limiting for auth endpoints
 /*const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -250,6 +284,7 @@ router.post('/login', debugMiddleware,  async (req, res) => {
     
     console.log('🔐 Processing login for:', identifier);
     const result = await authService.login({ identifier, password });
+    setRefreshTokenCookie(res, result.refreshToken);
     res.status(200).json(result);
   } catch (error) {
     console.error('Login error:', error);
@@ -366,14 +401,14 @@ router.post('/reset-password', debugMiddleware, async (req, res) => {
  */
 router.post('/refresh-token', debugMiddleware, async (req, res) => {
   try {
-    if (!req.body || typeof req.body !== 'object') {
+    if (req.body && typeof req.body !== 'object') {
       return res.status(400).json({
         success: false,
         error: 'Request body is missing. Send JSON data with Content-Type: application/json'
       });
     }
 
-    const { refreshToken } = req.body;
+    const refreshToken = getRefreshTokenFromRequest(req);
     
     if (!refreshToken || typeof refreshToken !== 'string') {
       return res.status(401).json({
@@ -385,6 +420,7 @@ router.post('/refresh-token', debugMiddleware, async (req, res) => {
     
     console.log('🔄 Processing token refresh...');
     const result = await authService.refreshTokens(refreshToken);
+    setRefreshTokenCookie(res, result.refreshToken);
     
     res.status(200).json(result);
   } catch (error) {
@@ -472,7 +508,13 @@ router.post('/verify-token', authenticateToken, async (req, res) => {
  */
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
-    const result = await authService.logout(req.headers.authorization?.split(' ')[1]);
+    const refreshToken = getRefreshTokenFromRequest(req);
+    const result = await authService.logout(refreshToken);
+    res.clearCookie(REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    });
     res.status(200).json(result);
   } catch (error) {
     console.error('Logout error:', error);

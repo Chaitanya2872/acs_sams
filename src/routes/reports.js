@@ -86,12 +86,24 @@ const TEST_NAME_LABELS = {
 
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PDF_MIME = 'application/pdf';
+const WORD_MIME = 'application/msword';
+
+const isPdfFormat = (format) => format === 'pdf';
+const isWordFormat = (format) => ['word', 'doc', 'docx'].includes(format);
 
 const safeText = (value, fallback = '') => {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
 };
+
+const escapeHtml = (value) =>
+  safeText(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const formatDate = (value) => {
   if (!value) return '';
@@ -1210,6 +1222,147 @@ const sendPdf = (res, doc, fileName) =>
     doc.end();
   });
 
+const renderWordTable = (headers, rows) => `
+  <table>
+    <thead>
+      <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
+    </thead>
+    <tbody>
+      ${
+        rows.length
+          ? rows
+              .map(
+                (row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell) || '&nbsp;'}</td>`).join('')}</tr>`
+              )
+              .join('')
+          : `<tr><td colspan="${headers.length}">No records available</td></tr>`
+      }
+    </tbody>
+  </table>
+`;
+
+const renderWordSection = (title, body) => `<h2>${escapeHtml(title)}</h2>${body}`;
+
+const renderStructureWord = (structureExport, filtersApplied, index, total) => {
+  const observations = collectStructureObservations(structureExport.structure);
+  const quantifications = collectQuantifications(structureExport.structure);
+  const tests = collectTests(structureExport.structure);
+  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
+  const structure = structureExport.structure;
+  const summaryRows = summarizeMethodology(quantifications);
+
+  const summaryItems = [
+    ['Structure ID', structure.structural_identity?.structural_identity_number],
+    ['UID', structure.structural_identity?.uid],
+    ['Structure Type', structure.structural_identity?.type_of_structure],
+    ['Structure Subtype', structure.structural_identity?.structure_subtype],
+    ['Owner / Employee', `${buildOwnerLabel(structureExport.owner)}${structureExport.owner?.profile?.employee_id ? ` (${structureExport.owner.profile.employee_id})` : ''}`],
+    ['Organization', structureExport.owner?.profile?.organization || structure.administration?.organization],
+    ['Location', [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code].filter(Boolean).join(' / ')],
+    ['Created Date', formatDate(structure.creation_info?.created_date)],
+    ['Last Updated', formatDate(structure.creation_info?.last_updated_date)],
+    ['Applied Filters', filtersApplied || 'None'],
+    ['Report Position', `${index + 1} of ${total}`]
+  ];
+
+  return `
+    <section class="report-block">
+      <h1>SAMS Output / Report Format</h1>
+      ${renderWordTable(['Field', 'Value'], summaryItems)}
+      ${renderWordSection(
+        'Observations',
+        renderWordTable(
+          ['Location', 'Category', 'Component', 'Remarks', 'Repair Methodology'],
+          observations.map((item) => [item.location, item.category, item.component, item.remarks, item.repair_methodology || ''])
+        )
+      )}
+      ${renderWordSection(
+        'Inspection Images',
+        renderWordTable(
+          ['S. No', 'Caption', 'Location', 'Image Reference'],
+          inspectionImages.map((row, rowIndex) => [String(rowIndex + 1), row.caption, row.location, row.source])
+        )
+      )}
+      ${renderWordSection(
+        'Test Results',
+        renderWordTable(
+          ['S. No', 'Test Name', 'Location', 'Component', 'Date', 'Remarks / Result', 'Attachment'],
+          tests.map((row, rowIndex) => [
+            String(rowIndex + 1),
+            row.test_name,
+            row.scopeLabel,
+            [row.component_type, row.component_id].filter(Boolean).join(' / '),
+            row.test_date || '',
+            [row.result_summary, row.remarks].filter(Boolean).join(' | ') || 'N/A',
+            row.attachment || ''
+          ])
+        )
+      )}
+      ${renderWordSection(
+        'Testing Images',
+        renderWordTable(
+          ['S. No', 'Test Name', 'Location', 'File Reference'],
+          testingImages.map((row, rowIndex) => [String(rowIndex + 1), row.test_name, row.scopeLabel, row.source])
+        )
+      )}
+      ${renderWordSection(
+        'Quantification',
+        renderWordTable(
+          ['S. No', 'Category', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Quantity', 'Repair Methodology'],
+          quantifications.map((row, rowIndex) => [
+            String(rowIndex + 1),
+            row.category,
+            row.location_of_distress,
+            row.distress,
+            String(row.nos),
+            row.length ?? '',
+            row.breadth ?? '',
+            row.height ?? '',
+            `${row.quantity} ${row.unit}`.trim(),
+            row.repair_methodology
+          ])
+        )
+      )}
+      ${renderWordSection(
+        'Repair Methodology Summary',
+        renderWordTable(
+          ['S. No', 'Description', 'Quantity', 'Units'],
+          summaryRows.map((row, rowIndex) => [String(rowIndex + 1), row.description, String(row.quantity), row.units])
+        )
+      )}
+      <p class="note">Note: Observation-to-quantification linkage depends on saved quantification rows.</p>
+    </section>
+  `;
+};
+
+const buildWordDocument = (structures, filtersApplied) => `
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <style>
+        body { font-family: Calibri, Arial, sans-serif; color: #1f1f1f; margin: 24px; }
+        h1 { color: #1f4e78; font-size: 20px; margin: 0 0 12px; }
+        h2 { background: #d9e2f3; color: #1f1f1f; padding: 8px 10px; font-size: 14px; margin: 18px 0 8px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+        th, td { border: 1px solid #bfbfbf; padding: 6px 8px; font-size: 11px; vertical-align: top; text-align: left; }
+        th { background: #f3f6fb; }
+        .report-block { page-break-after: always; }
+        .report-block:last-child { page-break-after: auto; }
+        .note { color: #555555; font-size: 10px; }
+      </style>
+    </head>
+    <body>
+      ${structures.map((structureExport, index) => renderStructureWord(structureExport, filtersApplied, index, structures.length)).join('')}
+    </body>
+  </html>
+`;
+
+const sendWordDocument = (res, content, fileName) => {
+  res.setHeader('Content-Type', WORD_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.send(content);
+};
+
 router.get('/structures/download', authenticateToken, checkExportPermissions, async (req, res) => {
   try {
     const structures = await fetchStructuresForExport(req.user, req.query);
@@ -1223,13 +1376,18 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
     const filterSummary = buildFilterSummary(req.query);
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
-    if (requestedFormat === 'pdf') {
+    if (isPdfFormat(requestedFormat)) {
       const doc = createPdfDocument();
       structures.forEach((structureExport, index) => {
         renderStructurePdf(doc, structureExport, filterSummary, index, structures.length);
       });
       const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
       return sendPdf(res, doc, fileName);
+    }
+
+    if (isWordFormat(requestedFormat)) {
+      const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.doc`;
+      return sendWordDocument(res, buildWordDocument(structures, filterSummary), fileName);
     }
 
     const workbook = createWorkbook(req.user);
@@ -1290,13 +1448,18 @@ router.get('/structures/complete-download', authenticateToken, checkExportPermis
     }
 
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
-    if (requestedFormat === 'pdf') {
+    if (isPdfFormat(requestedFormat)) {
       const doc = createPdfDocument();
       structures.forEach((structureExport, index) => {
         renderStructurePdf(doc, structureExport, 'Complete export', index, structures.length);
       });
       const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
       return sendPdf(res, doc, fileName);
+    }
+
+    if (isWordFormat(requestedFormat)) {
+      const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.doc`;
+      return sendWordDocument(res, buildWordDocument(structures, 'Complete export'), fileName);
     }
 
     const workbook = createWorkbook(req.user);
@@ -1345,11 +1508,16 @@ router.get('/structures/:id/download', authenticateToken, checkExportPermissions
     );
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
-    if (requestedFormat === 'pdf') {
+    if (isPdfFormat(requestedFormat)) {
       const doc = createPdfDocument();
       renderStructurePdf(doc, structureExport, buildFilterSummary(req.query), 0, 1);
       const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.pdf`;
       return sendPdf(res, doc, fileName);
+    }
+
+    if (isWordFormat(requestedFormat)) {
+      const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.doc`;
+      return sendWordDocument(res, buildWordDocument([structureExport], buildFilterSummary(req.query)), fileName);
     }
 
     const workbook = createWorkbook(req.user);
@@ -1440,7 +1608,8 @@ router.get('/structures/metadata', authenticateToken, checkExportPermissions, as
         },
         users,
         organizations: Array.from(new Set(users.map((user) => user.organization).filter(Boolean))).sort(),
-        pdf_export_supported: true
+        pdf_export_supported: true,
+        word_export_supported: true
       },
       message: 'Report metadata retrieved successfully'
     });
