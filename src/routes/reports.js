@@ -1,6 +1,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
+const fs = require('fs');
 const mongoose = require('mongoose');
 const { User } = require('../models/schemas');
 const { authenticateToken } = require('../middlewares/auth');
@@ -926,10 +927,27 @@ const pdfSectionTitle = (doc, title) => {
   doc
     .font('Helvetica-Bold')
     .fontSize(12)
-    .fillColor('#1F4E78')
-    .text(title, { underline: false });
+    .fillColor('#000000')
+    .text(title, { underline: true });
   doc.moveDown(0.4);
   doc.fillColor('#000000');
+};
+
+const pdfHighlightLabel = (doc, text) => {
+  const label = safeText(text, 'N/A');
+  const x = doc.page.margins.left;
+  const y = doc.y;
+  const width = doc.widthOfString(label, { font: 'Helvetica-Bold', size: 12 }) + 8;
+  const height = 16;
+
+  ensurePdfSpace(doc, height + 4);
+  doc.rect(x, y, width, height).fill('#FFF200');
+  doc
+    .fillColor('#000000')
+    .font('Helvetica-Bold')
+    .fontSize(12)
+    .text(label, x + 4, y + 3, { lineBreak: false });
+  doc.y = y + height + 6;
 };
 
 const pdfKeyValue = (doc, label, value) => {
@@ -989,19 +1007,122 @@ const pdfTableRow = (doc, columns, widths, options = {}) => {
   doc.y += rowHeight;
 };
 
+const groupObservationsForPdf = (observations) =>
+  observations.reduce((acc, item) => {
+    if (!acc.has(item.location)) {
+      acc.set(item.location, { structural: [], nonStructural: [] });
+    }
+
+    const bucket = item.category === 'STRUCTURAL DISTRESS' ? 'structural' : 'nonStructural';
+    acc.get(item.location)[bucket].push(item);
+    return acc;
+  }, new Map());
+
+const groupTestsForPdf = (tests) =>
+  tests.reduce((acc, test) => {
+    if (!acc.has(test.test_name)) acc.set(test.test_name, []);
+    acc.get(test.test_name).push(test);
+    return acc;
+  }, new Map());
+
+const groupQuantificationsForPdf = (rows) =>
+  rows.reduce((acc, row) => {
+    const key = safeText(row.distress, 'OTHER');
+    if (!acc.has(key)) acc.set(key, []);
+    acc.get(key).push(row);
+    return acc;
+  }, new Map());
+
+const getPdfImagePath = (source) => {
+  const value = safeText(source);
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value) || /^data:/i.test(value)) return null;
+  if (fs.existsSync(value)) return value;
+  return null;
+};
+
+const renderPdfImageGrid = (doc, rows, type) => {
+  if (!rows.length) {
+    pdfBullet(doc, `No ${type} images available`);
+    return;
+  }
+
+  const gap = 16;
+  const cardWidth = (doc.page.width - doc.page.margins.left - doc.page.margins.right - gap) / 2;
+  const imageHeight = 150;
+  const captionHeight = 34;
+  const cardHeight = imageHeight + captionHeight;
+  const startX = doc.page.margins.left;
+
+  rows.forEach((row, index) => {
+    if (index % 2 === 0) {
+      ensurePdfSpace(doc, cardHeight + 20);
+    }
+
+    const x = index % 2 === 0 ? startX : startX + cardWidth + gap;
+    const y = doc.y;
+    const title = type === 'inspection' ? row.caption : row.test_name;
+    const meta = type === 'inspection' ? row.location : row.scopeLabel;
+    const imagePath = getPdfImagePath(row.source);
+
+    doc.rect(x, y, cardWidth, imageHeight).lineWidth(0.5).strokeColor('#BFBFBF').stroke();
+
+    if (imagePath) {
+      try {
+        doc.image(imagePath, x + 2, y + 2, {
+          fit: [cardWidth - 4, imageHeight - 4],
+          align: 'center',
+          valign: 'center'
+        });
+      } catch (error) {
+        doc.font('Helvetica').fontSize(9).fillColor('#666666').text('Image could not be rendered', x + 8, y + 68, {
+          width: cardWidth - 16,
+          align: 'center'
+        });
+      }
+    } else {
+      doc.font('Helvetica').fontSize(9).fillColor('#666666').text('Image not available in export', x + 8, y + 68, {
+        width: cardWidth - 16,
+        align: 'center'
+      });
+    }
+
+    doc
+      .fillColor('#000000')
+      .font('Helvetica')
+      .fontSize(9)
+      .text(safeText(title, 'Untitled'), x, y + imageHeight + 4, {
+        width: cardWidth,
+        align: 'center'
+      });
+    doc
+      .fillColor('#555555')
+      .fontSize(8)
+      .text(safeText(meta, ''), x, y + imageHeight + 16, {
+        width: cardWidth,
+        align: 'center'
+      });
+
+    if (index % 2 === 1 || index === rows.length - 1) {
+      doc.y = y + cardHeight + 10;
+    }
+  });
+  doc.fillColor('#000000');
+};
+
 const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) => {
   const observations = collectStructureObservations(structureExport.structure);
   const quantifications = collectQuantifications(structureExport.structure);
   const tests = collectTests(structureExport.structure);
   const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
   const structure = structureExport.structure;
+  const summaryRows = summarizeMethodology(quantifications);
 
   if (index > 0) doc.addPage();
 
-  doc.font('Helvetica-Bold').fontSize(16).fillColor('#1F1F1F').text('SAMS');
+  doc.font('Helvetica-Bold').fontSize(18).fillColor('#1F1F1F').text('SAMS', { align: 'center' });
   doc.moveDown(0.2);
-  doc.font('Helvetica-Bold').fontSize(13).fillColor('#1F4E78').text('OUTPUT / REPORT FORMAT');
-  doc.moveDown(0.5);
+  pdfHighlightLabel(doc, 'OUTPUT / REPORT FORMAT:');
   doc.fillColor('#000000');
 
   pdfKeyValue(doc, 'Structure ID', structure.structural_identity?.structural_identity_number);
@@ -1027,64 +1148,52 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   if (!observations.length) {
     pdfBullet(doc, 'No observations recorded');
   } else {
-    const grouped = observations.reduce((acc, item) => {
-      if (!acc.has(item.location)) acc.set(item.location, []);
-      acc.get(item.location).push(item);
-      return acc;
-    }, new Map());
+    const grouped = groupObservationsForPdf(observations);
+    pdfTableRow(doc, ['S. No', 'Location/Remarks'], [60, 475], { header: true });
 
-    grouped.forEach((locationObservations, location) => {
-      ensurePdfSpace(doc, 18);
-      doc.font('Helvetica-Bold').fontSize(10).text(location.toUpperCase());
-      ['STRUCTURAL DISTRESS', 'NON-STRUCTURAL DISTRESS'].forEach((category) => {
-        const rows = locationObservations.filter((item) => item.category === category);
+    grouped.forEach((locationRows, location) => {
+      pdfTableRow(doc, ['', location.toUpperCase()], [60, 475], { header: true });
+      [
+        ['STRUCTURAL DISTRESS', locationRows.structural],
+        ['NON-STRUCTURAL DISTRESS', locationRows.nonStructural]
+      ].forEach(([label, rows]) => {
         if (!rows.length) return;
-        ensurePdfSpace(doc, 16);
-        doc.font('Helvetica-Bold').fontSize(9).text(category);
+        pdfTableRow(doc, ['', label], [60, 475], { header: true });
         rows.forEach((item, rowIndex) => {
-          pdfBullet(doc, `${rowIndex + 1}. ${item.component}: ${item.remarks}`);
+          const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
+          pdfTableRow(doc, [String(rowIndex + 1), text], [60, 475], { fontSize: 9 });
         });
       });
-      doc.moveDown(0.3);
     });
   }
 
   pdfSectionTitle(doc, 'INSPECTION IMAGES');
-  if (!inspectionImages.length) {
-    pdfBullet(doc, 'No inspection image references attached');
-  } else {
-    pdfTableRow(doc, ['S. No', 'Caption', 'Location', 'Image Reference'], [40, 170, 140, 150], { header: true });
-    inspectionImages.forEach((row, rowIndex) => {
-      pdfTableRow(doc, [String(rowIndex + 1), row.caption, row.location, row.source], [40, 170, 140, 150]);
-    });
-  }
+  renderPdfImageGrid(doc, inspectionImages, 'inspection');
 
   pdfSectionTitle(doc, 'TEST RESULTS');
   if (!tests.length) {
     pdfBullet(doc, 'No test results recorded');
   } else {
-    const groupedTests = tests.reduce((acc, item) => {
-      if (!acc.has(item.test_name)) acc.set(item.test_name, []);
-      acc.get(item.test_name).push(item);
-      return acc;
-    }, new Map());
+    const groupedTests = groupTestsForPdf(tests);
 
     let testIndex = 1;
     groupedTests.forEach((rows, testName) => {
-      ensurePdfSpace(doc, 16);
-      doc.font('Helvetica-Bold').fontSize(10).text(`${testIndex}. ${testName}`);
-      pdfTableRow(doc, ['S. No', 'Location', 'Component', 'Date', 'Remarks / Result'], [40, 150, 110, 70, 180], { header: true });
+      ensurePdfSpace(doc, 18);
+      doc.font('Helvetica').fontSize(12).fillColor('#000000').text(`${testIndex}. ${testName}`);
+      pdfTableRow(doc, ['Location', 'Component', 'Date', 'Result', 'Remarks', 'Attachment'], [120, 100, 55, 110, 85, 65], { header: true, fontSize: 8 });
       rows.forEach((row, rowIndex) => {
         pdfTableRow(
           doc,
           [
-            String(rowIndex + 1),
             row.scopeLabel,
             [row.component_type, row.component_id].filter(Boolean).join(' / '),
             row.test_date || '',
-            [row.result_summary, row.remarks].filter(Boolean).join(' | ') || 'N/A'
+            row.result_summary || 'N/A',
+            row.remarks || '',
+            row.attachment || ''
           ],
-          [40, 150, 110, 70, 180]
+          [120, 100, 55, 110, 85, 65],
+          { fontSize: 8 }
         );
       });
       testIndex += 1;
@@ -1093,32 +1202,28 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   }
 
   pdfSectionTitle(doc, 'TESTING IMAGES');
-  if (!testingImages.length) {
-    pdfBullet(doc, 'No testing file references attached');
-  } else {
-    pdfTableRow(doc, ['S. No', 'Test Name', 'Location', 'File Reference'], [40, 170, 150, 140], { header: true });
-    testingImages.forEach((row, rowIndex) => {
-      pdfTableRow(doc, [String(rowIndex + 1), row.test_name, row.scopeLabel, row.source], [40, 170, 150, 140]);
-    });
-  }
+  renderPdfImageGrid(doc, testingImages, 'testing');
 
   pdfSectionTitle(doc, 'QUANTIFICATION');
   if (!quantifications.length) {
     pdfBullet(doc, 'No quantification entries recorded');
   } else {
-    const groupedQuantifications = quantifications.reduce((acc, item) => {
-      if (!acc.has(item.category)) acc.set(item.category, []);
-      acc.get(item.category).push(item);
-      return acc;
-    }, new Map());
-
+    const groupedQuantifications = groupQuantificationsForPdf(quantifications);
     groupedQuantifications.forEach((rows, category) => {
-      ensurePdfSpace(doc, 16);
-      doc.font('Helvetica-Bold').fontSize(10).text(category);
+      ensurePdfSpace(doc, 18);
+      const startX = doc.page.margins.left;
+      const y = doc.y;
+      doc.rect(startX, y, 535, 16).fill('#FFF200');
+      doc
+        .fillColor('#000000')
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .text(category, startX, y + 4, { width: 535, align: 'center' });
+      doc.y = y + 18;
       pdfTableRow(
         doc,
-        ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Quantity', 'Repair Methodology'],
-        [32, 120, 78, 35, 35, 35, 35, 70, 100],
+        ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Length / Area / Volume', 'Repair Methodology'],
+        [32, 120, 78, 35, 35, 35, 35, 90, 75],
         { header: true, fontSize: 8 }
       );
       rows.forEach((row, rowIndex) => {
@@ -1135,7 +1240,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
             `${row.quantity} ${row.unit}`.trim(),
             row.repair_methodology
           ],
-          [32, 120, 78, 35, 35, 35, 35, 70, 100],
+          [32, 120, 78, 35, 35, 35, 35, 90, 75],
           { fontSize: 8 }
         );
       });
@@ -1144,7 +1249,6 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   }
 
   pdfSectionTitle(doc, 'REPAIR METHODOLOGY SUMMARY');
-  const summaryRows = summarizeMethodology(quantifications);
   if (!summaryRows.length) {
     pdfBullet(doc, 'No methodology summary available');
   } else {
@@ -1156,12 +1260,20 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
 
   doc.moveDown(0.4);
   doc
-    .font('Helvetica-Oblique')
-    .fontSize(8)
+    .font('Helvetica')
+    .fontSize(9)
     .fillColor('#555555')
-    .text(
-      'Note: Observation-to-quantification linkage depends on saved quantification rows. TODO: add explicit observation linkage in the data model if one-to-one traceability is required.'
-    );
+    .text('Note 1. The distress, L, B, H, and repair methodology entered in the structural rating screen should reflect in this table format.');
+  doc
+    .font('Helvetica')
+    .fontSize(9)
+    .fillColor('#555555')
+    .text('Note 2. Structural and non-structural distress should reflect in this table separately.');
+  doc
+    .font('Helvetica')
+    .fontSize(9)
+    .fillColor('#555555')
+    .text('Note 3. Output should remain suitable for final-report copy/paste into Word.');
   doc.fillColor('#000000');
 };
 
