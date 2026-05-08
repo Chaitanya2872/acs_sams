@@ -934,7 +934,7 @@ const pdfSectionTitle = (doc, title) => {
 };
 
 const pdfHighlightLabel = (doc, text) => {
-  const label = safeText(text, 'N/A');
+  const label = safeText(text, '');
   const x = doc.page.margins.left;
   const y = doc.y;
   const width = doc.widthOfString(label, { font: 'Helvetica-Bold', size: 12 }) + 8;
@@ -958,7 +958,7 @@ const pdfKeyValue = (doc, label, value) => {
     .text(`${label}: `, { continued: true });
   doc
     .font('Helvetica')
-    .text(safeText(value, 'N/A'));
+    .text(safeText(value, ''));
 };
 
 const pdfBullet = (doc, text, indent = 14) => {
@@ -1043,7 +1043,6 @@ const getPdfImagePath = (source) => {
 
 const renderPdfImageGrid = (doc, rows, type) => {
   if (!rows.length) {
-    pdfBullet(doc, `No ${type} images available`);
     return;
   }
 
@@ -1117,6 +1116,10 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
   const structure = structureExport.structure;
   const summaryRows = summarizeMethodology(quantifications);
+  const ownerEmployee = [
+    buildOwnerLabel(structureExport.owner),
+    structureExport.owner?.profile?.employee_id ? `(${structureExport.owner.profile.employee_id})` : ''
+  ].filter(Boolean).join(' ');
 
   if (index > 0) doc.addPage();
 
@@ -1125,12 +1128,12 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   pdfHighlightLabel(doc, 'OUTPUT / REPORT FORMAT:');
   doc.fillColor('#000000');
 
-  pdfKeyValue(doc, 'Structure ID', structure.structural_identity?.structural_identity_number);
-  pdfKeyValue(doc, 'UID', structure.structural_identity?.uid);
-  pdfKeyValue(doc, 'Structure Type', structure.structural_identity?.type_of_structure);
-  pdfKeyValue(doc, 'Structure Subtype', structure.structural_identity?.structure_subtype);
-  pdfKeyValue(doc, 'Owner / Employee', `${buildOwnerLabel(structureExport.owner)}${structureExport.owner?.profile?.employee_id ? ` (${structureExport.owner.profile.employee_id})` : ''}`);
-  pdfKeyValue(doc, 'Organization', structureExport.owner?.profile?.organization || structure.administration?.organization);
+  pdfKeyValue(doc, 'Structure ID', structure.structural_identity?.structural_identity_number || '');
+  pdfKeyValue(doc, 'UID', structure.structural_identity?.uid || '');
+  pdfKeyValue(doc, 'Structure Type', structure.structural_identity?.type_of_structure || '');
+  pdfKeyValue(doc, 'Structure Subtype', structure.structural_identity?.structure_subtype || '');
+  pdfKeyValue(doc, 'Owner / Employee', ownerEmployee || '');
+  pdfKeyValue(doc, 'Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || '');
   pdfKeyValue(
     doc,
     'Location',
@@ -1138,15 +1141,14 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
       .filter(Boolean)
       .join(' / ')
   );
-  pdfKeyValue(doc, 'Created Date', formatDate(structure.creation_info?.created_date));
-  pdfKeyValue(doc, 'Last Updated', formatDate(structure.creation_info?.last_updated_date));
-  pdfKeyValue(doc, 'Applied Filters', filtersApplied || 'None');
-  pdfKeyValue(doc, 'Report Position', `${index + 1} of ${total}`);
+  pdfKeyValue(doc, 'Created Date', formatDate(structure.creation_info?.created_date) || '');
+  pdfKeyValue(doc, 'Last Updated', formatDate(structure.creation_info?.last_updated_date) || '');
+  pdfKeyValue(doc, 'Applied Filters', filtersApplied || '');
   doc.moveDown(0.6);
 
   pdfSectionTitle(doc, 'OBSERVATIONS');
   if (!observations.length) {
-    pdfBullet(doc, 'No observations recorded');
+    pdfTableRow(doc, ['S. No', 'Location/Remarks'], [60, 475], { header: true });
   } else {
     const grouped = groupObservationsForPdf(observations);
     pdfTableRow(doc, ['S. No', 'Location/Remarks'], [60, 475], { header: true });
@@ -1172,7 +1174,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
 
   pdfSectionTitle(doc, 'TEST RESULTS');
   if (!tests.length) {
-    pdfBullet(doc, 'No test results recorded');
+    doc.moveDown(0.1);
   } else {
     const groupedTests = groupTestsForPdf(tests);
 
@@ -1188,7 +1190,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
             row.scopeLabel,
             [row.component_type, row.component_id].filter(Boolean).join(' / '),
             row.test_date || '',
-            row.result_summary || 'N/A',
+            row.result_summary || '',
             row.remarks || '',
             row.attachment || ''
           ],
@@ -1206,7 +1208,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
 
   pdfSectionTitle(doc, 'QUANTIFICATION');
   if (!quantifications.length) {
-    pdfBullet(doc, 'No quantification entries recorded');
+    doc.moveDown(0.1);
   } else {
     const groupedQuantifications = groupQuantificationsForPdf(quantifications);
     groupedQuantifications.forEach((rows, category) => {
@@ -1250,7 +1252,8 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
 
   pdfSectionTitle(doc, 'REPAIR METHODOLOGY SUMMARY');
   if (!summaryRows.length) {
-    pdfBullet(doc, 'No methodology summary available');
+    pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], [40, 320, 90, 90], { header: true });
+    pdfTableRow(doc, ['', '', '', ''], [40, 320, 90, 90]);
   } else {
     pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], [40, 320, 90, 90], { header: true });
     summaryRows.forEach((row, rowIndex) => {
