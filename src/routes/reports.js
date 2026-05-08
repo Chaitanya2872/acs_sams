@@ -2,6 +2,7 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
+const puppeteer = require('puppeteer-core');
 const mongoose = require('mongoose');
 const { User } = require('../models/schemas');
 const { authenticateToken } = require('../middlewares/auth');
@@ -88,6 +89,14 @@ const TEST_NAME_LABELS = {
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PDF_MIME = 'application/pdf';
 const WORD_MIME = 'application/msword';
+
+const BROWSER_CANDIDATES = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+].filter(Boolean);
 
 const isPdfFormat = (format) => format === 'pdf';
 const isWordFormat = (format) => ['word', 'doc', 'docx'].includes(format);
@@ -1753,10 +1762,47 @@ const buildWordDocument = (structures, filtersApplied) => `
   </html>
 `;
 
+const resolveBrowserExecutablePath = () => {
+  const executablePath = BROWSER_CANDIDATES.find((candidate) => fs.existsSync(candidate));
+  if (!executablePath) {
+    throw new Error('Chrome or Edge executable not found for HTML-to-PDF rendering');
+  }
+  return executablePath;
+};
+
 const sendWordDocument = (res, content, fileName) => {
   res.setHeader('Content-Type', WORD_MIME);
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
   res.send(content);
+};
+
+const sendPdfFromHtml = async (res, html, fileName) => {
+  const browser = await puppeteer.launch({
+    executablePath: resolveBrowserExecutablePath(),
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '12mm',
+        right: '12mm',
+        bottom: '12mm',
+        left: '12mm'
+      }
+    });
+
+    res.setHeader('Content-Type', PDF_MIME);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(pdfBuffer);
+  } finally {
+    await browser.close();
+  }
 };
 
 router.get('/structures/download', authenticateToken, checkExportPermissions, async (req, res) => {
@@ -1773,12 +1819,9 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
     if (isPdfFormat(requestedFormat)) {
-      const doc = createPdfDocument();
-      structures.forEach((structureExport, index) => {
-        renderStructurePdf(doc, structureExport, filterSummary, index, structures.length);
-      });
+      const html = buildWordDocument(structures, filterSummary);
       const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendPdf(res, doc, fileName);
+      return sendPdfFromHtml(res, html, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
@@ -1845,12 +1888,9 @@ router.get('/structures/complete-download', authenticateToken, checkExportPermis
 
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
     if (isPdfFormat(requestedFormat)) {
-      const doc = createPdfDocument();
-      structures.forEach((structureExport, index) => {
-        renderStructurePdf(doc, structureExport, 'Complete export', index, structures.length);
-      });
+      const html = buildWordDocument(structures, 'Complete export');
       const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendPdf(res, doc, fileName);
+      return sendPdfFromHtml(res, html, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
@@ -1905,10 +1945,9 @@ router.get('/structures/:id/download', authenticateToken, checkExportPermissions
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
     if (isPdfFormat(requestedFormat)) {
-      const doc = createPdfDocument();
-      renderStructurePdf(doc, structureExport, buildFilterSummary(req.query), 0, 1);
+      const html = buildWordDocument([structureExport], buildFilterSummary(req.query));
       const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.pdf`;
-      return sendPdf(res, doc, fileName);
+      return sendPdfFromHtml(res, html, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
