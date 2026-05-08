@@ -1418,7 +1418,6 @@ const renderWordImageGrid = (rows, type) => {
         .map((row) => {
           const imageSrc = toWordImageSource(row.source);
           const caption = type === 'inspection' ? row.caption : row.test_name;
-          const meta = type === 'inspection' ? row.location : row.scopeLabel;
 
           return `
             <div class="image-card">
@@ -1430,7 +1429,6 @@ const renderWordImageGrid = (rows, type) => {
               }
               </div>
               <div class="caption-title">${escapeHtml(caption)}</div>
-              ${meta ? `<div class="caption-meta">${escapeHtml(meta)}</div>` : ''}
             </div>
           `;
         })
@@ -1497,6 +1495,45 @@ const renderTestResultsWord = (tests) => {
     })
     .join('');
 };
+
+const renderSummaryTableWord = (summaryRows) =>
+  `
+    <table>
+      <thead>
+        <tr>
+          <th style="width:50px;" class="center">S. No</th>
+          <th>Description</th>
+          <th style="width:100px;" class="center">Quantity</th>
+          <th style="width:100px;" class="center">Units</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${
+          summaryRows.length
+            ? summaryRows
+                .map(
+                  (row, rowIndex) => `
+                    <tr>
+                      <td class="center">${rowIndex + 1}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td class="center">${escapeHtml(String(row.quantity))}</td>
+                      <td class="center">${escapeHtml(row.units)}</td>
+                    </tr>
+                  `
+                )
+                .join('')
+            : `
+              <tr>
+                <td class="center">&nbsp;</td>
+                <td>&nbsp;</td>
+                <td class="center">&nbsp;</td>
+                <td class="center">&nbsp;</td>
+              </tr>
+            `
+        }
+      </tbody>
+    </table>
+  `;
 
 const renderQuantificationWord = (quantifications) => {
   const grouped = groupQuantificationsForWord(quantifications);
@@ -1612,11 +1649,7 @@ const renderStructureWord = (structureExport, filtersApplied, index, total) => {
       ${renderWordSection('QUANTIFICATION', renderQuantificationWord(quantifications))}
       ${renderWordSection(
         'REPAIR METHODOLOGY SUMMARY',
-        renderWordTable(
-          ['S. No', 'Description', 'Quantity', 'Units'],
-          summaryRows.map((row, rowIndex) => [String(rowIndex + 1), row.description, String(row.quantity), row.units]),
-          { className: 'summary-table' }
-        ) + renderSummaryNoteList()
+        renderSummaryTableWord(summaryRows) + renderSummaryNoteList()
       )}
     </section>
   `;
@@ -1629,14 +1662,18 @@ const buildWordDocument = (structures, filtersApplied) => `
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>SAMS - Output / Report Format</title>
       <style>
+        @page {
+          size: A4;
+          margin: 18mm 16mm;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
           font-family: 'Times New Roman', Times, serif;
           font-size: 11pt;
           color: #1f1f1f;
           background: #fff;
-          padding: 40px 60px;
-          max-width: 900px;
+          padding: 0;
+          max-width: 820px;
           margin: 0 auto;
           line-height: 1.4;
         }
@@ -1674,6 +1711,7 @@ const buildWordDocument = (structures, filtersApplied) => `
           border-collapse: collapse;
           margin-bottom: 16px;
           font-size: 10pt;
+          table-layout: fixed;
         }
         th, td {
           border: 1px solid #7f7f7f;
@@ -1708,6 +1746,7 @@ const buildWordDocument = (structures, filtersApplied) => `
         .image-card {
           flex: 0 0 calc(50% - 10px);
           text-align: center;
+          break-inside: avoid;
         }
         .image-box {
           width: 100%;
@@ -1727,7 +1766,6 @@ const buildWordDocument = (structures, filtersApplied) => `
           object-fit: cover;
         }
         .caption-title { font-size: 10pt; margin-top: 5px; }
-        .caption-meta { font-size: 9pt; color: #555; }
         .quant-group-row td {
           background: #fff200;
           font-weight: 700;
@@ -1748,12 +1786,13 @@ const buildWordDocument = (structures, filtersApplied) => `
         .test-block h3 { font-size: 11pt; font-weight: 400; margin-bottom: 6px; }
         .center { text-align: center; }
         .meta-table td:first-child { font-weight: 700; width: 160px; }
+        .meta-table td:last-child { width: auto; }
+        .report-block { page-break-after: always; break-after: page; }
+        .report-block:last-child { page-break-after: auto; break-after: auto; }
         @media print {
-          body { padding: 20px; }
+          body { padding: 0; max-width: none; }
           .no-print { display: none; }
         }
-        .report-block { page-break-after: always; }
-        .report-block:last-child { page-break-after: auto; }
       </style>
     </head>
     <body>
