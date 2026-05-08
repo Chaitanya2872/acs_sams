@@ -1347,15 +1347,15 @@ const renderWordTable = (headers, rows, options = {}) => `
                 (row) => `<tr>${row.map((cell) => `<td>${cell === null ? '&nbsp;' : escapeHtml(cell) || '&nbsp;'}</td>`).join('')}</tr>`
               )
               .join('')
-          : `<tr><td colspan="${headers.length}">No records available</td></tr>`
+          : `<tr><td colspan="${headers.length}">&nbsp;</td></tr>`
       }
     </tbody>
   </table>
 `;
 
 const renderWordSection = (title, body, subtitle = '') => `
-  <h2>${escapeHtml(title)}</h2>
-  ${subtitle ? `<p class="section-copy">${escapeHtml(subtitle)}</p>` : ''}
+  <h2 class="section-title">${escapeHtml(title)}</h2>
+  ${subtitle ? `<p class="section-note">${escapeHtml(subtitle)}</p>` : ''}
   ${body}
 `;
 
@@ -1397,7 +1397,7 @@ const groupQuantificationsForWord = (rows) =>
 
 const renderWordImageGrid = (rows, type) => {
   if (!rows.length) {
-    return `<p class="empty-state">No ${type} images available.</p>`;
+    return `<p class="empty-state"></p>`;
   }
 
   return `
@@ -1409,18 +1409,17 @@ const renderWordImageGrid = (rows, type) => {
           const meta = type === 'inspection' ? row.location : row.scopeLabel;
 
           return `
-            <figure class="image-card">
+            <div class="image-card">
+              <div class="image-box">
               ${
                 imageSrc
                   ? `<img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(caption)}" />`
-                  : `<div class="image-missing">Image not available</div>`
+                  : 'Image not available in export'
               }
-              <figcaption>
-                <div class="caption-title">${escapeHtml(caption)}</div>
-                <div class="caption-meta">${escapeHtml(meta)}</div>
-                ${!imageSrc ? `<div class="caption-ref">${escapeHtml(row.source)}</div>` : ''}
-              </figcaption>
-            </figure>
+              </div>
+              <div class="caption-title">${escapeHtml(caption)}</div>
+              ${meta ? `<div class="caption-meta">${escapeHtml(meta)}</div>` : ''}
+            </div>
           `;
         })
         .join('')}
@@ -1432,12 +1431,12 @@ const renderObservationSectionWord = (observations) => {
   const grouped = groupObservationsForWord(observations);
 
   if (!grouped.size) {
-    return '<p class="empty-state">No observations recorded.</p>';
+    return '<table><thead><tr><th class="sno-col">S. No</th><th>Location/Remarks</th></tr></thead><tbody></tbody></table>';
   }
 
-  const rows = ['<table class="observation-table"><thead><tr><th style="width:70px;">S. No</th><th>Location/Remarks</th></tr></thead><tbody>'];
+  const rows = ['<table><thead><tr><th class="sno-col">S. No</th><th>Location/Remarks</th></tr></thead><tbody>'];
   grouped.forEach((group, location) => {
-    rows.push(`<tr class="location-row"><td colspan="2">${escapeHtml(location)}</td></tr>`);
+    rows.push(`<tr class="obs-location-row"><td colspan="2">${escapeHtml(location)}</td></tr>`);
 
     const categories = [
       ['STRUCTURAL DISTRESS', group.structural],
@@ -1446,10 +1445,10 @@ const renderObservationSectionWord = (observations) => {
 
     categories.forEach(([label, items]) => {
       if (!items.length) return;
-      rows.push(`<tr class="category-row"><td colspan="2">${escapeHtml(label)}</td></tr>`);
+      rows.push(`<tr class="obs-category-row"><td colspan="2">${escapeHtml(label)}</td></tr>`);
       items.forEach((item, index) => {
         const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
-        rows.push(`<tr><td class="center">${index + 1}</td><td>${escapeHtml(text)}</td></tr>`);
+        rows.push(`<tr><td class="sno-col center">${index + 1}</td><td>${escapeHtml(text)}</td></tr>`);
       });
     });
   });
@@ -1461,7 +1460,7 @@ const renderTestResultsWord = (tests) => {
   const grouped = groupTestsForWord(tests);
 
   if (!grouped.size) {
-    return '<p class="empty-state">No test results recorded.</p>';
+    return '<p class="empty-state"></p>';
   }
 
   let testIndex = 1;
@@ -1473,7 +1472,7 @@ const renderTestResultsWord = (tests) => {
           row.scopeLabel,
           [row.component_type, row.component_id].filter(Boolean).join(' / '),
           row.test_date || '',
-          row.result_summary || 'N/A',
+          row.result_summary || '',
           row.remarks || '',
           row.attachment || ''
         ]),
@@ -1491,21 +1490,38 @@ const renderQuantificationWord = (quantifications) => {
   const grouped = groupQuantificationsForWord(quantifications);
 
   if (!grouped.size) {
-    return '<p class="empty-state">No quantification entries recorded.</p>';
+    return '<p class="empty-state"></p>';
   }
 
   const rows = [
-    '<table class="quantification-table"><thead><tr><th style="width:60px;">S. No</th><th>Location of Distress</th><th>Distress</th><th style="width:48px;">Nos</th><th style="width:48px;">L (M)</th><th style="width:48px;">B (M)</th><th style="width:48px;">H (M)</th><th style="width:110px;">Length / Area / Volume</th><th>Repair Methodology</th></tr></thead><tbody>'
+    `
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2" style="width:50px;" class="center">S.No</th>
+          <th rowspan="2">Location of Distress</th>
+          <th colspan="4" style="text-align:center;">Distress</th>
+          <th rowspan="2" style="text-align:center;">Length (Rm) / Area (Sqm) / Volume (Cum)</th>
+          <th rowspan="2">Repair Methodology</th>
+        </tr>
+        <tr>
+          <th class="center">Nos</th>
+          <th class="center">L (M)</th>
+          <th class="center">B (M)</th>
+          <th class="center">H (M)</th>
+        </tr>
+      </thead>
+      <tbody>
+    `
   ];
 
   grouped.forEach((items, groupName) => {
-    rows.push(`<tr class="quant-group"><td colspan="9">${escapeHtml(groupName)}</td></tr>`);
+    rows.push(`<tr class="quant-group-row"><td colspan="8">${escapeHtml(groupName)}</td></tr>`);
     items.forEach((row, index) => {
       rows.push(`
         <tr>
           <td class="center">${index + 1}</td>
           <td>${escapeHtml(row.location_of_distress)}</td>
-          <td>${escapeHtml(row.distress)}</td>
           <td class="center">${escapeHtml(String(row.nos))}</td>
           <td class="center">${escapeHtml(row.length ?? '')}</td>
           <td class="center">${escapeHtml(row.breadth ?? '')}</td>
@@ -1522,6 +1538,7 @@ const renderQuantificationWord = (quantifications) => {
 };
 
 const renderSummaryNoteList = () => `
+  <div class="summary-note">Quantities in the above table are summarized by repair methodology.</div>
   <div class="note-block">
     <p>Note 1. The distress, L, B, H, and repair methodology entered in the structural rating screen should reflect in this table format.</p>
     <p>Note 2. Structural and non-structural distress should reflect in this table separately.</p>
@@ -1536,43 +1553,49 @@ const renderStructureWord = (structureExport, filtersApplied, index, total) => {
   const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
   const structure = structureExport.structure;
   const summaryRows = summarizeMethodology(quantifications);
+  const ownerEmployee = [
+    buildOwnerLabel(structureExport.owner),
+    structureExport.owner?.profile?.employee_id ? `(${structureExport.owner.profile.employee_id})` : ''
+  ].filter(Boolean).join(' ');
 
   const summaryItems = [
-    ['Structure ID', structure.structural_identity?.structural_identity_number],
-    ['UID', structure.structural_identity?.uid],
-    ['Structure Type', structure.structural_identity?.type_of_structure],
-    ['Structure Subtype', structure.structural_identity?.structure_subtype],
-    ['Owner / Employee', `${buildOwnerLabel(structureExport.owner)}${structureExport.owner?.profile?.employee_id ? ` (${structureExport.owner.profile.employee_id})` : ''}`],
-    ['Organization', structureExport.owner?.profile?.organization || structure.administration?.organization],
+    ['Structure ID', structure.structural_identity?.structural_identity_number || ''],
+    ['UID', structure.structural_identity?.uid || ''],
+    ['Structure Type', structure.structural_identity?.type_of_structure || ''],
+    ['Structure Subtype', structure.structural_identity?.structure_subtype || ''],
+    ['Owner / Employee', ownerEmployee || ''],
+    ['Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || ''],
     ['Location', [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code].filter(Boolean).join(' / ')],
-    ['Created Date', formatDate(structure.creation_info?.created_date)],
-    ['Last Updated', formatDate(structure.creation_info?.last_updated_date)],
-    ['Applied Filters', filtersApplied || 'None'],
-    ['Report Position', `${index + 1} of ${total}`]
+    ['Created Date', formatDate(structure.creation_info?.created_date) || ''],
+    ['Last Updated', formatDate(structure.creation_info?.last_updated_date) || ''],
+    ['Applied Filters', filtersApplied || '']
   ];
 
   return `
     <section class="report-block">
-      <div class="report-header">
-        <div class="report-brand">SAMS</div>
-      </div>
-      <div class="highlight-label">OUTPUT / REPORT FORMAT:</div>
-      ${renderWordTable(['Field', 'Value'], summaryItems, { className: 'meta-table' })}
+      <div class="brand">SAMS</div>
+      <div><span class="highlight-label">OUTPUT / REPORT FORMAT:</span></div>
+      <table class="meta-table">
+        <tbody>
+          ${summaryItems.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${value ? escapeHtml(value) : '&nbsp;'}</td></tr>`).join('')}
+        </tbody>
+      </table>
       ${renderWordSection(
         'OBSERVATIONS',
         renderObservationSectionWord(observations),
-        'Observation given in the structural and non-structural entries should reflect in the table and images below the table in the output.'
+        'Observation given in the structural and non-structural shall be reflect in the table and images below the table in the output.'
       )}
       ${renderWordSection('INSPECTION IMAGES', renderWordImageGrid(inspectionImages, 'inspection'))}
+      <p class="section-note" style="font-size:9pt; text-transform:uppercase; margin-bottom:14px;">The observation entered during the attaching the photo should reflect with image in small font</p>
       ${renderWordSection(
         'TEST RESULTS',
         renderTestResultsWord(tests),
-        'Provision for uploading multiple image, PDF, or Excel files for each testing format.'
+        'Provision for uploading multiple IMAGE OR PDF OR EXCEL files for each testing format.'
       )}
+      <p class="section-note" style="margin-bottom:14px;">Images attached during the testing should reflect below the test results in the output.</p>
       ${renderWordSection(
         'TESTING IMAGES',
-        renderWordImageGrid(testingImages, 'testing'),
-        'Images attached during testing should reflect below the test results in the output.'
+        renderWordImageGrid(testingImages, 'testing')
       )}
       ${renderWordSection('QUANTIFICATION', renderQuantificationWord(quantifications))}
       ${renderWordSection(
@@ -1591,30 +1614,132 @@ const buildWordDocument = (structures, filtersApplied) => `
   <html>
     <head>
       <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>SAMS - Output / Report Format</title>
       <style>
-        body { font-family: 'Times New Roman', serif; color: #1f1f1f; margin: 20px; line-height: 1.3; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-        th, td { border: 1px solid #7f7f7f; padding: 5px 6px; font-size: 11px; vertical-align: top; text-align: left; }
-        th { background: #ffffff; font-weight: 700; }
-        h2 { font-size: 16px; text-decoration: underline; margin: 22px 0 6px; }
-        h3 { font-size: 14px; margin: 10px 0 6px; font-weight: 400; }
-        .report-header { text-align: center; margin-bottom: 8px; }
-        .report-brand { font-family: Calibri, Arial, sans-serif; font-size: 22px; font-weight: 700; }
-        .highlight-label { display: inline-block; background: #fff200; font-weight: 700; padding: 2px 4px; margin: 8px 0 14px; }
-        .section-copy { margin: 0 0 10px; font-size: 11px; }
-        .meta-table th { width: 170px; }
-        .observation-table .location-row td { color: #0070c0; font-weight: 700; text-align: center; font-size: 12px; }
-        .observation-table .category-row td { font-weight: 700; text-align: center; font-size: 11px; }
-        .quantification-table .quant-group td { background: #fff200; font-weight: 700; text-align: center; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: 'Times New Roman', Times, serif;
+          font-size: 11pt;
+          color: #1f1f1f;
+          background: #fff;
+          padding: 40px 60px;
+          max-width: 900px;
+          margin: 0 auto;
+          line-height: 1.4;
+        }
+        .brand {
+          text-align: center;
+          font-family: Calibri, Arial, sans-serif;
+          font-size: 22pt;
+          font-weight: 700;
+          margin-bottom: 10px;
+          letter-spacing: 1px;
+        }
+        .highlight-label {
+          display: inline-block;
+          background: #fff200;
+          font-weight: 700;
+          font-size: 12pt;
+          padding: 2px 6px;
+          margin-bottom: 18px;
+          text-decoration: underline;
+        }
+        h2.section-title {
+          font-size: 13pt;
+          font-weight: 700;
+          text-decoration: underline;
+          margin: 22px 0 6px;
+          font-family: 'Times New Roman', Times, serif;
+        }
+        .section-note {
+          font-size: 10pt;
+          margin-bottom: 10px;
+          color: #1f1f1f;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 16px;
+          font-size: 10pt;
+        }
+        th, td {
+          border: 1px solid #7f7f7f;
+          padding: 5px 7px;
+          vertical-align: top;
+          text-align: left;
+        }
+        th {
+          font-weight: 700;
+          background: #fff;
+        }
+        .obs-location-row td {
+          color: #0070c0;
+          font-weight: 700;
+          text-align: center;
+          font-size: 11pt;
+          background: #fff;
+        }
+        .obs-category-row td {
+          font-weight: 700;
+          text-align: center;
+          font-size: 10pt;
+          background: #fff;
+        }
+        .sno-col { width: 60px; text-align: center; }
+        .image-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 20px;
+          margin: 14px 0;
+        }
+        .image-card {
+          flex: 0 0 calc(50% - 10px);
+          text-align: center;
+        }
+        .image-box {
+          width: 100%;
+          height: 220px;
+          border: 1px solid #999;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f5f5f5;
+          color: #888;
+          font-size: 10pt;
+          font-style: italic;
+        }
+        .image-box img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        .caption-title { font-size: 10pt; margin-top: 5px; }
+        .caption-meta { font-size: 9pt; color: #555; }
+        .quant-group-row td {
+          background: #fff200;
+          font-weight: 700;
+          text-align: center;
+          font-size: 10pt;
+        }
+        .note-block { margin-top: 8px; }
+        .note-block p { font-size: 10pt; margin: 3px 0; }
+        .summary-note {
+          background: #fce4d6;
+          padding: 5px 8px;
+          font-size: 10pt;
+          margin-bottom: 8px;
+          border: 1px solid #f2b98a;
+        }
+        .empty-state { font-size: 10pt; color: #888; padding: 6px 0; font-style: italic; }
+        .test-block { margin-bottom: 14px; }
+        .test-block h3 { font-size: 11pt; font-weight: 400; margin-bottom: 6px; }
         .center { text-align: center; }
-        .image-grid { display: table; width: 100%; border-spacing: 10px 6px; margin-bottom: 12px; }
-        .image-card { display: inline-block; width: 48%; margin: 0 1% 12px 1%; vertical-align: top; text-align: center; }
-        .image-card img { width: 100%; height: 220px; object-fit: cover; border: 1px solid #999999; }
-        .image-missing { height: 220px; border: 1px solid #999999; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #666666; }
-        .caption-title { font-size: 10px; margin-top: 4px; }
-        .caption-meta, .caption-ref { font-size: 9px; color: #555555; }
-        .empty-state { font-size: 11px; color: #555555; margin: 6px 0 12px; }
-        .note-block p { margin: 3px 0; font-size: 11px; }
+        .meta-table td:first-child { font-weight: 700; width: 160px; }
+        @media print {
+          body { padding: 20px; }
+          .no-print { display: none; }
+        }
         .report-block { page-break-after: always; }
         .report-block:last-child { page-break-after: auto; }
       </style>
