@@ -7,6 +7,15 @@ const rateLimit = require('express-rate-limit');
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
 
+const normalizeToken = (value) => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.toLowerCase().startsWith('bearer ')
+    ? trimmed.slice(7).trim()
+    : trimmed;
+};
+
 const parseCookies = (cookieHeader = '') =>
   cookieHeader
     .split(';')
@@ -16,25 +25,37 @@ const parseCookies = (cookieHeader = '') =>
       const separatorIndex = item.indexOf('=');
       if (separatorIndex === -1) return cookies;
       const key = item.slice(0, separatorIndex).trim();
-      const value = item.slice(separatorIndex + 1).trim();
+      const value = item.slice(separatorIndex + 1).trim().replace(/^"|"$/g, '');
       cookies[key] = decodeURIComponent(value);
       return cookies;
     }, {});
 
 const getRefreshTokenFromRequest = (req) => {
-  if (req.body && typeof req.body.refreshToken === 'string' && req.body.refreshToken.trim()) {
-    return req.body.refreshToken.trim();
+  const bodyToken = normalizeToken(req.body?.refreshToken);
+  if (bodyToken) {
+    return bodyToken;
+  }
+
+  const headerToken = normalizeToken(req.headers['x-refresh-token']);
+  if (headerToken) {
+    return headerToken;
+  }
+
+  const authHeaderToken = normalizeToken(req.headers.authorization);
+  if (authHeaderToken) {
+    return authHeaderToken;
   }
 
   const cookies = parseCookies(req.headers.cookie);
-  return cookies[REFRESH_COOKIE_NAME] || '';
+  return normalizeToken(cookies[REFRESH_COOKIE_NAME]);
 };
 
 const setRefreshTokenCookie = (res, refreshToken) => {
   res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    sameSite: process.env.REFRESH_COOKIE_SAMESITE || (process.env.NODE_ENV === 'production' ? 'none' : 'lax'),
+    path: '/',
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
 };
@@ -513,7 +534,8 @@ router.post('/logout', authenticateToken, async (req, res) => {
     res.clearCookie(REFRESH_COOKIE_NAME, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+      sameSite: process.env.REFRESH_COOKIE_SAMESITE || (process.env.NODE_ENV === 'production' ? 'none' : 'lax'),
+      path: '/'
     });
     res.status(200).json(result);
   } catch (error) {
