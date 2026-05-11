@@ -182,6 +182,30 @@ const inferUnit = (entry) => {
   return "NO'S";
 };
 
+const toMeters = (value, unit) => {
+  const numeric = toNumber(value);
+  if (numeric === null) return null;
+
+  switch (safeText(unit, 'm').toLowerCase()) {
+    case 'mm':
+      return numeric / 1000;
+    case 'cm':
+      return numeric / 100;
+    case 'inch':
+      return numeric * 0.0254;
+    case 'feet':
+      return numeric * 0.3048;
+    case 'm':
+    default:
+      return numeric;
+  }
+};
+
+const roundDimension = (value) => {
+  if (value === null || value === undefined) return null;
+  return Number(value.toFixed(3));
+};
+
 const summarizeMethodology = (rows) => {
   const summaryMap = new Map();
 
@@ -422,6 +446,103 @@ const buildLocationLabel = (scopeType, scope) => {
   return 'Structure';
 };
 
+const normalizeComponentLookupKey = (value) =>
+  safeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_');
+
+const getObservationText = (entry) => {
+  const remarks = safeText(entry?.inspector_notes || entry?.condition_comment || entry?.remarks);
+  if (remarks) return remarks;
+
+  const distressTypes = Array.isArray(entry?.distress_types)
+    ? entry.distress_types.map((item) => safeText(item)).filter(Boolean).join(', ')
+    : '';
+
+  return distressTypes || '';
+};
+
+const buildObservationLookup = (structuralContainer, nonStructuralContainer) => {
+  const lookup = new Map();
+
+  const addEntries = (entries) => {
+    entries.forEach(({ componentKey, componentLabel, entry }) => {
+      const observationText = getObservationText(entry);
+      if (!observationText) return;
+
+      [componentKey, componentLabel, entry?.name].forEach((alias) => {
+        const key = normalizeComponentLookupKey(alias);
+        if (key && !lookup.has(key)) {
+          lookup.set(key, observationText);
+        }
+      });
+    });
+  };
+
+  addEntries(getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS));
+  addEntries(getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS));
+
+  return lookup;
+};
+
+const resolveQuantificationLocation = (entry, observationLookup, scopeLabel) => {
+  const categoryKey = normalizeComponentLookupKey(entry?.category);
+  const observationText = categoryKey ? observationLookup.get(categoryKey) : '';
+  return safeText(observationText, safeText(entry?.location_of_distress, scopeLabel));
+};
+
+const buildDerivedQuantificationRows = (entries, scopeLabel) => {
+  const rows = [];
+
+  entries.forEach(({ componentLabel, entry }) => {
+    const observationText = getObservationText(entry);
+    const dimensions = entry?.distress_dimensions || {};
+    const dimensionUnit = safeText(dimensions.unit, 'm');
+    const length = roundDimension(toMeters(dimensions.length, dimensionUnit));
+    const breadth = roundDimension(toMeters(dimensions.breadth, dimensionUnit));
+    const height = roundDimension(toMeters(dimensions.height, dimensionUnit));
+    const repairMethodology = safeText(entry?.repair_methodology, 'Not Specified');
+    const hasDimensions = length !== null || breadth !== null || height !== null;
+    const hasContent = Boolean(observationText || hasDimensions || safeText(entry?.repair_methodology));
+
+    if (!hasContent) {
+      return;
+    }
+
+    const quantBase = {
+      nos: 1,
+      length,
+      breadth,
+      height
+    };
+
+    rows.push({
+      scopeLabel,
+      category: componentLabel,
+      location_of_distress: safeText(observationText, componentLabel),
+      distress: componentLabel,
+      nos: quantBase.nos,
+      length: quantBase.length,
+      breadth: quantBase.breadth,
+      height: quantBase.height,
+      quantity: inferQuantityValue(quantBase),
+      unit: inferUnit(quantBase),
+      repair_methodology: repairMethodology
+    });
+  });
+
+  return rows;
+};
+
+const collectScopeDerivedQuantifications = (scopeLabel, structuralContainer, nonStructuralContainer) =>
+  buildDerivedQuantificationRows(getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS), scopeLabel)
+    .concat(buildDerivedQuantificationRows(getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS), scopeLabel));
+
+const collectDerivedQuantificationsForContainer = (scopeLabel, container, componentMap) =>
+  buildDerivedQuantificationRows(getComponentEntries(container, componentMap), scopeLabel);
+
 const collectObservationsFromScope = (scopeType, scope, structuralContainer, nonStructuralContainer) => {
   const observations = [];
   const locationLabel = buildLocationLabel(scopeType, scope);
@@ -496,12 +617,12 @@ const collectQuantifications = (structure) => {
   const rows = [];
   const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
 
-  const addRows = (entries, scopeLabel, category) => {
+  const addRows = (entries, scopeLabel, category, observationLookup) => {
     (Array.isArray(entries) ? entries : []).forEach((entry) => {
       rows.push({
         scopeLabel,
         category,
-        location_of_distress: safeText(entry.location_of_distress, scopeLabel),
+        location_of_distress: resolveQuantificationLocation(entry, observationLookup, scopeLabel),
         distress: safeText(entry.category, category),
         nos: toNumber(entry.nos) ?? 1,
         length: toNumber(entry.length),
@@ -514,15 +635,54 @@ const collectQuantifications = (structure) => {
     });
   };
 
+  const addSavedOrDerivedRows = ({
+    structuralEntries,
+    nonStructuralEntries,
+    scopeLabel,
+    structuralContainer,
+    nonStructuralContainer
+  }) => {
+    const observationLookup = buildObservationLookup(structuralContainer, nonStructuralContainer);
+    const hasSavedStructural = Array.isArray(structuralEntries) && structuralEntries.length > 0;
+    const hasSavedNonStructural = Array.isArray(nonStructuralEntries) && nonStructuralEntries.length > 0;
+
+    if (hasSavedStructural) {
+      addRows(structuralEntries, scopeLabel, 'STRUCTURAL DISTRESS', observationLookup);
+    } else {
+      rows.push(...collectDerivedQuantificationsForContainer(scopeLabel, structuralContainer, STRUCTURAL_COMPONENTS));
+    }
+
+    if (hasSavedNonStructural) {
+      addRows(nonStructuralEntries, scopeLabel, 'NON-STRUCTURAL DISTRESS', observationLookup);
+    } else {
+      rows.push(...collectDerivedQuantificationsForContainer(scopeLabel, nonStructuralContainer, NON_STRUCTURAL_COMPONENTS));
+    }
+  };
+
   floors.forEach((floor) => {
     const floorLabel = safeText(floor.floor_label_name, `Floor ${floor.floor_number}`);
-    addRows(floor.quantifications?.structural, floorLabel, 'STRUCTURAL DISTRESS');
-    addRows(floor.quantifications?.non_structural, floorLabel, 'NON-STRUCTURAL DISTRESS');
+    addSavedOrDerivedRows({
+      structuralEntries: floor.quantifications?.structural,
+      nonStructuralEntries: floor.quantifications?.non_structural,
+      scopeLabel: floorLabel,
+      structuralContainer: floor.structural_rating,
+      nonStructuralContainer: floor.non_structural_rating
+    });
 
     (Array.isArray(floor.flats) ? floor.flats : []).forEach((flat) => {
       const flatLabel = `${floorLabel} / Flat ${safeText(flat.flat_number, flat.flat_id || 'N/A')}`;
-      addRows(flat.quantifications?.structural, flatLabel, 'STRUCTURAL DISTRESS');
-      addRows(flat.quantifications?.non_structural, flatLabel, 'NON-STRUCTURAL DISTRESS');
+      addSavedOrDerivedRows({
+        structuralEntries: flat.quantifications?.structural,
+        nonStructuralEntries: flat.quantifications?.non_structural,
+        scopeLabel: flatLabel,
+        structuralContainer: flat.structural_rating,
+        nonStructuralContainer: flat.non_structural_rating
+      });
+    });
+
+    (Array.isArray(floor.blocks) ? floor.blocks : []).forEach((block) => {
+      const blockLabel = `${floorLabel} / Block ${safeText(block.block_name || block.block_number, block.block_id || 'N/A')}`;
+      rows.push(...collectScopeDerivedQuantifications(blockLabel, block.structural_rating, block.non_structural_rating));
     });
   });
 
@@ -819,14 +979,6 @@ const addMethodologySummary = (worksheet, startRow, quantifications) => {
   let row = startRow;
   const summaryRows = summarizeMethodology(quantifications);
 
-  addMergedSectionRow(
-    worksheet,
-    row,
-    'Quantities in the above table are summarized by repair methodology.',
-    COLORS.NOTE,
-    4
-  );
-  row += 1;
   addTableHeader(worksheet, row, ['S. No', 'Description', 'Quantity', 'Units'], COLORS.PRIMARY);
   row += 1;
 
@@ -1270,23 +1422,6 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
     });
   }
 
-  doc.moveDown(0.4);
-  doc
-    .font('Helvetica')
-    .fontSize(9)
-    .fillColor('#555555')
-    .text('Note 1. The distress, L, B, H, and repair methodology entered in the structural rating screen should reflect in this table format.');
-  doc
-    .font('Helvetica')
-    .fontSize(9)
-    .fillColor('#555555')
-    .text('Note 2. Structural and non-structural distress should reflect in this table separately.');
-  doc
-    .font('Helvetica')
-    .fontSize(9)
-    .fillColor('#555555')
-    .text('Note 3. Output should remain suitable for final-report copy/paste into Word.');
-  doc.fillColor('#000000');
 };
 
 const writeStructureWorksheet = (worksheet, structureExport, filtersApplied) => {
@@ -1586,14 +1721,7 @@ const renderQuantificationWord = (quantifications) => {
   return rows.join('');
 };
 
-const renderSummaryNoteList = () => `
-  <div class="summary-note">Quantities in the above table are summarized by repair methodology.</div>
-  <div class="note-block">
-    <p>Note 1. The distress, L, B, H, and repair methodology entered in the structural rating screen should reflect in this table format.</p>
-    <p>Note 2. Structural and non-structural distress should reflect in this table separately.</p>
-    <p>Note 3. Output should remain suitable for final-report copy/paste into Word.</p>
-  </div>
-`;
+const renderSummaryNoteList = () => '';
 
 const renderStructureWord = (structureExport, filtersApplied, index, total) => {
   const observations = collectStructureObservations(structureExport.structure);
