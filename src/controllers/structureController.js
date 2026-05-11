@@ -3472,7 +3472,10 @@ const structureType = structure.structural_identity?.type_of_structure;
   }
 
   // Check administrative
-  if (structure.administration?.client_name && structure.administration?.email_id) {
+  if (
+    (structure.administrative?.client_name || structure.administration?.client_name) &&
+    (structure.administrative?.email_id || structure.administration?.email_id)
+  ) {
     progress.administrative = true;
   }
 
@@ -3708,7 +3711,7 @@ async getAllStructures(req, res) {
       structures = structures.filter(structure => 
         structure.structural_identity?.structural_identity_number?.toLowerCase().includes(searchLower) ||
         structure.structural_identity?.uid?.toLowerCase().includes(searchLower) ||
-        structure.administration?.client_name?.toLowerCase().includes(searchLower) ||
+        (structure.administrative?.client_name || structure.administration?.client_name || '').toLowerCase().includes(searchLower) ||
         structure.structural_identity?.city_name?.toLowerCase().includes(searchLower) ||
         (isPrivileged && (
           structure._ownerUsername?.toLowerCase().includes(searchLower) ||
@@ -3735,8 +3738,8 @@ async getAllStructures(req, res) {
           bValue = b.structural_identity?.structural_identity_number || '';
           break;
         case 'client_name':
-          aValue = a.administration?.client_name || '';
-          bValue = b.administration?.client_name || '';
+          aValue = a.administrative?.client_name || a.administration?.client_name || '';
+          bValue = b.administrative?.client_name || b.administration?.client_name || '';
           break;
         case 'owner':
           if (isPrivileged) {
@@ -3861,7 +3864,7 @@ async getAllStructures(req, res) {
         structure_name: structure.location?.structure_name || 'jack',
         uid: structure.structural_identity?.uid,
         structural_identity_number: structure.structural_identity?.structural_identity_number,
-        client_name: structure.administration?.client_name,
+        client_name: structure.administrative?.client_name || structure.administration?.client_name,
         location: {
           city_name: structure.structural_identity?.city_name,
           state_code: structure.structural_identity?.state_code,
@@ -3976,7 +3979,7 @@ async getStructureDetails(req, res) {
       uid: structure.structural_identity?.uid,
       structural_identity: structure.structural_identity || {},
       location: structure.location || {},
-      administration: structure.administration || {},
+      administration: structure.administrative || structure.administration || {},
       geometric_details: {
         number_of_floors: structure.geometric_details?.number_of_floors,
         structure_width: structure.geometric_details?.structure_width,
