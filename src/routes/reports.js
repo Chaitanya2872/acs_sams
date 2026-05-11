@@ -206,23 +206,79 @@ const roundDimension = (value) => {
   return Number(value.toFixed(3));
 };
 
+const calculateMethodologySummaryValue = (row, methodKey) => {
+  const nos = toNumber(row.nos) || 1;
+  const length = toNumber(row.length);
+  const breadth = toNumber(row.breadth);
+  const height = toNumber(row.height);
+  const safeLength = length ?? 0;
+  const safeBreadth = breadth ?? 0;
+  const safeHeight = height ?? 0;
+
+  if (methodKey.includes('epoxy grouting') || methodKey.includes('cement grouting')) {
+    return {
+      quantity: safeLength * 8 || nos * 8,
+      units: 'KGS'
+    };
+  }
+
+  if (
+    methodKey.includes('micro concrete') ||
+    methodKey.includes('concrete jacketing') ||
+    methodKey.includes('encasement')
+  ) {
+    return {
+      quantity: nos * (safeLength || 1) * (safeBreadth || 1) * (safeHeight || 1),
+      units: 'CUM'
+    };
+  }
+
+  if (
+    methodKey.includes('polymer modified mortar') ||
+    methodKey.includes('replaster') ||
+    methodKey.includes('replastering') ||
+    methodKey.includes('repainting') ||
+    methodKey.includes('painting') ||
+    methodKey.includes('plaster')
+  ) {
+    return {
+      quantity: nos * (safeLength || 1) * (safeBreadth || 1),
+      units: 'SQM'
+    };
+  }
+
+  if (
+    methodKey.includes('replacement of') ||
+    methodKey.includes('replacement ') ||
+    methodKey.includes('pipe') ||
+    methodKey.includes('piping')
+  ) {
+    if (length !== null) {
+      return {
+        quantity: nos * safeLength,
+        units: 'RM'
+      };
+    }
+
+    return {
+      quantity: nos,
+      units: "NO'S"
+    };
+  }
+
+  return {
+    quantity: inferQuantityValue(row),
+    units: inferUnit(row)
+  };
+};
+
 const summarizeMethodology = (rows) => {
   const summaryMap = new Map();
 
   rows.forEach((row) => {
     const method = safeText(row.repair_methodology, 'Not Specified');
     const key = method.toLowerCase();
-    const baseQuantity = inferQuantityValue(row);
-    let quantity = baseQuantity;
-    let units = inferUnit(row);
-
-    if (key.includes('epoxy grouting')) {
-      quantity = baseQuantity * 8;
-      units = 'KGS';
-    } else if (key.includes('cement grouting')) {
-      quantity = baseQuantity * 8;
-      units = 'KGS';
-    }
+    const { quantity, units } = calculateMethodologySummaryValue(row, key);
 
     if (!summaryMap.has(key)) {
       summaryMap.set(key, {
