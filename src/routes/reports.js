@@ -1518,6 +1518,14 @@ const sendPdf = (res, doc, fileName) =>
     doc.end();
   });
 
+const sendStructurePdfReport = async (res, structures, filtersApplied, fileName) => {
+  const doc = createPdfDocument();
+  structures.forEach((structureExport, index) => {
+    renderStructurePdf(doc, structureExport, filtersApplied, index, structures.length);
+  });
+  await sendPdf(res, doc, fileName);
+};
+
 const renderWordTable = (headers, rows, options = {}) => `
   <table class="${options.className || ''}">
     <thead>
@@ -2000,10 +2008,12 @@ const sendPdfFromHtml = async (res, html, fileName) => {
         left: '12mm'
       }
     });
+    const normalizedPdfBuffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
 
     res.setHeader('Content-Type', PDF_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.send(pdfBuffer);
+    res.setHeader('Content-Length', String(normalizedPdfBuffer.length));
+    res.send(normalizedPdfBuffer);
   } finally {
     await browser.close();
   }
@@ -2023,9 +2033,8 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
     if (isPdfFormat(requestedFormat)) {
-      const html = buildWordDocument(structures, filterSummary);
       const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendPdfFromHtml(res, html, fileName);
+      return sendStructurePdfReport(res, structures, filterSummary, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
@@ -2092,9 +2101,8 @@ router.get('/structures/complete-download', authenticateToken, checkExportPermis
 
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
     if (isPdfFormat(requestedFormat)) {
-      const html = buildWordDocument(structures, 'Complete export');
       const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendPdfFromHtml(res, html, fileName);
+      return sendStructurePdfReport(res, structures, 'Complete export', fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
@@ -2149,9 +2157,8 @@ router.get('/structures/:id/download', authenticateToken, checkExportPermissions
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
     if (isPdfFormat(requestedFormat)) {
-      const html = buildWordDocument([structureExport], buildFilterSummary(req.query));
       const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.pdf`;
-      return sendPdfFromHtml(res, html, fileName);
+      return sendStructurePdfReport(res, [structureExport], buildFilterSummary(req.query), fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
