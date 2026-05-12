@@ -798,6 +798,121 @@ const testFormatSchema = new mongoose.Schema({
   }
 });
 
+const workflowActorSchema = {
+  user_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  name: {
+    type: String,
+    trim: true,
+    maxlength: 150
+  },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true
+  },
+  role: {
+    type: String,
+    trim: true,
+    maxlength: 20
+  },
+  date: {
+    type: Date
+  },
+  test_notes: {
+    type: String,
+    trim: true,
+    maxlength: 2000
+  },
+  validation_notes: {
+    type: String,
+    trim: true,
+    maxlength: 2000
+  },
+  approval_notes: {
+    type: String,
+    trim: true,
+    maxlength: 2000
+  },
+  rejection_reason: {
+    type: String,
+    trim: true,
+    maxlength: 2000
+  },
+  rejection_stage: {
+    type: String,
+    trim: true,
+    maxlength: 50
+  }
+};
+
+const testingAssignmentSchema = {
+  assigned_by: {
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    name: {
+      type: String,
+      trim: true,
+      maxlength: 150
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true
+    },
+    role: {
+      type: String,
+      trim: true,
+      maxlength: 20
+    }
+  },
+  testers: [{
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    username: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true
+    },
+    role: {
+      type: String,
+      trim: true,
+      maxlength: 20
+    }
+  }],
+  testing_formats: [{
+    format_id: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
+    test_name: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
+    display_name: {
+      type: String,
+      trim: true,
+      maxlength: 150
+    }
+  }],
+  assigned_at: {
+    type: Date
+  }
+};
+
 // =================== STRUCTURE SCHEMA ===================
 const structureSchema = new mongoose.Schema({
   structural_identity: {
@@ -988,6 +1103,16 @@ const structureSchema = new mongoose.Schema({
   
   // NEW: Structure-level test results
   structure_test_results: [testResultSchema],
+
+  workflow: {
+    submitted_by: workflowActorSchema,
+    tested_by: workflowActorSchema,
+    validated_by: workflowActorSchema,
+    approved_by: workflowActorSchema,
+    rejected_by: workflowActorSchema
+  },
+
+  testing_assignment: testingAssignmentSchema,
   
   // NEW: Report generation tracking
   reports: {

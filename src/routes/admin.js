@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { User } = require('../models/schemas');
+const { User, TestFormat } = require('../models/schemas');
 const { protect, isAdmin, authorizeModuleAction } = require('../middlewares/auth');
 const structureController = require('../controllers/structureController');
 const { handleValidationErrors } = require('../middlewares/validation');
@@ -158,6 +158,21 @@ const buildAdminFlatsPayload = (structure) => {
     structural_identity_number: structure.structural_identity?.structural_identity_number,
     total_flats: flats.length,
     flats
+  };
+};
+
+const buildWorkflowPayload = (structure) => {
+  const assignment = structure.testing_assignment || {};
+
+  return {
+    status: structure.status,
+    workflow: structure.workflow || {},
+    testing_assignment: {
+      assigned_at: assignment.assigned_at || null,
+      assigned_by: assignment.assigned_by || null,
+      testers: Array.isArray(assignment.testers) ? assignment.testers : [],
+      testing_formats: Array.isArray(assignment.testing_formats) ? assignment.testing_formats : []
+    }
   };
 };
 
@@ -628,6 +643,175 @@ router.post('/users/:id/reset-password', authorizeModuleAction('users', 'write')
     return res.status(500).json({
       success: false,
       error: 'Failed to reset password'
+    });
+  }
+});
+
+router.get('/testers', authorizeModuleAction('users', 'read'), async (req, res) => {
+  try {
+    const testers = await User.find({
+      is_active: true,
+      $or: [{ role: 'TE' }, { roles: 'TE' }]
+    })
+      .select('username email role roles profile')
+      .sort({ username: 1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      message: 'Testers retrieved successfully',
+      data: testers.map((tester) => ({
+        _id: tester._id,
+        username: tester.username,
+        email: tester.email,
+        role: tester.role,
+        roles: tester.roles || [],
+        designation: tester.profile?.designation || ''
+      }))
+    });
+  } catch (error) {
+    console.error('Get testers error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve testers'
+    });
+  }
+});
+
+router.get('/testing-formats', authorizeModuleAction('structures', 'read'), async (req, res) => {
+  try {
+    const formats = await TestFormat.find()
+      .select('format_id test_name display_name is_custom')
+      .sort({ display_name: 1, test_name: 1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      message: 'Testing formats retrieved successfully',
+      data: formats.map((format) => ({
+        format_id: format.format_id,
+        test_name: format.test_name,
+        display_name: format.display_name,
+        is_custom: Boolean(format.is_custom)
+      }))
+    });
+  } catch (error) {
+    console.error('Get testing formats error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve testing formats'
+    });
+  }
+});
+
+router.get('/structures/:id/workflow', authorizeModuleAction('structures', 'read'), async (req, res) => {
+  try {
+    const { structure } = await structureController.findStructureAcrossUsers(req.params.id);
+
+    return res.json({
+      success: true,
+      message: 'Structure workflow retrieved successfully',
+      data: buildWorkflowPayload(structure)
+    });
+  } catch (error) {
+    console.error('Get admin structure workflow error:', error);
+    const status = error.message === 'Structure not found' ? 404 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message === 'Structure not found' ? 'Structure not found' : 'Failed to retrieve structure workflow'
+    });
+  }
+});
+
+router.post('/structures/:id/move-to-testing', authorizeModuleAction('structures', 'write'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tester_ids = [], testing_formats = [] } = req.body || {};
+
+    if (!Array.isArray(tester_ids) || tester_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one tester must be assigned'
+      });
+    }
+
+    if (!Array.isArray(testing_formats) || testing_formats.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one testing format must be selected'
+      });
+    }
+
+    const { user: structureOwner, structure } = await structureController.findStructureAcrossUsers(id);
+
+    const testers = await User.find({
+      _id: { $in: tester_ids.filter((testerId) => mongoose.Types.ObjectId.isValid(testerId)) },
+      is_active: true,
+      $or: [{ role: 'TE' }, { roles: 'TE' }]
+    })
+      .select('username email role roles')
+      .lean();
+
+    if (!testers.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Selected testers are invalid or inactive'
+      });
+    }
+
+    const formatIds = testing_formats
+      .map((format) => (typeof format === 'string' ? format : format?.format_id))
+      .filter(Boolean);
+
+    const formats = await TestFormat.find({ format_id: { $in: formatIds } })
+      .select('format_id test_name display_name')
+      .lean();
+
+    if (!formats.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Selected testing formats are invalid'
+      });
+    }
+
+    structure.testing_assignment = {
+      assigned_by: {
+        user_id: req.user.userId,
+        name: req.user.username,
+        email: req.user.email,
+        role: req.user.role
+      },
+      testers: testers.map((tester) => ({
+        user_id: tester._id,
+        username: tester.username,
+        email: tester.email,
+        role: tester.role
+      })),
+      testing_formats: formats.map((format) => ({
+        format_id: format.format_id,
+        test_name: format.test_name,
+        display_name: format.display_name
+      })),
+      assigned_at: new Date()
+    };
+
+    if (['draft', 'location_completed', 'admin_completed', 'geometric_completed', 'ratings_in_progress'].includes(structure.status)) {
+      structure.status = 'submitted';
+    }
+
+    structure.creation_info.last_updated_date = new Date();
+    await structureOwner.save();
+
+    return res.json({
+      success: true,
+      message: 'Structure moved to testing successfully',
+      data: buildWorkflowPayload(structure)
+    });
+  } catch (error) {
+    console.error('Move structure to testing error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to move structure to testing'
     });
   }
 });

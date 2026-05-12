@@ -185,7 +185,7 @@ const inferUnit = (entry) => {
 const formatApproxQuantity = (value) => {
   const numeric = toNumber(value);
   if (numeric === null) return '';
-  return `Approx. ${Number(numeric.toFixed(2))}`;
+  return String(Number(numeric.toFixed(2)));
 };
 
 const calculateMethodologySummaryValue = (row, methodKey) => {
@@ -1518,14 +1518,6 @@ const sendPdf = (res, doc, fileName) =>
     doc.end();
   });
 
-const sendStructurePdfReport = async (res, structures, filtersApplied, fileName) => {
-  const doc = createPdfDocument();
-  structures.forEach((structureExport, index) => {
-    renderStructurePdf(doc, structureExport, filtersApplied, index, structures.length);
-  });
-  await sendPdf(res, doc, fileName);
-};
-
 const renderWordTable = (headers, rows, options = {}) => `
   <table class="${options.className || ''}">
     <thead>
@@ -2033,8 +2025,9 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
     if (isPdfFormat(requestedFormat)) {
+      const html = buildWordDocument(structures, filterSummary);
       const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendStructurePdfReport(res, structures, filterSummary, fileName);
+      return sendPdfFromHtml(res, html, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
@@ -2101,8 +2094,9 @@ router.get('/structures/complete-download', authenticateToken, checkExportPermis
 
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
     if (isPdfFormat(requestedFormat)) {
+      const html = buildWordDocument(structures, 'Complete export');
       const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendStructurePdfReport(res, structures, 'Complete export', fileName);
+      return sendPdfFromHtml(res, html, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
@@ -2157,8 +2151,9 @@ router.get('/structures/:id/download', authenticateToken, checkExportPermissions
     const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
 
     if (isPdfFormat(requestedFormat)) {
+      const html = buildWordDocument([structureExport], buildFilterSummary(req.query));
       const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.pdf`;
-      return sendStructurePdfReport(res, [structureExport], buildFilterSummary(req.query), fileName);
+      return sendPdfFromHtml(res, html, fileName);
     }
 
     if (isWordFormat(requestedFormat)) {
