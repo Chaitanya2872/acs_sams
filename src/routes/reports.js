@@ -182,28 +182,10 @@ const inferUnit = (entry) => {
   return "NO'S";
 };
 
-const toMeters = (value, unit) => {
+const formatApproxQuantity = (value) => {
   const numeric = toNumber(value);
-  if (numeric === null) return null;
-
-  switch (safeText(unit, 'm').toLowerCase()) {
-    case 'mm':
-      return numeric / 1000;
-    case 'cm':
-      return numeric / 100;
-    case 'inch':
-      return numeric * 0.0254;
-    case 'feet':
-      return numeric * 0.3048;
-    case 'm':
-    default:
-      return numeric;
-  }
-};
-
-const roundDimension = (value) => {
-  if (value === null || value === undefined) return null;
-  return Number(value.toFixed(3));
+  if (numeric === null) return '';
+  return `Approx. ${Number(numeric.toFixed(2))}`;
 };
 
 const calculateMethodologySummaryValue = (row, methodKey) => {
@@ -555,10 +537,9 @@ const buildDerivedQuantificationRows = (entries, scopeLabel) => {
   entries.forEach(({ componentLabel, entry }) => {
     const observationText = getObservationText(entry);
     const dimensions = entry?.distress_dimensions || {};
-    const dimensionUnit = safeText(dimensions.unit, 'm');
-    const length = roundDimension(toMeters(dimensions.length, dimensionUnit));
-    const breadth = roundDimension(toMeters(dimensions.breadth, dimensionUnit));
-    const height = roundDimension(toMeters(dimensions.height, dimensionUnit));
+    const length = toNumber(dimensions.length);
+    const breadth = toNumber(dimensions.breadth);
+    const height = toNumber(dimensions.height);
     const repairMethodology = safeText(entry?.repair_methodology, 'Not Specified');
     const hasDimensions = length !== null || breadth !== null || height !== null;
     const hasContent = Boolean(observationText || hasDimensions || safeText(entry?.repair_methodology));
@@ -992,7 +973,7 @@ const addQuantificationSection = (worksheet, startRow, quantifications) => {
   addTableHeader(
     worksheet,
     row,
-    ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Quantity', 'Repair Methodology'],
+    ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Length / Area / Volume', 'Repair Methodology'],
     COLORS.PRIMARY
   );
   row += 1;
@@ -1021,7 +1002,7 @@ const addQuantificationSection = (worksheet, startRow, quantifications) => {
       worksheet.getCell(row, 5).value = entry.length ?? '';
       worksheet.getCell(row, 6).value = entry.breadth ?? '';
       worksheet.getCell(row, 7).value = entry.height ?? '';
-      worksheet.getCell(row, 8).value = `${entry.quantity} ${entry.unit}`.trim();
+      worksheet.getCell(row, 8).value = formatApproxQuantity(entry.quantity);
       worksheet.getCell(row, 9).value = entry.repair_methodology;
       styleRowCells(worksheet, row, 1, 9);
       row += 1;
@@ -1441,7 +1422,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
       doc.y = y + 18;
       pdfTableRow(
         doc,
-        ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Length / Area / Volume', 'Repair Methodology'],
+        ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Length / Area / Volume', 'Repair Methodology'],
         [32, 120, 78, 35, 35, 35, 35, 90, 75],
         { header: true, fontSize: 8 }
       );
@@ -1456,7 +1437,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
             row.length ?? '',
             row.breadth ?? '',
             row.height ?? '',
-            `${row.quantity} ${row.unit}`.trim(),
+            formatApproxQuantity(row.quantity),
             row.repair_methodology
           ],
           [32, 120, 78, 35, 35, 35, 35, 90, 75],
@@ -1746,9 +1727,9 @@ const renderQuantificationWord = (quantifications) => {
         </tr>
         <tr>
           <th class="center">Nos</th>
-          <th class="center">L (M)</th>
-          <th class="center">B (M)</th>
-          <th class="center">H (M)</th>
+          <th class="center">L</th>
+          <th class="center">B</th>
+          <th class="center">H</th>
         </tr>
       </thead>
       <tbody>
@@ -1766,7 +1747,7 @@ const renderQuantificationWord = (quantifications) => {
           <td class="center">${escapeHtml(row.length ?? '')}</td>
           <td class="center">${escapeHtml(row.breadth ?? '')}</td>
           <td class="center">${escapeHtml(row.height ?? '')}</td>
-          <td class="center">${escapeHtml(`${row.quantity} ${row.unit}`.trim())}</td>
+          <td class="center">${escapeHtml(formatApproxQuantity(row.quantity))}</td>
           <td>${escapeHtml(row.repair_methodology)}</td>
         </tr>
       `);
