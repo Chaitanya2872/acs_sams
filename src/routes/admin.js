@@ -26,6 +26,33 @@ const sanitizeUser = (user) => {
   };
 };
 
+const buildUserWriteError = (error) => {
+  if (error?.code === 11000) {
+    const duplicateField = Object.keys(error.keyValue || {})[0] || 'field';
+    return {
+      status: 400,
+      message: `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists`
+    };
+  }
+
+  if (error?.name === 'ValidationError') {
+    const message = Object.values(error.errors || {})
+      .map((entry) => entry.message)
+      .filter(Boolean)
+      .join(', ');
+
+    return {
+      status: 400,
+      message: message || 'Validation failed'
+    };
+  }
+
+  return {
+    status: 500,
+    message: error?.message || 'Failed to save user'
+  };
+};
+
 const getHealthStatusFromAverage = (average) => {
   if (average === null || average === undefined) return null;
   if (average >= 4) return 'Good';
@@ -361,7 +388,10 @@ router.post('/users', authorizeModuleAction('users', 'write'), async (req, res) 
       permissions
     } = req.body || {};
 
-    if (!username || !email) {
+    const normalizedUsername = String(username || '').trim();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+
+    if (!normalizedUsername || !normalizedEmail) {
       return res.status(400).json({
         success: false,
         error: 'Username and email are required'
@@ -376,18 +406,19 @@ router.post('/users', authorizeModuleAction('users', 'write'), async (req, res) 
       });
     }
 
-    const normalizedRoles = Array.isArray(roles) && roles.length > 0
+    const requestedRoles = Array.isArray(roles) && roles.length > 0
       ? Array.from(new Set(roles.map((item) => String(item).toUpperCase()).filter((item) => USER_ROLES.includes(item))))
-      : [normalizedRole];
+      : [];
+    const normalizedRoles = requestedRoles.length ? requestedRoles : [normalizedRole];
 
     const existingUser = await User.findOne({
-      $or: [{ username }, { email: String(email).toLowerCase() }]
+      $or: [{ username: normalizedUsername }, { email: normalizedEmail }]
     }).lean();
 
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        error: existingUser.username === username ? 'Username already taken' : 'User already exists with this email'
+        error: existingUser.username === normalizedUsername ? 'Username already taken' : 'User already exists with this email'
       });
     }
 
@@ -395,8 +426,8 @@ router.post('/users', authorizeModuleAction('users', 'write'), async (req, res) 
     const hashedPassword = await bcrypt.hash(temporaryPassword, 12);
 
     const user = await User.create({
-      username,
-      email: String(email).toLowerCase(),
+      username: normalizedUsername,
+      email: normalizedEmail,
       password: hashedPassword,
       role: normalizedRole,
       roles: normalizedRoles,
@@ -424,9 +455,10 @@ router.post('/users', authorizeModuleAction('users', 'write'), async (req, res) 
     });
   } catch (error) {
     console.error('Create user error:', error);
-    return res.status(500).json({
+    const handled = buildUserWriteError(error);
+    return res.status(handled.status).json({
       success: false,
-      error: 'Failed to create user'
+      error: handled.message
     });
   }
 });
@@ -466,32 +498,36 @@ router.put('/users/:id', authorizeModuleAction('users', 'write'), async (req, re
       });
     }
 
-    if (username && username !== user.username) {
-      const usernameExists = await User.findOne({ username, _id: { $ne: id } }).lean();
+    const normalizedUsername = typeof username === 'string' ? username.trim() : '';
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+    if (normalizedUsername && normalizedUsername !== user.username) {
+      const usernameExists = await User.findOne({ username: normalizedUsername, _id: { $ne: id } }).lean();
       if (usernameExists) {
         return res.status(400).json({
           success: false,
           error: 'Username already taken'
         });
       }
-      user.username = username;
+      user.username = normalizedUsername;
     }
 
-    if (email && email.toLowerCase() !== user.email) {
-      const emailExists = await User.findOne({ email: email.toLowerCase(), _id: { $ne: id } }).lean();
+    if (normalizedEmail && normalizedEmail !== user.email) {
+      const emailExists = await User.findOne({ email: normalizedEmail, _id: { $ne: id } }).lean();
       if (emailExists) {
         return res.status(400).json({
           success: false,
           error: 'User already exists with this email'
         });
       }
-      user.email = email.toLowerCase();
+      user.email = normalizedEmail;
     }
 
     user.role = normalizedRole;
-    user.roles = Array.isArray(roles) && roles.length > 0
+    const requestedRoles = Array.isArray(roles) && roles.length > 0
       ? Array.from(new Set(roles.map((item) => String(item).toUpperCase()).filter((item) => USER_ROLES.includes(item))))
-      : [normalizedRole];
+      : [];
+    user.roles = requestedRoles.length ? requestedRoles : [normalizedRole];
 
     if (profile && typeof profile === 'object') {
       user.profile = {
@@ -513,9 +549,10 @@ router.put('/users/:id', authorizeModuleAction('users', 'write'), async (req, re
     });
   } catch (error) {
     console.error('Update user error:', error);
-    return res.status(500).json({
+    const handled = buildUserWriteError(error);
+    return res.status(handled.status).json({
       success: false,
-      error: 'Failed to update user'
+      error: handled.message
     });
   }
 });
