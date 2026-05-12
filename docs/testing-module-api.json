@@ -1,0 +1,300 @@
+{
+  "module": "Testing",
+  "version": "1.0.0",
+  "base_url": "/api",
+  "auth": {
+    "type": "Bearer",
+    "header": "Authorization: Bearer <token>"
+  },
+  "roles": {
+    "AD": "Admin",
+    "TE": "Test Engineer",
+    "VE": "Verification Engineer",
+    "FE": "Field Engineer"
+  },
+  "collections_used": [
+    "TestFormat",
+    "User.structures.structure_test_results",
+    "User.structures.geometric_details.floors.test_results",
+    "User.structures.geometric_details.floors.flats.test_results",
+    "User.structures.geometric_details.floors.blocks.test_results"
+  ],
+  "test_format_seeded_types": [
+    "rebound_hammer",
+    "ultra_pulse_velocity",
+    "half_cell_potential",
+    "carbonation_depth",
+    "cover_meter",
+    "core_cutting",
+    "pull_out",
+    "chemical_analysis",
+    "ultrasonic_thickness_gauge",
+    "magnetic_particle",
+    "liquid_penetration",
+    "hardness_test"
+  ],
+  "response_shape": {
+    "success": "boolean",
+    "message": "string",
+    "data": "object | array | null"
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "actor": "AD",
+      "action": "Fetch testers",
+      "endpoint": "GET /api/admin/testers"
+    },
+    {
+      "step": 2,
+      "actor": "AD",
+      "action": "Fetch testing formats",
+      "endpoint": "GET /api/admin/testing-formats"
+    },
+    {
+      "step": 3,
+      "actor": "AD",
+      "action": "Assign tester(s) and testing format(s) to a structure",
+      "endpoint": "POST /api/admin/structures/:id/move-to-testing"
+    },
+    {
+      "step": 4,
+      "actor": "FE or AD",
+      "action": "View workflow/assignment",
+      "endpoint": "GET /api/admin/structures/:id/workflow"
+    },
+    {
+      "step": 5,
+      "actor": "FE",
+      "action": "Submit structure for testing",
+      "endpoint": "POST /api/structures/:id/submit-for-testing"
+    },
+    {
+      "step": 6,
+      "actor": "TE",
+      "action": "Start testing",
+      "endpoint": "POST /api/structures/:id/start-testing"
+    },
+    {
+      "step": 7,
+      "actor": "TE or AD",
+      "action": "Create test results at structure/floor/flat/block level",
+      "endpoint_group": "Testing Result CRUD endpoints"
+    },
+    {
+      "step": 8,
+      "actor": "TE",
+      "action": "Complete testing or reject structure",
+      "endpoint": "POST /api/structures/:id/complete-testing"
+    },
+    {
+      "step": 9,
+      "actor": "VE",
+      "action": "Validation flow continues after testing",
+      "endpoint_group": [
+        "POST /api/structures/:id/start-validation",
+        "POST /api/structures/:id/complete-validation"
+      ]
+    }
+  ],
+  "entities": {
+    "test_result": {
+      "test_id": "string",
+      "test_name": "string",
+      "component_type": "string",
+      "component_id": "string",
+      "test_date": "ISO date",
+      "test_results": "object",
+      "tested_by": "string",
+      "remarks": "string",
+      "test_report_pdf": {
+        "filename": "string",
+        "file_path": "string",
+        "uploaded_at": "ISO date"
+      }
+    }
+  },
+  "admin_endpoints": [
+    {
+      "name": "Get testers",
+      "method": "GET",
+      "path": "/api/admin/testers",
+      "access": ["AD", "users.read"],
+      "description": "Returns active TE users for assignment."
+    },
+    {
+      "name": "Get testing formats",
+      "method": "GET",
+      "path": "/api/admin/testing-formats",
+      "access": ["AD", "structures.read"],
+      "description": "Returns available testing formats from TestFormat collection."
+    },
+    {
+      "name": "Get structure workflow",
+      "method": "GET",
+      "path": "/api/admin/structures/:id/workflow",
+      "access": ["AD", "structures.read"],
+      "description": "Returns structure status, workflow, and testing assignment."
+    },
+    {
+      "name": "Move structure to testing",
+      "method": "POST",
+      "path": "/api/admin/structures/:id/move-to-testing",
+      "access": ["AD", "structures.write"],
+      "description": "Assigns testers and formats to a structure and saves testing_assignment.",
+      "request_body": {
+        "tester_ids": ["<testerUserId1>", "<testerUserId2>"],
+        "testing_formats": ["TF_REBOUND_HAMMER", "TF_UPV"]
+      }
+    }
+  ],
+  "workflow_endpoints": [
+    {
+      "name": "Submit for testing",
+      "method": "POST",
+      "path": "/api/structures/:id/submit-for-testing",
+      "access": ["FE"],
+      "request_body": {
+        "notes": "Ready for testing"
+      }
+    },
+    {
+      "name": "Start testing",
+      "method": "POST",
+      "path": "/api/structures/:id/start-testing",
+      "access": ["TE"],
+      "request_body": {}
+    },
+    {
+      "name": "Complete testing",
+      "method": "POST",
+      "path": "/api/structures/:id/complete-testing",
+      "access": ["TE"],
+      "request_body_examples": {
+        "success": {
+          "status": "tested",
+          "test_notes": "Testing completed successfully"
+        },
+        "reject": {
+          "status": "rejected",
+          "test_notes": "Core sample failed",
+          "rejection_reason": "Observed mismatch in test readings"
+        }
+      }
+    },
+    {
+      "name": "Get workflow history",
+      "method": "GET",
+      "path": "/api/structures/:id/workflow",
+      "access": ["Authenticated user with structure access"]
+    }
+  ],
+  "testing_result_crud": {
+    "common_rules": {
+      "read_access": "Authenticated user with structure access",
+      "write_access": ["TE", "AD"],
+      "content_types": [
+        "application/json",
+        "multipart/form-data"
+      ],
+      "multipart_file_field": "docs",
+      "multipart_json_fields": [
+        "test_results",
+        "test_report_pdf"
+      ],
+      "validation": {
+        "test_name": "Must exist in TestFormat collection",
+        "component_type": "required string",
+        "component_id": "required string",
+        "test_results": "required object"
+      }
+    },
+    "structure_level": {
+      "list": "GET /api/structures/:id/test-results",
+      "create": "POST /api/structures/:id/test-results",
+      "get": "GET /api/structures/:id/test-results/:testId",
+      "update": "PUT /api/structures/:id/test-results/:testId",
+      "delete": "DELETE /api/structures/:id/test-results/:testId"
+    },
+    "floor_level": {
+      "list": "GET /api/structures/:id/floors/:floorId/test-results",
+      "create": "POST /api/structures/:id/floors/:floorId/test-results",
+      "get": "GET /api/structures/:id/floors/:floorId/test-results/:testId",
+      "update": "PUT /api/structures/:id/floors/:floorId/test-results/:testId",
+      "delete": "DELETE /api/structures/:id/floors/:floorId/test-results/:testId"
+    },
+    "flat_level": {
+      "list": "GET /api/structures/:id/floors/:floorId/flats/:flatId/test-results",
+      "create": "POST /api/structures/:id/floors/:floorId/flats/:flatId/test-results",
+      "get": "GET /api/structures/:id/floors/:floorId/flats/:flatId/test-results/:testId",
+      "update": "PUT /api/structures/:id/floors/:floorId/flats/:flatId/test-results/:testId",
+      "delete": "DELETE /api/structures/:id/floors/:floorId/flats/:flatId/test-results/:testId"
+    },
+    "block_level": {
+      "list": "GET /api/structures/:id/floors/:floorId/blocks/:blockId/test-results",
+      "create": "POST /api/structures/:id/floors/:floorId/blocks/:blockId/test-results",
+      "get": "GET /api/structures/:id/floors/:floorId/blocks/:blockId/test-results/:testId",
+      "update": "PUT /api/structures/:id/floors/:floorId/blocks/:blockId/test-results/:testId",
+      "delete": "DELETE /api/structures/:id/floors/:floorId/blocks/:blockId/test-results/:testId"
+    }
+  },
+  "test_result_request_example_json": {
+    "test_name": "rebound_hammer",
+    "component_type": "column",
+    "component_id": "column_001",
+    "test_date": "2026-05-12",
+    "test_results": {
+      "test_date": "2026-05-12",
+      "component_label": "Column C1 - Ground Floor",
+      "tested_by": "TE User",
+      "avg_rebound_number": 32,
+      "estimated_strength_mpa": 24.5
+    },
+    "tested_by": "TE User",
+    "remarks": "Concrete surface generally uniform."
+  },
+  "test_result_response_example": {
+    "success": true,
+    "message": "Test result created successfully",
+    "data": {
+      "scope": "floor",
+      "target_label": "Ground Floor",
+      "result": {
+        "test_id": "test_1747020000000_ab12cd",
+        "test_name": "rebound_hammer",
+        "component_type": "column",
+        "component_id": "column_001",
+        "test_date": "2026-05-12T00:00:00.000Z",
+        "test_results": {
+          "avg_rebound_number": 32,
+          "estimated_strength_mpa": 24.5
+        },
+        "tested_by": "TE User",
+        "remarks": "Concrete surface generally uniform.",
+        "test_report_pdf": {
+          "filename": "rebound-report.pdf",
+          "file_path": "https://res.cloudinary.com/.../raw/upload/.../rebound-report.pdf",
+          "uploaded_at": "2026-05-12T10:00:00.000Z"
+        }
+      }
+    }
+  },
+  "error_cases": [
+    {
+      "status": 400,
+      "reason": "Invalid or missing payload fields"
+    },
+    {
+      "status": 400,
+      "reason": "No matching TestFormat exists for test_name"
+    },
+    {
+      "status": 403,
+      "reason": "Only TE or AD can create/update/delete test results"
+    },
+    {
+      "status": 404,
+      "reason": "Structure, floor, flat, block, or test result not found"
+    }
+  ]
+}

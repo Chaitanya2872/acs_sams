@@ -1,5 +1,5 @@
 // @ts-nocheck
-const { User } = require('../models/schemas');
+const { User, TestFormat } = require('../models/schemas');
 const { hasPrivilegedAccess } = require('../middlewares/auth'); 
 const StructureNumberGenerator = require('../utils/StructureNumberGenerator');
 const cloudinary = require('../config/cloudinary');
@@ -66,6 +66,9 @@ const buildPdfObjects = (pdfList, resolveDoc) => {
 
 const generateQuantificationId = () =>
   `quant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const generateTestResultId = () =>
+  `test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 const toNumber = (value) => {
   if (value === null || typeof value === 'undefined') return 0;
@@ -4730,6 +4733,297 @@ async getUserImageStats(req, res) {
     return user.username;
   }
 
+  canManageTestResults(req) {
+    return this.hasRoleFromRequest(req, 'TE') || this.hasRoleFromRequest(req, 'AD');
+  }
+
+  ensureTestResultWriteAccess(req) {
+    if (!this.canManageTestResults(req)) {
+      const error = new Error('Only Test Engineers or Admins can manage test results');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
+  ensureTestResultsArray(target, key) {
+    if (!Array.isArray(target[key])) {
+      target[key] = [];
+    }
+    return target[key];
+  }
+
+  resolveTestResultTarget(structure, params = {}) {
+    const { floorId, flatId, blockId } = params;
+
+    if (blockId) {
+      const floor = structure.geometric_details?.floors?.id(floorId);
+      if (!floor) {
+        const error = new Error('Floor not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const block = floor.blocks?.id(blockId);
+      if (!block) {
+        const error = new Error('Block not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      return {
+        scope: 'block',
+        parent: block,
+        label: block.block_name || block.block_number || block.block_id,
+        collection: this.ensureTestResultsArray(block, 'test_results')
+      };
+    }
+
+    if (flatId) {
+      const floor = structure.geometric_details?.floors?.id(floorId);
+      if (!floor) {
+        const error = new Error('Floor not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const flat = floor.flats?.id(flatId);
+      if (!flat) {
+        const error = new Error('Flat not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      return {
+        scope: 'flat',
+        parent: flat,
+        label: flat.flat_number || flat.flat_id,
+        collection: this.ensureTestResultsArray(flat, 'test_results')
+      };
+    }
+
+    if (floorId) {
+      const floor = structure.geometric_details?.floors?.id(floorId);
+      if (!floor) {
+        const error = new Error('Floor not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      return {
+        scope: 'floor',
+        parent: floor,
+        label: floor.floor_label_name || floor.floor_number || floor.floor_id,
+        collection: this.ensureTestResultsArray(floor, 'test_results')
+      };
+    }
+
+    return {
+      scope: 'structure',
+      parent: structure,
+      label: structure.structural_identity?.structural_identity_number || structure.structural_identity?.uid,
+      collection: this.ensureTestResultsArray(structure, 'structure_test_results')
+    };
+  }
+
+  getUploadedTestReport(req) {
+    const docs = Array.isArray(req.files?.docs) ? req.files.docs : [];
+    const file = docs[0];
+
+    if (!file) return null;
+
+    return {
+      filename: file.originalname || file.filename || 'test-report.pdf',
+      file_path: file.path || file.secure_url || file.filename || '',
+      uploaded_at: new Date()
+    };
+  }
+
+  buildTestResultDocument(req, existingResult = null) {
+    const uploadedReport = this.getUploadedTestReport(req);
+    const shouldRemoveReport = req.body?.remove_test_report_pdf === true || req.body?.remove_test_report_pdf === 'true';
+    const bodyReport = req.body?.test_report_pdf && typeof req.body.test_report_pdf === 'object'
+      ? {
+          filename: req.body.test_report_pdf.filename || existingResult?.test_report_pdf?.filename || '',
+          file_path: req.body.test_report_pdf.file_path || existingResult?.test_report_pdf?.file_path || '',
+          uploaded_at: req.body.test_report_pdf.uploaded_at || existingResult?.test_report_pdf?.uploaded_at || new Date()
+        }
+      : null;
+
+    let testReport = existingResult?.test_report_pdf || undefined;
+    if (uploadedReport) {
+      testReport = uploadedReport;
+    } else if (bodyReport && bodyReport.file_path) {
+      testReport = bodyReport;
+    } else if (shouldRemoveReport) {
+      testReport = undefined;
+    }
+
+    return {
+      test_id: existingResult?.test_id || generateTestResultId(),
+      test_name: req.body.test_name,
+      component_type: req.body.component_type,
+      component_id: req.body.component_id,
+      test_date: req.body.test_date ? new Date(req.body.test_date) : (existingResult?.test_date || new Date()),
+      test_results: req.body.test_results || existingResult?.test_results || {},
+      tested_by: typeof req.body.tested_by === 'string' && req.body.tested_by.trim()
+        ? req.body.tested_by.trim()
+        : (existingResult?.tested_by || req.user.username),
+      remarks: typeof req.body.remarks === 'string'
+        ? req.body.remarks.trim()
+        : (existingResult?.remarks || ''),
+      ...(testReport ? { test_report_pdf: testReport } : {})
+    };
+  }
+
+  async ensureValidTestFormat(testName) {
+    const formatExists = await TestFormat.exists({ test_name: testName });
+    if (!formatExists) {
+      const error = new Error(`No test format found for "${testName}"`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  async getStructureForTestingRequest(req, structureId) {
+    return this.findUserStructure(req.user.userId, structureId, req.user);
+  }
+
+  async listTestResults(req, res) {
+    try {
+      const { structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      const target = this.resolveTestResultTarget(structure, req.params);
+
+      return sendSuccessResponse(res, 'Test results retrieved successfully', {
+        scope: target.scope,
+        target_label: target.label,
+        total: target.collection.length,
+        results: target.collection
+      });
+    } catch (error) {
+      return sendErrorResponse(res, 'Failed to retrieve test results', error.statusCode || 500, error.message);
+    }
+  }
+
+  async getTestResultById(req, res) {
+    try {
+      const { structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      const target = this.resolveTestResultTarget(structure, req.params);
+      const testResult = target.collection.find((entry) => entry.test_id === req.params.testId);
+
+      if (!testResult) {
+        return sendErrorResponse(res, 'Test result not found', 404);
+      }
+
+      return sendSuccessResponse(res, 'Test result retrieved successfully', {
+        scope: target.scope,
+        target_label: target.label,
+        result: testResult
+      });
+    } catch (error) {
+      return sendErrorResponse(res, 'Failed to retrieve test result', error.statusCode || 500, error.message);
+    }
+  }
+
+  async createTestResult(req, res) {
+    try {
+      this.ensureTestResultWriteAccess(req);
+      await this.ensureValidTestFormat(req.body.test_name);
+
+      const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      const target = this.resolveTestResultTarget(structure, req.params);
+      const testResult = this.buildTestResultDocument(req);
+
+      target.collection.push(testResult);
+      structure.creation_info.last_updated_date = new Date();
+      await structureOwner.save();
+
+      return sendCreatedResponse(res, {
+        scope: target.scope,
+        target_label: target.label,
+        result: testResult
+      }, 'Test result created successfully');
+    } catch (error) {
+      return sendErrorResponse(res, 'Failed to create test result', error.statusCode || 500, error.message);
+    }
+  }
+
+  async updateTestResult(req, res) {
+    try {
+      this.ensureTestResultWriteAccess(req);
+      await this.ensureValidTestFormat(req.body.test_name);
+
+      const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      const target = this.resolveTestResultTarget(structure, req.params);
+      const resultIndex = target.collection.findIndex((entry) => entry.test_id === req.params.testId);
+
+      if (resultIndex === -1) {
+        return sendErrorResponse(res, 'Test result not found', 404);
+      }
+
+      const updatedResult = this.buildTestResultDocument(req, target.collection[resultIndex]);
+      updatedResult.test_id = req.params.testId;
+      target.collection[resultIndex] = updatedResult;
+
+      structure.creation_info.last_updated_date = new Date();
+      await structureOwner.save();
+
+      return sendUpdatedResponse(res, {
+        scope: target.scope,
+        target_label: target.label,
+        result: updatedResult
+      }, 'Test result updated successfully');
+    } catch (error) {
+      return sendErrorResponse(res, 'Failed to update test result', error.statusCode || 500, error.message);
+    }
+  }
+
+  async deleteTestResult(req, res) {
+    try {
+      this.ensureTestResultWriteAccess(req);
+
+      const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      const target = this.resolveTestResultTarget(structure, req.params);
+      const resultIndex = target.collection.findIndex((entry) => entry.test_id === req.params.testId);
+
+      if (resultIndex === -1) {
+        return sendErrorResponse(res, 'Test result not found', 404);
+      }
+
+      const [deletedResult] = target.collection.splice(resultIndex, 1);
+      structure.creation_info.last_updated_date = new Date();
+      await structureOwner.save();
+
+      return sendSuccessResponse(res, 'Test result deleted successfully', {
+        scope: target.scope,
+        target_label: target.label,
+        result: deletedResult
+      });
+    } catch (error) {
+      return sendErrorResponse(res, 'Failed to delete test result', error.statusCode || 500, error.message);
+    }
+  }
+
+  async getStructureTestResults(req, res) { return this.listTestResults(req, res); }
+  async createStructureTestResult(req, res) { return this.createTestResult(req, res); }
+  async getStructureTestResultById(req, res) { return this.getTestResultById(req, res); }
+  async updateStructureTestResult(req, res) { return this.updateTestResult(req, res); }
+  async deleteStructureTestResult(req, res) { return this.deleteTestResult(req, res); }
+  async getFloorTestResults(req, res) { return this.listTestResults(req, res); }
+  async createFloorTestResult(req, res) { return this.createTestResult(req, res); }
+  async getFloorTestResultById(req, res) { return this.getTestResultById(req, res); }
+  async updateFloorTestResult(req, res) { return this.updateTestResult(req, res); }
+  async deleteFloorTestResult(req, res) { return this.deleteTestResult(req, res); }
+  async getFlatTestResults(req, res) { return this.listTestResults(req, res); }
+  async createFlatTestResult(req, res) { return this.createTestResult(req, res); }
+  async getFlatTestResultById(req, res) { return this.getTestResultById(req, res); }
+  async updateFlatTestResult(req, res) { return this.updateTestResult(req, res); }
+  async deleteFlatTestResult(req, res) { return this.deleteTestResult(req, res); }
+  async getBlockTestResults(req, res) { return this.listTestResults(req, res); }
+  async createBlockTestResult(req, res) { return this.createTestResult(req, res); }
+  async getBlockTestResultById(req, res) { return this.getTestResultById(req, res); }
+  async updateBlockTestResult(req, res) { return this.updateTestResult(req, res); }
+  async deleteBlockTestResult(req, res) { return this.deleteTestResult(req, res); }
+
 
   // =================== NEW COMPONENT RATING METHODS ===================
 // Add these methods to your StructureController class
@@ -7636,6 +7930,27 @@ this.completeValidation = this.completeValidation.bind(this);
 this.approveStructure = this.approveStructure.bind(this);
 this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
 this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
+
+ this.getStructureTestResults = this.getStructureTestResults.bind(this);
+ this.createStructureTestResult = this.createStructureTestResult.bind(this);
+ this.getStructureTestResultById = this.getStructureTestResultById.bind(this);
+ this.updateStructureTestResult = this.updateStructureTestResult.bind(this);
+ this.deleteStructureTestResult = this.deleteStructureTestResult.bind(this);
+ this.getFloorTestResults = this.getFloorTestResults.bind(this);
+ this.createFloorTestResult = this.createFloorTestResult.bind(this);
+ this.getFloorTestResultById = this.getFloorTestResultById.bind(this);
+ this.updateFloorTestResult = this.updateFloorTestResult.bind(this);
+ this.deleteFloorTestResult = this.deleteFloorTestResult.bind(this);
+ this.getFlatTestResults = this.getFlatTestResults.bind(this);
+ this.createFlatTestResult = this.createFlatTestResult.bind(this);
+ this.getFlatTestResultById = this.getFlatTestResultById.bind(this);
+ this.updateFlatTestResult = this.updateFlatTestResult.bind(this);
+ this.deleteFlatTestResult = this.deleteFlatTestResult.bind(this);
+ this.getBlockTestResults = this.getBlockTestResults.bind(this);
+ this.createBlockTestResult = this.createBlockTestResult.bind(this);
+ this.getBlockTestResultById = this.getBlockTestResultById.bind(this);
+ this.updateBlockTestResult = this.updateBlockTestResult.bind(this);
+ this.deleteBlockTestResult = this.deleteBlockTestResult.bind(this);
 */
 
 

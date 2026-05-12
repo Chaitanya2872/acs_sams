@@ -19,7 +19,8 @@ const {
   componentUpdateValidation,
   multiComponentRatingValidation,
   quantificationValidation,
-  parameterValidations
+  parameterValidations,
+  testResultValidation
 } = require('../utils/screenValidators');
 
 const router = express.Router();
@@ -42,6 +43,32 @@ const parseStructuresBody = (req, res, next) => {
       });
     }
   }
+  next();
+};
+
+const parseTestResultBody = (req, res, next) => {
+  if (!req.body || typeof req.body !== 'object') {
+    return next();
+  }
+
+  const maybeParseJson = (key) => {
+    if (typeof req.body[key] !== 'string') return;
+    const raw = req.body[key].trim();
+    if (!raw) return;
+
+    try {
+      req.body[key] = JSON.parse(raw);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid JSON in "${key}" field`,
+        details: error.message
+      });
+    }
+  };
+
+  maybeParseJson('test_results');
+  maybeParseJson('test_report_pdf');
   next();
 };
 
@@ -187,6 +214,236 @@ router.post(
 );
 
 console.log('✅ Bulk routes registered');
+
+// =================== TEST RESULT ROUTES ===================
+router.get(
+  '/:id/test-results',
+  authenticateToken,
+  parameterValidations.structureId,
+  handleValidationErrors,
+  structureController.getStructureTestResults
+);
+
+router.post(
+  '/:id/test-results',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  testResultValidation,
+  handleValidationErrors,
+  structureController.createStructureTestResult
+);
+
+router.get(
+  '/:id/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.getStructureTestResultById
+);
+
+router.put(
+  '/:id/test-results/:testId',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  testResultValidation,
+  handleValidationErrors,
+  structureController.updateStructureTestResult
+);
+
+router.delete(
+  '/:id/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.deleteStructureTestResult
+);
+
+router.get(
+  '/:id/floors/:floorId/test-results',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  handleValidationErrors,
+  structureController.getFloorTestResults
+);
+
+router.post(
+  '/:id/floors/:floorId/test-results',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  testResultValidation,
+  handleValidationErrors,
+  structureController.createFloorTestResult
+);
+
+router.get(
+  '/:id/floors/:floorId/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.getFloorTestResultById
+);
+
+router.put(
+  '/:id/floors/:floorId/test-results/:testId',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  testResultValidation,
+  handleValidationErrors,
+  structureController.updateFloorTestResult
+);
+
+router.delete(
+  '/:id/floors/:floorId/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.deleteFloorTestResult
+);
+
+router.get(
+  '/:id/floors/:floorId/flats/:flatId/test-results',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  handleValidationErrors,
+  structureController.getFlatTestResults
+);
+
+router.post(
+  '/:id/floors/:floorId/flats/:flatId/test-results',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  testResultValidation,
+  handleValidationErrors,
+  structureController.createFlatTestResult
+);
+
+router.get(
+  '/:id/floors/:floorId/flats/:flatId/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.getFlatTestResultById
+);
+
+router.put(
+  '/:id/floors/:floorId/flats/:flatId/test-results/:testId',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  testResultValidation,
+  handleValidationErrors,
+  structureController.updateFlatTestResult
+);
+
+router.delete(
+  '/:id/floors/:floorId/flats/:flatId/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.flatId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.deleteFlatTestResult
+);
+
+router.get(
+  '/:id/floors/:floorId/blocks/:blockId/test-results',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  handleValidationErrors,
+  structureController.getBlockTestResults
+);
+
+router.post(
+  '/:id/floors/:floorId/blocks/:blockId/test-results',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  testResultValidation,
+  handleValidationErrors,
+  structureController.createBlockTestResult
+);
+
+router.get(
+  '/:id/floors/:floorId/blocks/:blockId/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.getBlockTestResultById
+);
+
+router.put(
+  '/:id/floors/:floorId/blocks/:blockId/test-results/:testId',
+  authenticateToken,
+  uploadMultiple,
+  handleUploadError,
+  parseTestResultBody,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  testResultValidation,
+  handleValidationErrors,
+  structureController.updateBlockTestResult
+);
+
+router.delete(
+  '/:id/floors/:floorId/blocks/:blockId/test-results/:testId',
+  authenticateToken,
+  parameterValidations.structureId,
+  parameterValidations.floorId,
+  parameterValidations.blockId,
+  param('testId').notEmpty().withMessage('Test ID is required'),
+  handleValidationErrors,
+  structureController.deleteBlockTestResult
+);
 
 // =================== NOW APPLY AUTHENTICATION TO ALL OTHER ROUTES ===================
 router.use(authenticateToken);
