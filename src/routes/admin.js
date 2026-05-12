@@ -1,11 +1,30 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { User } = require('../models/schemas');
-const { protect, isAdmin } = require('../middlewares/auth');
+const { protect, isAdmin, authorizeModuleAction } = require('../middlewares/auth');
 const structureController = require('../controllers/structureController');
 const { handleValidationErrors } = require('../middlewares/validation');
 const { parameterValidations } = require('../utils/screenValidators');
+const { normalizePermissions } = require('../utils/accessControl');
 
 const router = express.Router();
+const USER_ROLES = ['AD', 'TE', 'VE', 'FE'];
+
+const generateTemporaryPassword = () =>
+  crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'TempPass123';
+
+const sanitizeUser = (user) => {
+  if (!user) return null;
+  const plainUser = typeof user.toObject === 'function' ? user.toObject() : { ...user };
+  delete plainUser.password;
+
+  return {
+    ...plainUser,
+    permissions: normalizePermissions(plainUser.permissions, plainUser.role),
+    structure_count: Array.isArray(plainUser.structures) ? plainUser.structures.length : 0
+  };
+};
 
 const getHealthStatusFromAverage = (average) => {
   if (average === null || average === undefined) return null;
@@ -123,18 +142,20 @@ router.use(isAdmin);
  * GET /api/admin/users
  * Get all users
  */
-router.get('/users', async (req, res) => {
+router.get('/users', authorizeModuleAction('users', 'read'), async (req, res) => {
   try {
     const users = await User.find()
-      .select('-password -structures')
+      .select('-password')
       .limit(100)
       .lean();
+
+    const sanitizedUsers = users.map((user) => sanitizeUser(user));
 
     res.json({
       success: true,
       message: 'Users retrieved successfully',
-      data: users,
-      total: users.length
+      data: sanitizedUsers,
+      total: sanitizedUsers.length
     });
   } catch (error) {
     console.error('Get users error:', error);
@@ -149,7 +170,7 @@ router.get('/users', async (req, res) => {
  * GET /api/admin/users/:id
  * Get single user by ID
  */
-router.get('/users/:id', async (req, res) => {
+router.get('/users/:id', authorizeModuleAction('users', 'read'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select('-password')
@@ -165,10 +186,7 @@ router.get('/users/:id', async (req, res) => {
     res.json({
       success: true,
       message: 'User retrieved successfully',
-      data: {
-        ...user,
-        structure_count: user.structures?.length || 0
-      }
+      data: sanitizeUser(user)
     });
   } catch (error) {
     console.error('Get user error:', error);
@@ -183,7 +201,7 @@ router.get('/users/:id', async (req, res) => {
  * GET /api/admin/structures
  * Get all structures from all users
  */
-router.get('/structures', async (req, res) => {
+router.get('/structures', authorizeModuleAction('structures', 'read'), async (req, res) => {
   try {
     console.log('📊 Admin fetching all structures');
     const {
@@ -327,11 +345,263 @@ router.get('/structures', async (req, res) => {
 });
 
 /**
+ * POST /api/admin/users
+ * Create a user with role and module permissions
+ */
+router.post('/users', authorizeModuleAction('users', 'write'), async (req, res) => {
+  try {
+    const {
+      username,
+      email,
+      role = 'FE',
+      roles,
+      profile,
+      is_active = true,
+      isEmailVerified = true,
+      permissions
+    } = req.body || {};
+
+    if (!username || !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username and email are required'
+      });
+    }
+
+    const normalizedRole = String(role).toUpperCase();
+    if (!USER_ROLES.includes(normalizedRole)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid role. Allowed roles: ${USER_ROLES.join(', ')}`
+      });
+    }
+
+    const normalizedRoles = Array.isArray(roles) && roles.length > 0
+      ? Array.from(new Set(roles.map((item) => String(item).toUpperCase()).filter((item) => USER_ROLES.includes(item))))
+      : [normalizedRole];
+
+    const existingUser = await User.findOne({
+      $or: [{ username }, { email: String(email).toLowerCase() }]
+    }).lean();
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: existingUser.username === username ? 'Username already taken' : 'User already exists with this email'
+      });
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 12);
+
+    const user = await User.create({
+      username,
+      email: String(email).toLowerCase(),
+      password: hashedPassword,
+      role: normalizedRole,
+      roles: normalizedRoles,
+      profile: profile || {},
+      is_active,
+      isEmailVerified,
+      structures: [],
+      permissions: normalizePermissions(permissions, normalizedRole),
+      stats: {
+        total_structures_created: 0,
+        total_structures_submitted: 0,
+        total_structures_approved: 0,
+        last_activity_date: new Date(),
+        total_login_count: 0
+      }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      data: {
+        ...sanitizeUser(user),
+        temporary_password: temporaryPassword
+      }
+    });
+  } catch (error) {
+    console.error('Create user error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to create user'
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/users/:id
+ * Update user details, role and permissions
+ */
+router.put('/users/:id', authorizeModuleAction('users', 'write'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      username,
+      email,
+      role,
+      roles,
+      profile,
+      is_active,
+      isEmailVerified,
+      permissions
+    } = req.body || {};
+
+    const user = await User.findById(id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const normalizedRole = role ? String(role).toUpperCase() : user.role;
+    if (!USER_ROLES.includes(normalizedRole)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid role. Allowed roles: ${USER_ROLES.join(', ')}`
+      });
+    }
+
+    if (username && username !== user.username) {
+      const usernameExists = await User.findOne({ username, _id: { $ne: id } }).lean();
+      if (usernameExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username already taken'
+        });
+      }
+      user.username = username;
+    }
+
+    if (email && email.toLowerCase() !== user.email) {
+      const emailExists = await User.findOne({ email: email.toLowerCase(), _id: { $ne: id } }).lean();
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'User already exists with this email'
+        });
+      }
+      user.email = email.toLowerCase();
+    }
+
+    user.role = normalizedRole;
+    user.roles = Array.isArray(roles) && roles.length > 0
+      ? Array.from(new Set(roles.map((item) => String(item).toUpperCase()).filter((item) => USER_ROLES.includes(item))))
+      : [normalizedRole];
+
+    if (profile && typeof profile === 'object') {
+      user.profile = {
+        ...(user.profile?.toObject ? user.profile.toObject() : user.profile || {}),
+        ...profile
+      };
+    }
+
+    if (typeof is_active === 'boolean') user.is_active = is_active;
+    if (typeof isEmailVerified === 'boolean') user.isEmailVerified = isEmailVerified;
+    user.permissions = normalizePermissions(permissions || user.permissions, normalizedRole);
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'User updated successfully',
+      data: sanitizeUser(user)
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update user'
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/users/:id
+ * Soft delete by deactivating user access
+ */
+router.delete('/users/:id', authorizeModuleAction('users', 'write'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    if (String(user._id) === String(req.user.userId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'You cannot deactivate your own account'
+      });
+    }
+
+    user.is_active = false;
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'User deactivated successfully'
+    });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to delete user'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/users/:id/reset-password
+ * Reset and return a temporary password
+ */
+router.post('/users/:id/reset-password', authorizeModuleAction('users', 'write'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+    user.password = await bcrypt.hash(temporaryPassword, 12);
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'Password reset successfully',
+      data: {
+        user_id: user._id,
+        username: user.username,
+        temporary_password: temporaryPassword
+      }
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to reset password'
+    });
+  }
+});
+
+/**
  * GET /api/admin/structures/:id/location
  * Get location screen for any structure as admin
  */
 router.get(
   '/structures/:id/location',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   handleValidationErrors,
   structureController.getLocationScreen
@@ -343,6 +613,7 @@ router.get(
  */
 router.get(
   '/structures/:id/administrative',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   handleValidationErrors,
   structureController.getAdministrativeScreen
@@ -354,6 +625,7 @@ router.get(
  */
 router.get(
   '/structures/:id/floors',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   handleValidationErrors,
   structureController.getFloors
@@ -365,6 +637,7 @@ router.get(
  */
 router.get(
   '/structures/:id/flats',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   handleValidationErrors,
   async (req, res) => {
@@ -396,6 +669,7 @@ router.get(
  */
 router.get(
   '/structures/:id/floors/:floorId',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   parameterValidations.floorId,
   handleValidationErrors,
@@ -408,6 +682,7 @@ router.get(
  */
 router.get(
   '/structures/:id/floors/:floorId/flats',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   parameterValidations.floorId,
   handleValidationErrors,
@@ -420,6 +695,7 @@ router.get(
  */
 router.get(
   '/structures/:id/floors/:floorId/ratings',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   parameterValidations.floorId,
   handleValidationErrors,
@@ -432,6 +708,7 @@ router.get(
  */
 router.get(
   '/structures/:id/floors/:floorId/structural/:type',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   parameterValidations.floorId,
   parameterValidations.componentType,
@@ -445,6 +722,7 @@ router.get(
  */
 router.get(
   '/structures/:id/floors/:floorId/non-structural/:type',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   parameterValidations.floorId,
   parameterValidations.componentType,
@@ -458,6 +736,7 @@ router.get(
  */
 router.get(
   '/structures/:id/ratings',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   handleValidationErrors,
   async (req, res) => {
@@ -489,6 +768,7 @@ router.get(
  */
 router.get(
   '/structures/:id',
+  authorizeModuleAction('structures', 'read'),
   parameterValidations.structureId,
   handleValidationErrors,
   structureController.getStructureDetails
@@ -498,7 +778,7 @@ router.get(
  * GET /api/admin/system-stats
  * Get system statistics
  */
-router.get('/system-stats', async (req, res) => {
+router.get('/system-stats', authorizeModuleAction('admin', 'read'), async (req, res) => {
   try {
     const [totalUsers, activeUsers, totalStructures] = await Promise.all([
       User.countDocuments(),

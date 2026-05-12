@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models/schemas');
+const { hasModulePermission, normalizePermissions } = require('../utils/accessControl');
 
 /**
  * Middleware to authenticate JWT token
@@ -53,6 +54,7 @@ const authenticateToken = async (req, res, next) => {
       email: user.email,
       role: user.role,
       roles: userRoles,
+      permissions: normalizePermissions(user.permissions, user.role),
       isEmailVerified: user.isEmailVerified,
       is_active: user.is_active
     };
@@ -167,6 +169,34 @@ const isAdmin = (req, res, next) => {
 };
 
 /**
+ * Authorize endpoint access by module and action
+ */
+const authorizeModuleAction = (moduleKey, action) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    if (hasPrivilegedAccess(req.user) && req.user.role === 'AD') {
+      return next();
+    }
+
+    if (hasModulePermission(req.user.permissions, moduleKey, action)) {
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: `Insufficient permissions for ${moduleKey}.${action}`,
+      code: 'INSUFFICIENT_PERMISSIONS'
+    });
+  };
+};
+
+/**
  * Validate request format
  */
 const validateRequest = (req, res, next) => {
@@ -194,6 +224,7 @@ module.exports = {
   authorize,
   authorizeRole,
   isAdmin,
+  authorizeModuleAction,
   requireEmailVerification,
   validateRequest,
   hasPrivilegedAccess

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { normalizePermissions } = require('../utils/accessControl');
 
 const isValidPhotoReference = (value) => {
   // Allow empty/null — photo is optional; undefined values are skipped by Mongoose
@@ -1131,6 +1132,24 @@ const userSchema = new mongoose.Schema({
     can_manage_users: {
       type: Boolean,
       default: false
+    },
+    modules: {
+      users: {
+        read: { type: Boolean, default: false },
+        write: { type: Boolean, default: false }
+      },
+      structures: {
+        read: { type: Boolean, default: true },
+        write: { type: Boolean, default: true }
+      },
+      reports: {
+        read: { type: Boolean, default: true },
+        write: { type: Boolean, default: true }
+      },
+      admin: {
+        read: { type: Boolean, default: false },
+        write: { type: Boolean, default: false }
+      }
     }
   },
   
@@ -1224,6 +1243,7 @@ structureSchema.virtual('total_units').get(function() {
 // =================== MIDDLEWARE ===================
 userSchema.pre('save', function(next) {
   this.updated_at = new Date();
+  this.permissions = normalizePermissions(this.permissions, this.role);
   next();
 });
 

@@ -21,3 +21,6 @@ Thumbs.db
 # Build outputs
 dist/
 build/
+
+# Frontend app kept local to backend repo
+admin-web/

@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { User, OTP } = require('../models/schemas');
 const emailService = require('./emailService');
+const { normalizePermissions } = require('../utils/accessControl');
 
 class AuthService {
   constructor() {
@@ -170,6 +171,7 @@ class AuthService {
   async register(userData) {
     try {
       const { username, email, password, confirmPassword, role } = userData;
+      const normalizedRole = String(role || 'FE').toUpperCase();
 
       console.log('📝 Starting registration for:', email);
 
@@ -208,7 +210,8 @@ class AuthService {
         username,
         email: email.toLowerCase(),
         password: hashedPassword,
-        role: role || 'engineer',
+        role: normalizedRole,
+        roles: [normalizedRole],
         isEmailVerified: false,
         is_active: true,
         structures: [], // Initialize empty structures array
@@ -220,14 +223,7 @@ class AuthService {
           total_login_count: 0
         },
         profile: {}, // Initialize empty profile object
-        permissions: {
-          can_create_structures: true,
-          can_approve_structures: false,
-          can_delete_structures: false,
-          can_view_all_structures: false,
-          can_export_reports: false,
-          can_manage_users: false
-        }
+        permissions: normalizePermissions({}, normalizedRole)
       });
 
       const savedUser = await newUser.save();
@@ -392,6 +388,7 @@ class AuthService {
           username: user.username,
           email: user.email,
           role: user.role,
+          permissions: normalizePermissions(user.permissions, user.role),
           isEmailVerified: user.isEmailVerified,
           is_active: user.is_active
         }
@@ -494,6 +491,7 @@ class AuthService {
           username: user.username,
           email: user.email,
           role: user.role,
+          permissions: normalizePermissions(user.permissions, user.role),
           last_login: new Date(),
           isEmailVerified: user.isEmailVerified,
           is_active: user.is_active
@@ -537,6 +535,7 @@ class AuthService {
           username: user.username,
           email: user.email,
           role: user.role,
+          permissions: normalizePermissions(user.permissions, user.role),
           is_active: user.is_active,
           isEmailVerified: user.isEmailVerified
         }
@@ -569,6 +568,7 @@ class AuthService {
           username: user.username,
           email: user.email,
           role: user.role,
+          permissions: normalizePermissions(user.permissions, user.role),
           isEmailVerified: user.isEmailVerified,
           is_active: user.is_active
         }
@@ -851,7 +851,7 @@ class AuthService {
           email: user.email,
           role: user.role,
           profile: user.profile || {},
-          permissions: user.permissions || {},
+          permissions: normalizePermissions(user.permissions, user.role),
           stats: user.stats || {},
           is_active: user.is_active,
           isEmailVerified: user.isEmailVerified,
