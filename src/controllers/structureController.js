@@ -366,11 +366,49 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   }
 
   // =================== UTILITY METHODS ===================
+ isTesterAssignedToStructure(structure, testerUserId) {
+  if (!structure || !testerUserId) {
+    return false;
+  }
+
+  const assignedTesters = Array.isArray(structure.testing_assignment?.testers)
+    ? structure.testing_assignment.testers
+    : [];
+
+  return assignedTesters.some((tester) => {
+    const assignedUserId = tester?.user_id?.toString?.() || tester?.user_id;
+    return assignedUserId === testerUserId;
+  });
+}
+
+ buildTestingAssignmentPayload(structure, testerUserId = null) {
+  const assignment = structure?.testing_assignment || {};
+  const assignedFormats = Array.isArray(assignment.testing_formats) ? assignment.testing_formats : [];
+
+  return {
+    assigned_at: assignment.assigned_at || null,
+    assigned_by: assignment.assigned_by || null,
+    testers: Array.isArray(assignment.testers) ? assignment.testers : [],
+    testing_formats: assignedFormats,
+    assigned_format_ids: assignedFormats
+      .map((format) => format?.format_id)
+      .filter(Boolean),
+    is_assigned_tester: testerUserId ? this.isTesterAssignedToStructure(structure, testerUserId) : false
+  };
+}
+
  async findUserStructure(userId, structureId, requestUser = null) {
   // If requestUser is provided and has privileged access, search across all users
   if (requestUser && hasPrivilegedAccess(requestUser)) {
     console.log('🔓 Privileged user accessing structure:', structureId);
-    return await this.findStructureAcrossUsers(structureId);
+    const result = await this.findStructureAcrossUsers(structureId);
+    const isTeUser = this.hasRoleFromRequest(requestUser, 'TE');
+
+    if (isTeUser && !this.isTesterAssignedToStructure(result.structure, userId)) {
+      throw new Error('Structure not found');
+    }
+
+    return result;
   }
   
   // Regular user - only search their own structures
@@ -3644,7 +3682,11 @@ async getAllStructures(req, res) {
               if (!teRelevantStatuses.includes(structure.status)) {
                 return; // Skip this structure
               }
-              
+
+              if (!this.isTesterAssignedToStructure(structure, req.user.userId)) {
+                return; // Skip structures not assigned to this TE
+              }
+               
               console.log(`✅ TE viewing structure ${structure._id} with status: ${structure.status}`);
             }
             
@@ -3885,6 +3927,10 @@ async getAllStructures(req, res) {
         
         // ✅ WORKFLOW INFORMATION FOR DISPLAY
         workflow: workflowInfo,
+        testing_assignment: this.buildTestingAssignmentPayload(
+          structure,
+          userRole === 'TE' ? req.user.userId : null
+        ),
         
         // Helper for frontend to quickly display status
         status_display: this.buildStatusDisplay(structure.status, workflowInfo),
@@ -4013,6 +4059,10 @@ async getStructureDetails(req, res) {
         priority_level: null,
         last_assessment_date: null
       },
+      testing_assignment: this.buildTestingAssignmentPayload(
+        structure,
+        this.hasRoleFromRequest(req.user, 'TE') ? req.user.userId : null
+      ),
       
       // Floors and flats data
       floors: []
@@ -7513,6 +7563,10 @@ async startTesting(req, res) {
     if (structure.status !== 'submitted') {
       return sendErrorResponse(res, `Structure must be in 'submitted' status to start testing. Current status: ${structure.status}`, 400);
     }
+
+    if (!this.isTesterAssignedToStructure(structure, req.user.userId)) {
+      return sendErrorResponse(res, 'This structure is not assigned to the current tester', 403);
+    }
     
     // Update status
     structure.status = 'under_testing';
@@ -7525,7 +7579,8 @@ async startTesting(req, res) {
       structure_id: id,
       uid: structure.structural_identity?.uid,
       status: structure.status,
-      testing_started_by: this.getUserFullName(user)
+      testing_started_by: this.getUserFullName(user),
+      testing_assignment: this.buildTestingAssignmentPayload(structure, req.user.userId)
     });
     
   } catch (error) {

@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { User, TestFormat } = require('../models/schemas');
+const { DEFAULT_TEST_FORMATS } = require('../data/testFormats');
 const { protect, isAdmin, authorizeModuleAction } = require('../middlewares/auth');
 const structureController = require('../controllers/structureController');
 const { handleValidationErrors } = require('../middlewares/validation');
@@ -10,6 +11,7 @@ const { normalizePermissions } = require('../utils/accessControl');
 
 const router = express.Router();
 const USER_ROLES = ['AD', 'TE', 'VE', 'FE'];
+const DEFAULT_CUSTOM_TEST_FORMAT = DEFAULT_TEST_FORMATS.find((format) => format.is_custom);
 
 const generateTemporaryPassword = () =>
   crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'TempPass123';
@@ -24,6 +26,44 @@ const sanitizeUser = (user) => {
     permissions: normalizePermissions(plainUser.permissions, plainUser.role),
     structure_count: Array.isArray(plainUser.structures) ? plainUser.structures.length : 0
   };
+};
+
+const ensureCustomTestingFormat = async () => {
+  const existingCustomFormat = await TestFormat.findOne({
+    $or: [{ is_custom: true }, { test_name: 'custom' }]
+  })
+    .select('format_id test_name display_name is_custom')
+    .lean();
+
+  if (existingCustomFormat) {
+    return existingCustomFormat;
+  }
+
+  if (!DEFAULT_CUSTOM_TEST_FORMAT) {
+    throw new Error('Default custom testing format is not configured');
+  }
+
+  const upsertedFormat = await TestFormat.findOneAndUpdate(
+    { format_id: DEFAULT_CUSTOM_TEST_FORMAT.format_id },
+    {
+      $set: {
+        ...DEFAULT_CUSTOM_TEST_FORMAT,
+        updated_at: new Date()
+      },
+      $setOnInsert: {
+        created_at: new Date()
+      }
+    },
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true
+    }
+  )
+    .select('format_id test_name display_name is_custom')
+    .lean();
+
+  return upsertedFormat;
 };
 
 const buildUserWriteError = (error) => {
@@ -680,6 +720,8 @@ router.get('/testers', authorizeModuleAction('users', 'read'), async (req, res) 
 
 router.get('/testing-formats', authorizeModuleAction('structures', 'read'), async (req, res) => {
   try {
+    await ensureCustomTestingFormat();
+
     const formats = await TestFormat.find()
       .select('format_id test_name display_name is_custom')
       .sort({ display_name: 1, test_name: 1 })
@@ -735,13 +777,6 @@ router.post('/structures/:id/move-to-testing', authorizeModuleAction('structures
       });
     }
 
-    if (!Array.isArray(testing_formats) || testing_formats.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'At least one testing format must be selected'
-      });
-    }
-
     const { user: structureOwner, structure } = await structureController.findStructureAcrossUsers(id);
 
     const testers = await User.find({
@@ -759,15 +794,26 @@ router.post('/structures/:id/move-to-testing', authorizeModuleAction('structures
       });
     }
 
-    const formatIds = testing_formats
+    const customFormat = await ensureCustomTestingFormat();
+
+    const requestedFormatIds = testing_formats
       .map((format) => (typeof format === 'string' ? format : format?.format_id))
       .filter(Boolean);
+    const formatIds = Array.from(new Set([...(customFormat?.format_id ? [customFormat.format_id] : []), ...requestedFormatIds]));
 
     const formats = await TestFormat.find({ format_id: { $in: formatIds } })
-      .select('format_id test_name display_name')
+      .select('format_id test_name display_name is_custom')
       .lean();
 
     if (!formats.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Selected testing formats are invalid'
+      });
+    }
+
+    const foundFormatIds = new Set(formats.map((format) => format.format_id));
+    if (formatIds.some((formatId) => !foundFormatIds.has(formatId))) {
       return res.status(400).json({
         success: false,
         error: 'Selected testing formats are invalid'
@@ -787,11 +833,17 @@ router.post('/structures/:id/move-to-testing', authorizeModuleAction('structures
         email: tester.email,
         role: tester.role
       })),
-      testing_formats: formats.map((format) => ({
-        format_id: format.format_id,
-        test_name: format.test_name,
-        display_name: format.display_name
-      })),
+      testing_formats: formats
+        .sort((left, right) => {
+          if (left.is_custom && !right.is_custom) return -1;
+          if (!left.is_custom && right.is_custom) return 1;
+          return left.display_name.localeCompare(right.display_name);
+        })
+        .map((format) => ({
+          format_id: format.format_id,
+          test_name: format.test_name,
+          display_name: format.display_name
+        })),
       assigned_at: new Date()
     };
 

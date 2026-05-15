@@ -2,6 +2,7 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
+const path = require('path');
 const puppeteer = require('puppeteer-core');
 const mongoose = require('mongoose');
 const { User } = require('../models/schemas');
@@ -325,6 +326,35 @@ const sanitizeWorksheetName = (name, fallback) => {
   return (cleaned || fallback).slice(0, 31);
 };
 
+const getFileExtension = (value) => {
+  const source = safeText(value);
+  if (!source) return '';
+
+  const normalized = source.split('?')[0].split('#')[0];
+  const ext = path.extname(normalized).toLowerCase();
+  return ext;
+};
+
+const isImageSource = (value) => {
+  const ext = getFileExtension(value);
+  if (ext) {
+    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'].includes(ext);
+  }
+
+  const source = safeText(value);
+  return /^data:image\//i.test(source);
+};
+
+const getAttachmentLabel = (value) => {
+  const source = safeText(value);
+  if (!source) return '';
+  if (isImageSource(source)) return 'Embedded image';
+
+  const normalized = source.replace(/\\/g, '/');
+  const name = normalized.split('/').pop();
+  return safeText(name, source);
+};
+
 const getUserMatch = (reqUser, query) => {
   const match = { is_active: true };
 
@@ -449,7 +479,7 @@ const getCustomComponentEntries = (value) => {
 
   const source = value instanceof Map ? Array.from(value.entries()) : Object.entries(value);
   return source.flatMap(([key, entries]) => {
-    const arr = Array.isArray(entries) ? entries : [];
+    const arr = Array.isArray(entries) ? entries : entries && typeof entries === 'object' ? [entries] : [];
     return arr.map((entry) => ({
       componentKey: key,
       componentLabel: safeText(entry?.name, key),
@@ -462,7 +492,8 @@ const getComponentEntries = (componentContainer, componentMap) => {
   if (!componentContainer) return [];
 
   const namedEntries = componentMap.flatMap(([componentKey, componentLabel]) => {
-    const entries = Array.isArray(componentContainer[componentKey]) ? componentContainer[componentKey] : [];
+    const rawValue = componentContainer[componentKey];
+    const entries = Array.isArray(rawValue) ? rawValue : rawValue && typeof rawValue === 'object' ? [rawValue] : [];
     return entries.map((entry) => ({ componentKey, componentLabel, entry }));
   });
 
@@ -492,7 +523,7 @@ const normalizeComponentLookupKey = (value) =>
     .replace(/_+/g, '_');
 
 const getObservationText = (entry) => {
-  const remarks = safeText(entry?.inspector_notes || entry?.condition_comment || entry?.remarks);
+  const remarks = safeText(entry?.condition_comment || entry?.inspector_notes || entry?.remarks);
   if (remarks) return remarks;
 
   const distressTypes = Array.isArray(entry?.distress_types)
@@ -586,9 +617,10 @@ const collectObservationsFromScope = (scopeType, scope, structuralContainer, non
 
   const appendEntries = (entries, category) => {
     entries.forEach(({ componentLabel, entry }) => {
-      const remarks = safeText(entry?.inspector_notes || entry?.condition_comment || entry?.remarks);
-      const distressTypes = Array.isArray(entry?.distress_types) ? entry.distress_types.join(', ') : '';
-      const note = remarks || distressTypes;
+      const note = getObservationText(entry);
+      const distressTypes = Array.isArray(entry?.distress_types)
+        ? entry.distress_types.map((item) => safeText(item)).filter(Boolean).join(', ')
+        : '';
       const photos = Array.isArray(entry?.photos) ? entry.photos.filter(Boolean) : [];
 
       if (!note && photos.length === 0) {
@@ -599,7 +631,7 @@ const collectObservationsFromScope = (scopeType, scope, structuralContainer, non
         location: locationLabel,
         category,
         component: componentLabel,
-        remarks: note || `${componentLabel} observation recorded`,
+        remarks: note || '',
         photos,
         repair_methodology: safeText(entry?.repair_methodology),
         distress: distressTypes || componentLabel
@@ -778,7 +810,7 @@ const collectPhotoRows = (observations, tests) => {
   );
 
   const testingImages = tests
-    .filter((test) => test.attachment)
+    .filter((test) => test.attachment && isImageSource(test.attachment))
     .map((test, index) => ({
       serial: index + 1,
       test_name: test.test_name,
@@ -1547,7 +1579,42 @@ const toWordImageSource = (value) => {
   const source = safeText(value);
   if (!source) return '';
   if (/^https?:\/\//i.test(source) || /^data:/i.test(source)) return source;
-  return encodeURI(`file:///${source.replace(/\\/g, '/')}`);
+
+  const candidatePaths = [source, path.resolve(source)];
+  const existingPath = candidatePaths.find((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch (error) {
+      return false;
+    }
+  });
+
+  if (!existingPath) {
+    return '';
+  }
+
+  const extension = getFileExtension(existingPath);
+  const mimeTypeMap = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml'
+  };
+
+  const mimeType = mimeTypeMap[extension];
+  if (!mimeType) {
+    return encodeURI(`file:///${existingPath.replace(/\\/g, '/')}`);
+  }
+
+  try {
+    const buffer = fs.readFileSync(existingPath);
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
+  } catch (error) {
+    return encodeURI(`file:///${existingPath.replace(/\\/g, '/')}`);
+  }
 };
 
 const groupObservationsForWord = (observations) =>
@@ -1656,7 +1723,7 @@ const renderTestResultsWord = (tests) => {
           row.test_date || '',
           row.result_summary || '',
           row.remarks || '',
-          row.attachment || ''
+          getAttachmentLabel(row.attachment)
         ]),
         { className: 'test-table' }
       );

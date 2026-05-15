@@ -29,13 +29,14 @@ const buildFormat = ({
   format_id,
   test_name,
   display_name,
+  is_custom = false,
   summary,
   specificFields
 }) => ({
   format_id,
   test_name,
   display_name,
-  is_custom: false,
+  is_custom,
   format_template: {
     version: 1,
     summary,
@@ -56,6 +57,18 @@ const buildFormat = ({
 });
 
 const DEFAULT_TEST_FORMATS = [
+  buildFormat({
+    format_id: 'TF_CUSTOM',
+    test_name: 'custom',
+    display_name: 'Custom Format',
+    is_custom: true,
+    summary: 'Flexible format for assignment-specific or project-specific testing needs.',
+    specificFields: [
+      { field_name: 'custom_test_name', field_type: 'text', field_label: 'Custom Test Name', required: true },
+      { field_name: 'observation_summary', field_type: 'text', field_label: 'Observation Summary', required: true },
+      { field_name: 'result_status', field_type: 'select', field_label: 'Result Status', required: false, options: ['Pass', 'Fail', 'Needs Review'] }
+    ]
+  }),
   buildFormat({
     format_id: 'TF_REBOUND_HAMMER',
     test_name: 'rebound_hammer',
