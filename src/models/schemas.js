@@ -1106,6 +1106,7 @@ const structureSchema = new mongoose.Schema({
 
   workflow: {
     submitted_by: workflowActorSchema,
+    testing_started_by: workflowActorSchema,
     tested_by: workflowActorSchema,
     validated_by: workflowActorSchema,
     approved_by: workflowActorSchema,

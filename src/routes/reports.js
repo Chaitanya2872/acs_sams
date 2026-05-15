@@ -2083,7 +2083,10 @@ const buildWordDocument = (structures, filtersApplied) => `
 const resolveBrowserExecutablePath = () => {
   const executablePath = BROWSER_CANDIDATES.find((candidate) => fs.existsSync(candidate));
   if (!executablePath) {
-    throw new Error('Chrome or Edge executable not found for HTML-to-PDF rendering');
+    const error = new Error('Chrome or Edge executable not found for HTML-to-PDF rendering');
+    error.statusCode = 503;
+    error.expose = true;
+    throw error;
   }
   return executablePath;
 };
@@ -2095,13 +2098,15 @@ const sendWordDocument = (res, content, fileName) => {
 };
 
 const sendPdfFromHtml = async (res, html, fileName) => {
-  const browser = await puppeteer.launch({
-    executablePath: resolveBrowserExecutablePath(),
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+  let browser = null;
 
   try {
+    browser = await puppeteer.launch({
+      executablePath: resolveBrowserExecutablePath(),
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const pdfBuffer = await page.pdf({
@@ -2121,7 +2126,9 @@ const sendPdfFromHtml = async (res, html, fileName) => {
     res.setHeader('Content-Length', String(normalizedPdfBuffer.length));
     res.send(normalizedPdfBuffer);
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 };
 

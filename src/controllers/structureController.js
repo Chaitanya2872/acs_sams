@@ -397,6 +397,53 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   };
 }
 
+ buildTabletTestingAssignmentPayload(structure) {
+  const assignment = structure?.testing_assignment || {};
+  const testers = Array.isArray(assignment.testers) ? assignment.testers : [];
+  const testingFormats = Array.isArray(assignment.testing_formats) ? assignment.testing_formats : [];
+  const hasAssignment =
+    Boolean(assignment.assigned_at || assignment.assigned_by) ||
+    testers.length > 0 ||
+    testingFormats.length > 0;
+
+  if (!hasAssignment) {
+    return null;
+  }
+
+  return {
+    assigned_at: assignment.assigned_at || null,
+    assigned_by: assignment.assigned_by
+      ? {
+          id: assignment.assigned_by.user_id ? String(assignment.assigned_by.user_id) : '',
+          name: assignment.assigned_by.name || '',
+          role: assignment.assigned_by.role || ''
+        }
+      : null,
+    testers: testers.map((tester) => ({
+      id: tester?.user_id ? String(tester.user_id) : tester?._id ? String(tester._id) : '',
+      name: tester?.name || tester?.username || '',
+      role: tester?.role || ''
+    })),
+    testing_formats: testingFormats.map((format) => ({
+      id: format?.format_id || '',
+      name: format?.display_name || format?.test_name || ''
+    }))
+  };
+ }
+
+ buildTabletWorkflowData(structure, structureId) {
+  return {
+    structure_id: String(structureId || structure?._id || ''),
+    workflow: {
+      status: structure?.status || '',
+      assigned_at: structure?.testing_assignment?.assigned_at || null,
+      updated_at: structure?.creation_info?.last_updated_date || null
+    },
+    testing_assignment: this.buildTabletTestingAssignmentPayload(structure),
+    timeline: this.buildWorkflowTimeline(structure?.workflow || {}, structure?.status)
+  };
+ }
+
  async findUserStructure(userId, structureId, requestUser = null) {
   // If requestUser is provided and has privileged access, search across all users
   if (requestUser && hasPrivilegedAccess(requestUser)) {
@@ -6099,7 +6146,7 @@ async deleteRemark(req, res) {
       return sendErrorResponse(res, 'Only FE and VE can delete remarks', 403);
     }
 
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    const { structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     if (!structure.remarks) {
       return sendErrorResponse(res, 'No remarks found', 404);
@@ -7502,7 +7549,7 @@ async saveFlatQuantifications(req, res) {
 async submitForTesting(req, res) {
   try {
     const { id } = req.params;
-    const { notes } = req.body;
+    const { notes } = req.body || {};
     
     const user = await User.findById(req.user.userId);
     if (!user) {
@@ -7516,15 +7563,28 @@ async submitForTesting(req, res) {
     
     const { user: structureOwner, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
+    const allowedStatuses = ['draft', 'location_completed', 'admin_completed', 'geometric_completed', 'ratings_in_progress'];
+    if (!allowedStatuses.includes(structure.status)) {
+      return sendErrorResponse(res, 'Structure cannot be submitted for testing from current status', 409);
+    }
+
     // Update status and workflow
     structure.status = 'submitted';
-    structure.workflow = structure.workflow || {};
+    structure.workflow = {
+      submitted_by: null,
+      testing_started_by: null,
+      tested_by: null,
+      validated_by: null,
+      approved_by: null,
+      rejected_by: null
+    };
     structure.workflow.submitted_by = {
       user_id: user._id,
       name: this.getUserFullName(user),
       email: user.email,
       role: 'FE',
-      date: new Date()
+      date: new Date(),
+      test_notes: notes || ''
     };
     
     if (notes) {
@@ -7536,17 +7596,14 @@ async submitForTesting(req, res) {
     
     console.log(`✅ Structure ${id} submitted for testing by ${user.username}`);
     
-    sendSuccessResponse(res, 'Structure submitted for testing successfully', {
-      structure_id: id,
-      uid: structure.structural_identity?.uid,
-      status: structure.status,
-      submitted_by: structure.workflow.submitted_by,
-      submitted_at: structure.workflow.submitted_by.date
-    });
+    return sendSuccessResponse(res, 'Structure submitted for testing successfully', this.buildTabletWorkflowData(structure, id));
     
   } catch (error) {
     console.error('❌ Submit for testing error:', error);
-    sendErrorResponse(res, 'Failed to submit structure for testing', 500, error.message);
+    if (error.message === 'Structure not found') {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+    return sendErrorResponse(res, 'Failed to submit structure for testing', 500, error.message);
   }
 }
 
@@ -7569,11 +7626,11 @@ async startTesting(req, res) {
       return sendErrorResponse(res, 'Only Test Engineers can start testing', 403);
     }
     
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    const { structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     // Check if structure is in submitted status
     if (structure.status !== 'submitted') {
-      return sendErrorResponse(res, `Structure must be in 'submitted' status to start testing. Current status: ${structure.status}`, 400);
+      return sendErrorResponse(res, 'Cannot start testing from current status', 409);
     }
 
     if (!this.isTesterAssignedToStructure(structure, req.user.userId)) {
@@ -7582,22 +7639,28 @@ async startTesting(req, res) {
     
     // Update status
     structure.status = 'under_testing';
+    structure.workflow = structure.workflow || {};
+    structure.workflow.testing_started_by = {
+      user_id: user._id,
+      name: this.getUserFullName(user),
+      email: user.email,
+      role: 'TE',
+      date: new Date(),
+      test_notes: ''
+    };
     structure.creation_info.last_updated_date = new Date();
     await structureOwner.save();
     
     console.log(`✅ TE ${user.username} started testing structure ${id}`);
     
-    sendSuccessResponse(res, 'Testing started successfully', {
-      structure_id: id,
-      uid: structure.structural_identity?.uid,
-      status: structure.status,
-      testing_started_by: this.getUserFullName(user),
-      testing_assignment: this.buildTestingAssignmentPayload(structure, req.user.userId)
-    });
+    return sendSuccessResponse(res, 'Testing started successfully', this.buildTabletWorkflowData(structure, id));
     
   } catch (error) {
     console.error('❌ Start testing error:', error);
-    sendErrorResponse(res, 'Failed to start testing', 500, error.message);
+    if (error.message === 'Structure not found') {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+    return sendErrorResponse(res, 'Failed to start testing', 500, error.message);
   }
 }
 
@@ -7609,7 +7672,7 @@ async startTesting(req, res) {
 async completeTesting(req, res) {
   try {
     const { id } = req.params;
-    const { test_notes, status } = req.body; // status can be 'tested' or 'rejected'
+    const { test_notes, status, rejection_reason } = req.body || {};
     
     const user = await User.findById(req.user.userId);
     if (!user) {
@@ -7623,17 +7686,21 @@ async completeTesting(req, res) {
     
     const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
     
+    if (status !== 'tested' && status !== 'rejected') {
+      return sendErrorResponse(res, 'status must be one of: tested, rejected', 400);
+    }
+
     // Check if structure is under testing
-    if (structure.status !== 'under_testing' && structure.status !== 'submitted') {
-      return sendErrorResponse(res, `Structure must be under testing. Current status: ${structure.status}`, 400);
+    if (structure.status !== 'under_testing') {
+      return sendErrorResponse(res, 'Cannot complete testing from current status', 409);
     }
     
     structure.workflow = structure.workflow || {};
     
     if (status === 'rejected') {
       // Reject the structure
-      if (!req.body.rejection_reason) {
-        return sendErrorResponse(res, 'Rejection reason is required', 400);
+      if (!rejection_reason) {
+        return sendErrorResponse(res, 'rejection_reason is required when status is rejected', 400);
       }
       
       structure.status = 'rejected';
@@ -7643,7 +7710,7 @@ async completeTesting(req, res) {
         email: user.email,
         role: 'TE',
         date: new Date(),
-        rejection_reason: req.body.rejection_reason,
+        rejection_reason,
         rejection_stage: 'testing'
       };
       
@@ -7666,17 +7733,18 @@ async completeTesting(req, res) {
     structure.creation_info.last_updated_date = new Date();
     await structureOwner.save();
     
-    sendSuccessResponse(res, status === 'rejected' ? 'Structure rejected' : 'Testing completed successfully', {
-      structure_id: id,
-      uid: structure.structural_identity?.uid,
-      status: structure.status,
-      tested_by: structure.workflow.tested_by,
-      rejected_by: structure.workflow.rejected_by
-    });
+    return sendSuccessResponse(
+      res,
+      status === 'rejected' ? 'Testing rejected successfully' : 'Testing completed successfully',
+      this.buildTabletWorkflowData(structure, id)
+    );
     
   } catch (error) {
     console.error('❌ Complete testing error:', error);
-    sendErrorResponse(res, 'Failed to complete testing', 500, error.message);
+    if (error.message === 'Structure not found') {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+    return sendErrorResponse(res, 'Failed to complete testing', 500, error.message);
   }
 }
 
@@ -7887,25 +7955,14 @@ async getWorkflowHistory(req, res) {
     
     const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
     
-    const workflow = structure.workflow || {};
-    
-    sendSuccessResponse(res, 'Workflow history retrieved successfully', {
-      structure_id: id,
-      uid: structure.structural_identity?.uid,
-      current_status: structure.status,
-      workflow: {
-        submitted: workflow.submitted_by || null,
-        tested: workflow.tested_by || null,
-        validated: workflow.validated_by || null,
-        approved: workflow.approved_by || null,
-        rejected: workflow.rejected_by || null
-      },
-      timeline: this.buildWorkflowTimeline(workflow, structure.status)
-    });
+    return sendSuccessResponse(res, 'Workflow fetched successfully', this.buildTabletWorkflowData(structure, id));
     
   } catch (error) {
     console.error('❌ Get workflow history error:', error);
-    sendErrorResponse(res, 'Failed to retrieve workflow history', 500, error.message);
+    if (error.message === 'Structure not found') {
+      return sendErrorResponse(res, 'Structure not found', 404);
+    }
+    return sendErrorResponse(res, 'Failed to retrieve workflow history', 500, error.message);
   }
 }
 
@@ -7917,73 +7974,71 @@ buildWorkflowTimeline(workflow, currentStatus) {
   
   if (workflow.submitted_by) {
     timeline.push({
-      stage: 'Submitted',
-      user: workflow.submitted_by.name,
-      role: workflow.submitted_by.role,
-      date: workflow.submitted_by.date,
-      status: 'completed'
+      title: 'Submitted for testing',
+      status: 'submitted',
+      actor_name: workflow.submitted_by.name || '',
+      created_at: workflow.submitted_by.date || null,
+      notes: workflow.submitted_by.test_notes || ''
+    });
+  }
+
+  if (workflow.testing_started_by) {
+    timeline.push({
+      title: 'Testing started',
+      status: 'under_testing',
+      actor_name: workflow.testing_started_by.name || '',
+      created_at: workflow.testing_started_by.date || null,
+      notes: workflow.testing_started_by.test_notes || ''
     });
   }
   
   if (workflow.tested_by) {
     timeline.push({
-      stage: 'Tested',
-      user: workflow.tested_by.name,
-      role: workflow.tested_by.role,
-      date: workflow.tested_by.date,
-      notes: workflow.tested_by.test_notes,
-      status: 'completed'
+      title: 'Testing completed',
+      status: 'tested',
+      actor_name: workflow.tested_by.name || '',
+      created_at: workflow.tested_by.date || null,
+      notes: workflow.tested_by.test_notes || ''
     });
   }
   
   if (workflow.validated_by) {
     timeline.push({
-      stage: 'Validated',
-      user: workflow.validated_by.name,
-      role: workflow.validated_by.role,
-      date: workflow.validated_by.date,
-      notes: workflow.validated_by.validation_notes,
-      status: 'completed'
+      title: 'Validation completed',
+      status: 'validated',
+      actor_name: workflow.validated_by.name || '',
+      created_at: workflow.validated_by.date || null,
+      notes: workflow.validated_by.validation_notes || ''
     });
   }
   
   if (workflow.approved_by) {
     timeline.push({
-      stage: 'Approved',
-      user: workflow.approved_by.name,
-      role: workflow.approved_by.role,
-      date: workflow.approved_by.date,
-      notes: workflow.approved_by.approval_notes,
-      status: 'completed'
+      title: 'Structure approved',
+      status: 'approved',
+      actor_name: workflow.approved_by.name || '',
+      created_at: workflow.approved_by.date || null,
+      notes: workflow.approved_by.approval_notes || ''
     });
   }
   
   if (workflow.rejected_by) {
     timeline.push({
-      stage: 'Rejected',
-      user: workflow.rejected_by.name,
-      role: workflow.rejected_by.role,
-      date: workflow.rejected_by.date,
-      reason: workflow.rejected_by.rejection_reason,
-      rejection_stage: workflow.rejected_by.rejection_stage,
-      status: 'rejected'
+      title: workflow.rejected_by.rejection_stage === 'testing' ? 'Testing rejected' : 'Structure rejected',
+      status: 'rejected',
+      actor_name: workflow.rejected_by.name || '',
+      created_at: workflow.rejected_by.date || null,
+      notes: workflow.rejected_by.rejection_reason || ''
     });
   }
-  
-  // Add current pending stage
-  if (currentStatus === 'submitted') {
-    timeline.push({ stage: 'Testing', status: 'pending' });
-  } else if (currentStatus === 'under_testing') {
-    timeline.push({ stage: 'Testing', status: 'in_progress' });
-  } else if (currentStatus === 'tested') {
-    timeline.push({ stage: 'Validation', status: 'pending' });
-  } else if (currentStatus === 'under_validation') {
-    timeline.push({ stage: 'Validation', status: 'in_progress' });
-  } else if (currentStatus === 'validated') {
-    timeline.push({ stage: 'Approval', status: 'pending' });
-  }
-  
-  return timeline;
+
+  return timeline
+    .filter((item) => item.created_at || item.title)
+    .sort((left, right) => {
+      const leftTime = left.created_at ? new Date(left.created_at).getTime() : 0;
+      const rightTime = right.created_at ? new Date(right.created_at).getTime() : 0;
+      return leftTime - rightTime;
+    });
 }
 
 // Don't forget to bind these in the constructor!

@@ -795,9 +795,10 @@ router.post('/:id/complete-testing',
   parameterValidations.structureId,
   [
     body('status')
-      .optional()
+      .exists()
+      .withMessage('status is required')
       .isIn(['tested', 'rejected'])
-      .withMessage('Status must be either "tested" or "rejected"'),
+      .withMessage('status must be one of: tested, rejected'),
     body('test_notes')
       .optional()
       .isString()
@@ -807,7 +808,7 @@ router.post('/:id/complete-testing',
     body('rejection_reason')
       .if(body('status').equals('rejected'))
       .notEmpty()
-      .withMessage('Rejection reason is required when rejecting')
+      .withMessage('rejection_reason is required when status is rejected')
       .isLength({ max: 2000 })
       .withMessage('Rejection reason cannot exceed 2000 characters')
   ],
