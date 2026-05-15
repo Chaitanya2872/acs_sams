@@ -321,6 +321,23 @@ const buildOwnerLabel = (userInfo) => {
   return fullName || safeText(userInfo?.username) || safeText(userInfo?.email) || 'N/A';
 };
 
+const formatCoordinate = (value) => {
+  const numeric = toNumber(value);
+  if (numeric === null) return '';
+  return String(Number(numeric.toFixed(6)));
+};
+
+const collectBlockNames = (structure) => {
+  const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
+  const blockNames = floors.flatMap((floor) =>
+    (Array.isArray(floor.blocks) ? floor.blocks : [])
+      .map((block) => safeText(block?.block_name || block?.block_number || block?.block_id))
+      .filter(Boolean)
+  );
+
+  return Array.from(new Set(blockNames)).join(', ');
+};
+
 const sanitizeWorksheetName = (name, fallback) => {
   const cleaned = safeText(name, fallback).replace(/[\\/*?:[\]]/g, ' ').trim();
   return (cleaned || fallback).slice(0, 31);
@@ -1350,6 +1367,18 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
     buildOwnerLabel(structureExport.owner),
     structureExport.owner?.profile?.employee_id ? `(${structureExport.owner.profile.employee_id})` : ''
   ].filter(Boolean).join(' ');
+  const locationSummary = [
+    structure.location?.state_code,
+    structure.location?.district_code,
+    structure.location?.city_name,
+    structure.location?.location_code
+  ]
+    .filter(Boolean)
+    .join(' / ');
+  const coordinates = [formatCoordinate(structure.location?.latitude), formatCoordinate(structure.location?.longitude)]
+    .filter(Boolean)
+    .join(', ');
+  const blockNames = collectBlockNames(structure);
 
   if (index > 0) doc.addPage();
 
@@ -1362,15 +1391,15 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   pdfKeyValue(doc, 'UID', structure.structural_identity?.uid || '');
   pdfKeyValue(doc, 'Structure Type', structure.structural_identity?.type_of_structure || '');
   pdfKeyValue(doc, 'Structure Subtype', structure.structural_identity?.structure_subtype || '');
+  pdfKeyValue(doc, 'Age Of Structure', safeText(structure.structural_identity?.age_of_structure));
   pdfKeyValue(doc, 'Owner / Employee', ownerEmployee || '');
   pdfKeyValue(doc, 'Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || '');
-  pdfKeyValue(
-    doc,
-    'Location',
-    [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code]
-      .filter(Boolean)
-      .join(' / ')
-  );
+  pdfKeyValue(doc, 'Location', locationSummary);
+  pdfKeyValue(doc, 'Coordinates', coordinates);
+  pdfKeyValue(doc, 'Block Name', blockNames);
+  pdfKeyValue(doc, 'Structure Width', safeText(structure.geometric_details?.structure_width));
+  pdfKeyValue(doc, 'Structure Length', safeText(structure.geometric_details?.structure_length));
+  pdfKeyValue(doc, 'Structure Height', safeText(structure.geometric_details?.structure_height));
   pdfKeyValue(doc, 'Created Date', formatDate(structure.creation_info?.created_date) || '');
   pdfKeyValue(doc, 'Last Updated', formatDate(structure.creation_info?.last_updated_date) || '');
   pdfKeyValue(doc, 'Applied Filters', filtersApplied || '');
@@ -1838,15 +1867,33 @@ const renderStructureWord = (structureExport, filtersApplied, index, total) => {
     buildOwnerLabel(structureExport.owner),
     structureExport.owner?.profile?.employee_id ? `(${structureExport.owner.profile.employee_id})` : ''
   ].filter(Boolean).join(' ');
+  const locationSummary = [
+    structure.location?.state_code,
+    structure.location?.district_code,
+    structure.location?.city_name,
+    structure.location?.location_code
+  ]
+    .filter(Boolean)
+    .join(' / ');
+  const coordinates = [formatCoordinate(structure.location?.latitude), formatCoordinate(structure.location?.longitude)]
+    .filter(Boolean)
+    .join(', ');
+  const blockNames = collectBlockNames(structure);
 
   const summaryItems = [
     ['Structure ID', structure.structural_identity?.structural_identity_number || ''],
     ['UID', structure.structural_identity?.uid || ''],
     ['Structure Type', structure.structural_identity?.type_of_structure || ''],
     ['Structure Subtype', structure.structural_identity?.structure_subtype || ''],
+    ['Age Of Structure', safeText(structure.structural_identity?.age_of_structure)],
     ['Owner / Employee', ownerEmployee || ''],
     ['Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || ''],
-    ['Location', [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code].filter(Boolean).join(' / ')],
+    ['Location', locationSummary],
+    ['Coordinates', coordinates],
+    ['Block Name', blockNames],
+    ['Structure Width', safeText(structure.geometric_details?.structure_width)],
+    ['Structure Length', safeText(structure.geometric_details?.structure_length)],
+    ['Structure Height', safeText(structure.geometric_details?.structure_height)],
     ['Created Date', formatDate(structure.creation_info?.created_date) || ''],
     ['Last Updated', formatDate(structure.creation_info?.last_updated_date) || ''],
     ['Applied Filters', filtersApplied || '']
