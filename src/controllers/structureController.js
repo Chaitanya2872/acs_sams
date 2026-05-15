@@ -4770,9 +4770,21 @@ async getUserImageStats(req, res) {
     return user.roles?.includes(requiredRole) || user.role === requiredRole;
   }
 
-  // Check role from request user object (which includes roles array)
-  hasRoleFromRequest(req, requiredRole) {
-    const userRoles = req.user.roles || [req.user.role];
+  // Accept either the full Express request or a plain user/auth payload.
+  hasRoleFromRequest(requestOrUser, requiredRole) {
+    const authUser =
+      requestOrUser && typeof requestOrUser === 'object' && 'user' in requestOrUser
+        ? requestOrUser.user
+        : requestOrUser;
+
+    if (!authUser || typeof authUser !== 'object') {
+      return false;
+    }
+
+    const roles = Array.isArray(authUser.roles) ? authUser.roles.filter(Boolean) : [];
+    const primaryRole = typeof authUser.role === 'string' && authUser.role ? [authUser.role] : [];
+    const userRoles = [...roles, ...primaryRole];
+
     return userRoles.includes(requiredRole);
   }
 
