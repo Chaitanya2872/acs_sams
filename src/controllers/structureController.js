@@ -555,7 +555,7 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
     const result = await this.findStructureAcrossUsers(structureId);
     const isTeUser = this.hasRoleFromRequest(requestUser, 'TE');
 
-    if (isTeUser && !this.isTesterAssignedToStructure(result.structure, userId)) {
+    if (isTeUser && !this.canTesterViewStructure(result.structure, userId)) {
       throw new Error('Structure not found');
     }
 
@@ -3798,7 +3798,7 @@ async getAllStructures(req, res) {
     
     // ✅ Check if user has privileged access (AD, VE, TE, admin)
     const isPrivileged = hasPrivilegedAccess(req.user);
-    const userRole = req.user.roles?.[0] || req.user.role;
+    const userRole = req.user.role || req.user.roles?.[0];
     
     let structures = [];
     let ownerInfo = {}; // To track structure owners for privileged users
@@ -3822,7 +3822,7 @@ async getAllStructures(req, res) {
             // ✅ FILTER FOR TE:
             // TE should see structures that are submitted,
             // submitted for testing, or assigned to them.
-            if (userRole === 'TE') {
+            if (this.hasRoleFromRequest(req, 'TE') && userRole === 'TE') {
               if (!this.canTesterViewStructure(structure, req.user.userId)) {
                 return; // Skip this structure
               }
@@ -3831,7 +3831,7 @@ async getAllStructures(req, res) {
             }
             
             // ✅ FILTER FOR VE: Only show structures that VE should see
-            if (userRole === 'VE') {
+            if (this.hasRoleFromRequest(req, 'VE') && userRole === 'VE') {
               const veRelevantStatuses = [
                 'tested',          // Ready for VE to start validation
                 'under_validation', // VE is currently validating
@@ -3847,7 +3847,7 @@ async getAllStructures(req, res) {
             }
             
             // ✅ FILTER FOR AD: Only show structures that AD should see
-            if (userRole === 'AD') {
+            if (this.hasRoleFromRequest(req, 'AD') && userRole === 'AD') {
               const adRelevantStatuses = [
                 'validated',  // Ready for AD to approve
                 'approved',   // AD already approved
