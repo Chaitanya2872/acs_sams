@@ -381,6 +381,36 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   });
 }
 
+ isSubmittedForTesting(structure) {
+  if (!structure) {
+    return false;
+  }
+
+  if (structure.overall_testing_required === true) {
+    return true;
+  }
+
+  const assignment = structure.testing_assignment || {};
+  const hasTestingAssignment =
+    Boolean(assignment.assigned_at || assignment.assigned_by) ||
+    (Array.isArray(assignment.testers) && assignment.testers.length > 0) ||
+    (Array.isArray(assignment.testing_formats) && assignment.testing_formats.length > 0);
+
+  return hasTestingAssignment;
+ }
+
+ canTesterViewStructure(structure, testerUserId) {
+  if (!structure) {
+    return false;
+  }
+
+  return (
+    structure.status === 'submitted' ||
+    this.isSubmittedForTesting(structure) ||
+    this.isTesterAssignedToStructure(structure, testerUserId)
+  );
+ }
+
  buildTestingAssignmentPayload(structure, testerUserId = null) {
   const assignment = structure?.testing_assignment || {};
   const assignedFormats = Array.isArray(assignment.testing_formats) ? assignment.testing_formats : [];
@@ -3789,23 +3819,12 @@ async getAllStructures(req, res) {
       allUsers.forEach(user => {
         if (user.structures && user.structures.length > 0) {
           user.structures.forEach(structure => {
-            // ✅ FILTER FOR TE: Only show structures that TE should see
-            // TE should see: submitted, under_testing, tested, rejected (from testing stage)
+            // ✅ FILTER FOR TE:
+            // TE should see structures that are submitted,
+            // submitted for testing, or assigned to them.
             if (userRole === 'TE') {
-              const teRelevantStatuses = [
-                'submitted',        // Ready for TE to start testing
-                'under_testing',    // TE is currently testing
-                'tested',          // TE completed testing
-                'rejected'         // Any rejected (TE can review)
-              ];
-              
-              // Skip structures not relevant to TE
-              if (!teRelevantStatuses.includes(structure.status)) {
+              if (!this.canTesterViewStructure(structure, req.user.userId)) {
                 return; // Skip this structure
-              }
-
-              if (!this.isTesterAssignedToStructure(structure, req.user.userId)) {
-                return; // Skip structures not assigned to this TE
               }
                
               console.log(`✅ TE viewing structure ${structure._id} with status: ${structure.status}`);
@@ -4044,6 +4063,7 @@ async getAllStructures(req, res) {
           floors: structure.geometric_details?.number_of_floors
         },
         status: structure.status,
+        overall_testing_required: Boolean(structure.overall_testing_required),
         progress: progress,
         
         // ✅ WORKFLOW INFORMATION FOR DISPLAY

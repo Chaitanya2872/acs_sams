@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { User, TestFormat } = require('../models/schemas');
 const { DEFAULT_TEST_FORMATS } = require('../data/testFormats');
 const { protect, isAdmin, authorizeModuleAction } = require('../middlewares/auth');
