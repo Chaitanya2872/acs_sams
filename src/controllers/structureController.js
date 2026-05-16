@@ -3820,10 +3820,9 @@ async getAllStructures(req, res) {
         if (user.structures && user.structures.length > 0) {
           user.structures.forEach(structure => {
             // ✅ FILTER FOR TE:
-            // TE should see structures that are submitted,
-            // submitted for testing, or assigned to them.
+            // Tablet TE flow should only list submitted structures.
             if (this.hasRoleFromRequest(req, 'TE') && userRole === 'TE') {
-              if (!this.canTesterViewStructure(structure, req.user.userId)) {
+              if (structure.status !== 'submitted') {
                 return; // Skip this structure
               }
                
