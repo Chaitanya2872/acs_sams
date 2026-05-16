@@ -216,6 +216,76 @@ const buildWorkflowPayload = (structure) => {
   };
 };
 
+const flattenAdminStructureTestResults = (structure) => {
+  const rows = [];
+  const pushRows = (entries, payload) => {
+    (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      rows.push({
+        scope: payload.scope,
+        location_label: payload.location_label,
+        floor_id: payload.floor_id || null,
+        flat_id: payload.flat_id || null,
+        block_id: payload.block_id || null,
+        test_id: entry.test_id,
+        test_name: entry.test_name,
+        component_type: entry.component_type,
+        component_id: entry.component_id,
+        test_date: entry.test_date || null,
+        tested_by: entry.tested_by || '',
+        remarks: entry.remarks || '',
+        test_results: entry.test_results || {},
+        test_report_pdf: entry.test_report_pdf || null
+      });
+    });
+  };
+
+  pushRows(structure.structure_test_results, {
+    scope: 'structure',
+    location_label:
+      structure.structural_identity?.structure_name ||
+      structure.structural_identity?.structural_identity_number ||
+      structure.structural_identity?.uid ||
+      'Structure'
+  });
+
+  const floors = Array.isArray(structure.geometric_details?.floors) ? structure.geometric_details.floors : [];
+  floors.forEach((floor) => {
+    const floorLabel = floor.floor_label_name || `Floor ${floor.floor_number ?? ''}`.trim() || floor.floor_id || 'Floor';
+
+    pushRows(floor.test_results, {
+      scope: 'floor',
+      location_label: floorLabel,
+      floor_id: floor.floor_id || null
+    });
+
+    (Array.isArray(floor.flats) ? floor.flats : []).forEach((flat) => {
+      pushRows(flat.test_results, {
+        scope: 'flat',
+        location_label: `${floorLabel} / Flat ${flat.flat_number || flat.flat_id || 'N/A'}`,
+        floor_id: floor.floor_id || null,
+        flat_id: flat.flat_id || null
+      });
+    });
+
+    (Array.isArray(floor.blocks) ? floor.blocks : []).forEach((block) => {
+      pushRows(block.test_results, {
+        scope: 'block',
+        location_label: `${floorLabel} / Block ${block.block_name || block.block_number || block.block_id || 'N/A'}`,
+        floor_id: floor.floor_id || null,
+        block_id: block.block_id || null
+      });
+    });
+  });
+
+  rows.sort((left, right) => {
+    const leftTime = left.test_date ? new Date(left.test_date).getTime() : 0;
+    const rightTime = right.test_date ? new Date(right.test_date).getTime() : 0;
+    return rightTime - leftTime;
+  });
+
+  return rows;
+};
+
 // All routes require authentication and admin privileges
 router.use(protect);
 router.use(isAdmin);
@@ -761,6 +831,32 @@ router.get('/structures/:id/workflow', authorizeModuleAction('structures', 'read
     return res.status(status).json({
       success: false,
       error: error.message === 'Structure not found' ? 'Structure not found' : 'Failed to retrieve structure workflow'
+    });
+  }
+});
+
+router.get('/structures/:id/test-results', authorizeModuleAction('structures', 'read'), async (req, res) => {
+  try {
+    const { structure } = await structureController.findStructureAcrossUsers(req.params.id);
+    const results = flattenAdminStructureTestResults(structure);
+
+    return res.json({
+      success: true,
+      message: 'Admin structure test results retrieved successfully',
+      data: {
+        structure_id: String(structure._id || req.params.id),
+        uid: structure.structural_identity?.uid,
+        structural_identity_number: structure.structural_identity?.structural_identity_number,
+        total: results.length,
+        results
+      }
+    });
+  } catch (error) {
+    console.error('Get admin structure test results error:', error);
+    const status = error.message === 'Structure not found' ? 404 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message === 'Structure not found' ? 'Structure not found' : 'Failed to retrieve structure test results'
     });
   }
 });

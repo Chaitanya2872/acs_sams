@@ -246,7 +246,8 @@ const testResultSchema = {
       'ultrasonic_thickness_gauge',
       'magnetic_particle',
       'liquid_penetration',
-      'hardness_test'
+      'hardness_test',
+      'custom'
     ]
   },
   component_type: {

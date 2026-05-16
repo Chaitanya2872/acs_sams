@@ -2091,6 +2091,7 @@ const testingRequirementsValidation = [
   body('selected_tests.*')
     .if(body('testing_required').equals(true))
     .isIn([
+      'custom',
       'rebound_hammer',
       'ultra_pulse_velocity',
       'half_cell_potential',
@@ -2114,6 +2115,7 @@ const testResultValidation = [
     .notEmpty()
     .withMessage('Test name is required')
     .isIn([
+      'custom',
       'rebound_hammer',
       'ultra_pulse_velocity',
       'half_cell_potential',

@@ -397,7 +397,38 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   };
 }
 
- buildTabletTestingAssignmentPayload(structure) {
+ inferTabletFormatLayout(testName, isCustom = false) {
+  if (isCustom) {
+    return 'manual_fields';
+  }
+
+  switch (testName) {
+    case 'rebound_hammer':
+    case 'half_cell_potential':
+      return 'grid';
+    case 'ultra_pulse_velocity':
+    case 'cover_meter':
+      return 'repeatable_rows';
+    default:
+      return 'manual_fields';
+  }
+ }
+
+ mapTestFormatFieldDefinition(field = {}) {
+  const fieldType = typeof field.field_type === 'string' && field.field_type.trim()
+    ? field.field_type.trim()
+    : 'text';
+
+  return {
+    key: field.field_name || '',
+    label: field.field_label || field.field_name || '',
+    type: fieldType,
+    required: Boolean(field.required),
+    options: Array.isArray(field.options) ? field.options.filter((value) => typeof value === 'string') : []
+  };
+ }
+
+ async buildTabletTestingAssignmentPayload(structure) {
   const assignment = structure?.testing_assignment || {};
   const testers = Array.isArray(assignment.testers) ? assignment.testers : [];
   const testingFormats = Array.isArray(assignment.testing_formats) ? assignment.testing_formats : [];
@@ -408,6 +439,34 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
 
   if (!hasAssignment) {
     return null;
+  }
+
+  const formatIds = testingFormats
+    .map((format) => format?.format_id)
+    .filter(Boolean);
+  const formatTestNames = testingFormats
+    .map((format) => format?.test_name)
+    .filter(Boolean);
+
+  const formatDocs = formatIds.length || formatTestNames.length
+    ? await TestFormat.find({
+        $or: [
+          ...(formatIds.length ? [{ format_id: { $in: formatIds } }] : []),
+          ...(formatTestNames.length ? [{ test_name: { $in: formatTestNames } }] : [])
+        ]
+      })
+        .select('format_id test_name display_name is_custom field_definitions')
+        .lean()
+    : [];
+
+  const formatDocMap = new Map();
+  for (const doc of formatDocs) {
+    if (doc?.format_id) {
+      formatDocMap.set(doc.format_id, doc);
+    }
+    if (doc?.test_name && !formatDocMap.has(doc.test_name)) {
+      formatDocMap.set(doc.test_name, doc);
+    }
   }
 
   return {
@@ -424,14 +483,29 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
       name: tester?.name || tester?.username || '',
       role: tester?.role || ''
     })),
-    testing_formats: testingFormats.map((format) => ({
-      id: format?.format_id || '',
-      name: format?.display_name || format?.test_name || ''
-    }))
+    testing_formats: testingFormats.map((format) => {
+      const formatDoc =
+        formatDocMap.get(format?.format_id) ||
+        formatDocMap.get(format?.test_name) ||
+        null;
+      const slug = formatDoc?.test_name || format?.test_name || '';
+      const isCustom = Boolean(formatDoc?.is_custom || slug === 'custom');
+
+      return {
+        id: format?.format_id || formatDoc?.format_id || '',
+        name: format?.display_name || formatDoc?.display_name || slug,
+        slug,
+        format_type: isCustom ? 'dynamic' : 'native',
+        layout: this.inferTabletFormatLayout(slug, isCustom),
+        fields: Array.isArray(formatDoc?.field_definitions)
+          ? formatDoc.field_definitions.map((field) => this.mapTestFormatFieldDefinition(field))
+          : []
+      };
+    })
   };
  }
 
- buildTabletWorkflowData(structure, structureId) {
+ async buildTabletWorkflowData(structure, structureId) {
   return {
     structure_id: String(structureId || structure?._id || ''),
     workflow: {
@@ -439,7 +513,7 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
       assigned_at: structure?.testing_assignment?.assigned_at || null,
       updated_at: structure?.creation_info?.last_updated_date || null
     },
-    testing_assignment: this.buildTabletTestingAssignmentPayload(structure),
+    testing_assignment: await this.buildTabletTestingAssignmentPayload(structure),
     timeline: this.buildWorkflowTimeline(structure?.workflow || {}, structure?.status)
   };
  }
@@ -7596,7 +7670,11 @@ async submitForTesting(req, res) {
     
     console.log(`✅ Structure ${id} submitted for testing by ${user.username}`);
     
-    return sendSuccessResponse(res, 'Structure submitted for testing successfully', this.buildTabletWorkflowData(structure, id));
+    return sendSuccessResponse(
+      res,
+      'Structure submitted for testing successfully',
+      await this.buildTabletWorkflowData(structure, id)
+    );
     
   } catch (error) {
     console.error('❌ Submit for testing error:', error);
@@ -7626,7 +7704,7 @@ async startTesting(req, res) {
       return sendErrorResponse(res, 'Only Test Engineers can start testing', 403);
     }
     
-    const { structure } = await this.findUserStructure(req.user.userId, id, req.user);
+    const { user: structureOwner, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
     // Check if structure is in submitted status
     if (structure.status !== 'submitted') {
@@ -7653,7 +7731,11 @@ async startTesting(req, res) {
     
     console.log(`✅ TE ${user.username} started testing structure ${id}`);
     
-    return sendSuccessResponse(res, 'Testing started successfully', this.buildTabletWorkflowData(structure, id));
+    return sendSuccessResponse(
+      res,
+      'Testing started successfully',
+      await this.buildTabletWorkflowData(structure, id)
+    );
     
   } catch (error) {
     console.error('❌ Start testing error:', error);
@@ -7684,7 +7766,7 @@ async completeTesting(req, res) {
       return sendErrorResponse(res, 'Only Test Engineers can complete testing', 403);
     }
     
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, id);
     
     if (status !== 'tested' && status !== 'rejected') {
       return sendErrorResponse(res, 'status must be one of: tested, rejected', 400);
@@ -7693,6 +7775,10 @@ async completeTesting(req, res) {
     // Check if structure is under testing
     if (structure.status !== 'under_testing') {
       return sendErrorResponse(res, 'Cannot complete testing from current status', 409);
+    }
+
+    if (!this.isTesterAssignedToStructure(structure, req.user.userId)) {
+      return sendErrorResponse(res, 'This structure is not assigned to the current tester', 403);
     }
     
     structure.workflow = structure.workflow || {};
@@ -7736,7 +7822,7 @@ async completeTesting(req, res) {
     return sendSuccessResponse(
       res,
       status === 'rejected' ? 'Testing rejected successfully' : 'Testing completed successfully',
-      this.buildTabletWorkflowData(structure, id)
+      await this.buildTabletWorkflowData(structure, id)
     );
     
   } catch (error) {
@@ -7953,9 +8039,13 @@ async getWorkflowHistory(req, res) {
   try {
     const { id } = req.params;
     
-    const { user: structureOwner, structure } = await this.findStructureAcrossUsers(id);
+    const { structure } = await this.getStructureForTestingRequest(req, id);
     
-    return sendSuccessResponse(res, 'Workflow fetched successfully', this.buildTabletWorkflowData(structure, id));
+    return sendSuccessResponse(
+      res,
+      'Workflow fetched successfully',
+      await this.buildTabletWorkflowData(structure, id)
+    );
     
   } catch (error) {
     console.error('❌ Get workflow history error:', error);
