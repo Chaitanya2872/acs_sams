@@ -189,10 +189,21 @@ const structureValidation = [
     .withMessage('Floor height must be positive'),
 
   // Status validation
-  body('status')
-    .optional()
-    .isIn(['draft', 'submitted', 'approved', 'requires_inspection', 'maintenance_needed'])
-    .withMessage('Invalid status'),
+    body('status')
+      .optional()
+      .isIn([
+        'draft',
+        'submitted',
+        'under_testing',
+        'tested',
+        'under_validation',
+        'validated',
+        'approved',
+        'rejected',
+        'requires_inspection',
+        'maintenance_needed'
+      ])
+      .withMessage('Invalid status'),
 
   // Additional fields validation
   body('additional_photos')

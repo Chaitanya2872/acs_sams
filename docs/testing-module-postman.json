@@ -1,0 +1,943 @@
+{
+  "info": {
+    "_postman_id": "2a9c9a77-7d68-4df0-95d1-6af1e0a58c31",
+    "name": "SAMS Testing Module APIs",
+    "description": "Postman collection for SAMS testing workflow, assignment, and test result CRUD APIs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "structure_id",
+      "value": ""
+    },
+    {
+      "key": "floor_id",
+      "value": ""
+    },
+    {
+      "key": "flat_id",
+      "value": ""
+    },
+    {
+      "key": "block_id",
+      "value": ""
+    },
+    {
+      "key": "test_id",
+      "value": ""
+    },
+    {
+      "key": "tester_user_id",
+      "value": ""
+    },
+    {
+      "key": "format_id_1",
+      "value": "TF_REBOUND_HAMMER"
+    },
+    {
+      "key": "format_id_2",
+      "value": "TF_ULTRA_PULSE_VELOCITY"
+    }
+  ],
+  "item": [
+    {
+      "name": "Admin Testing",
+      "item": [
+        {
+          "name": "Get Testers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/testers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "testers"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Testing Formats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/testing-formats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "testing-formats"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Structure Workflow",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/structures/{{structure_id}}/workflow",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "structures",
+                "{{structure_id}}",
+                "workflow"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Move Structure To Testing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tester_ids\": [\"{{tester_user_id}}\"],\n  \"testing_formats\": [\"{{format_id_1}}\", \"{{format_id_2}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/structures/{{structure_id}}/move-to-testing",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "structures",
+                "{{structure_id}}",
+                "move-to-testing"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workflow",
+      "item": [
+        {
+          "name": "Submit For Testing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Ready for testing\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/submit-for-testing",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "submit-for-testing"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Start Testing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/start-testing",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "start-testing"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Complete Testing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"tested\",\n  \"test_notes\": \"Testing completed successfully\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/complete-testing",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "complete-testing"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Workflow History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/workflow",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "workflow"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Structure Test Results",
+      "item": [
+        {
+          "name": "List Structure Test Results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Structure Test Result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"rebound_hammer\",\n  \"component_type\": \"column\",\n  \"component_id\": \"column_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Column C1\",\n    \"avg_rebound_number\": 32,\n    \"estimated_strength_mpa\": 24.5\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Concrete surface generally uniform.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Structure Test Result By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Structure Test Result",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"rebound_hammer\",\n  \"component_type\": \"column\",\n  \"component_id\": \"column_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Column C1\",\n    \"avg_rebound_number\": 34,\n    \"estimated_strength_mpa\": 26.1\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Updated reading after repeat test.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Structure Test Result",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Floor Test Results",
+      "item": [
+        {
+          "name": "List Floor Test Results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Floor Test Result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"ultra_pulse_velocity\",\n  \"component_type\": \"beam\",\n  \"component_id\": \"beam_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Beam B1 - Floor Level\",\n    \"path_length_mm\": 500,\n    \"transit_time_us\": 120,\n    \"velocity_km_s\": 4.17\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Good pulse continuity.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Floor Test Result By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Floor Test Result",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"ultra_pulse_velocity\",\n  \"component_type\": \"beam\",\n  \"component_id\": \"beam_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Beam B1 - Floor Level\",\n    \"path_length_mm\": 500,\n    \"transit_time_us\": 118,\n    \"velocity_km_s\": 4.24\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Updated after recalibration.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Floor Test Result",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Flat Test Results",
+      "item": [
+        {
+          "name": "List Flat Test Results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/flats/{{flat_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "flats",
+                "{{flat_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Flat Test Result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"cover_meter\",\n  \"component_type\": \"slab\",\n  \"component_id\": \"slab_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Flat Slab F1\",\n    \"bar_diameter_mm\": 12,\n    \"avg_cover_mm\": 28,\n    \"cover_compliance\": \"Adequate\"\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Cover within expected range.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/flats/{{flat_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "flats",
+                "{{flat_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Flat Test Result By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/flats/{{flat_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "flats",
+                "{{flat_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Flat Test Result",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"cover_meter\",\n  \"component_type\": \"slab\",\n  \"component_id\": \"slab_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Flat Slab F1\",\n    \"bar_diameter_mm\": 12,\n    \"avg_cover_mm\": 30,\n    \"cover_compliance\": \"Adequate\"\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Updated with additional test point.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/flats/{{flat_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "flats",
+                "{{flat_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Flat Test Result",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/flats/{{flat_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "flats",
+                "{{flat_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Block Test Results",
+      "item": [
+        {
+          "name": "List Block Test Results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/blocks/{{block_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "blocks",
+                "{{block_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Block Test Result",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"ultrasonic_thickness_gauge\",\n  \"component_type\": \"roof_truss\",\n  \"component_id\": \"truss_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Roof Truss T1\",\n    \"nominal_thickness_mm\": 10,\n    \"measured_thickness_mm\": 8.8,\n    \"section_loss_percent\": 12\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Moderate section loss observed.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/blocks/{{block_id}}/test-results",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "blocks",
+                "{{block_id}}",
+                "test-results"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Block Test Result By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/blocks/{{block_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "blocks",
+                "{{block_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Block Test Result",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_name\": \"ultrasonic_thickness_gauge\",\n  \"component_type\": \"roof_truss\",\n  \"component_id\": \"truss_001\",\n  \"test_date\": \"2026-05-12\",\n  \"test_results\": {\n    \"component_label\": \"Roof Truss T1\",\n    \"nominal_thickness_mm\": 10,\n    \"measured_thickness_mm\": 8.5,\n    \"section_loss_percent\": 15\n  },\n  \"tested_by\": \"TE User\",\n  \"remarks\": \"Updated after second gauge pass.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/blocks/{{block_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "blocks",
+                "{{block_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Block Test Result",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/structures/{{structure_id}}/floors/{{floor_id}}/blocks/{{block_id}}/test-results/{{test_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "structures",
+                "{{structure_id}}",
+                "floors",
+                "{{floor_id}}",
+                "blocks",
+                "{{block_id}}",
+                "test-results",
+                "{{test_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

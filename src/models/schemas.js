@@ -1090,11 +1090,28 @@ const structureSchema = new mongoose.Schema({
     floors: [floorSchema]
   },
   
-  status: {
-    type: String,
-    enum: ['draft', 'location_completed', 'admin_completed', 'geometric_completed', 'ratings_in_progress', 'submitted', 'in_testing', 'tested', 'in_validation', 'validated', 'approved', 'rejected'],
-    default: 'draft'
-  },
+    status: {
+      type: String,
+      // Keep legacy in_* values for backwards compatibility while supporting
+      // the current workflow endpoints that use under_* transitions.
+      enum: [
+        'draft',
+        'location_completed',
+        'admin_completed',
+        'geometric_completed',
+        'ratings_in_progress',
+        'submitted',
+        'in_testing',
+        'under_testing',
+        'tested',
+        'in_validation',
+        'under_validation',
+        'validated',
+        'approved',
+        'rejected'
+      ],
+      default: 'draft'
+    },
   
   // NEW: Overall testing requirement for structure
   overall_testing_required: {

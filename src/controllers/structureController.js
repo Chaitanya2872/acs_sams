@@ -328,6 +328,26 @@ this.completeValidation = this.completeValidation.bind(this);
 this.approveStructure = this.approveStructure.bind(this);
 this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
 this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
+this.getStructureTestResults = this.getStructureTestResults.bind(this);
+this.createStructureTestResult = this.createStructureTestResult.bind(this);
+this.getStructureTestResultById = this.getStructureTestResultById.bind(this);
+this.updateStructureTestResult = this.updateStructureTestResult.bind(this);
+this.deleteStructureTestResult = this.deleteStructureTestResult.bind(this);
+this.getFloorTestResults = this.getFloorTestResults.bind(this);
+this.createFloorTestResult = this.createFloorTestResult.bind(this);
+this.getFloorTestResultById = this.getFloorTestResultById.bind(this);
+this.updateFloorTestResult = this.updateFloorTestResult.bind(this);
+this.deleteFloorTestResult = this.deleteFloorTestResult.bind(this);
+this.getFlatTestResults = this.getFlatTestResults.bind(this);
+this.createFlatTestResult = this.createFlatTestResult.bind(this);
+this.getFlatTestResultById = this.getFlatTestResultById.bind(this);
+this.updateFlatTestResult = this.updateFlatTestResult.bind(this);
+this.deleteFlatTestResult = this.deleteFlatTestResult.bind(this);
+this.getBlockTestResults = this.getBlockTestResults.bind(this);
+this.createBlockTestResult = this.createBlockTestResult.bind(this);
+this.getBlockTestResultById = this.getBlockTestResultById.bind(this);
+this.updateBlockTestResult = this.updateBlockTestResult.bind(this);
+this.deleteBlockTestResult = this.deleteBlockTestResult.bind(this);
     
     // Bulk Operations
     this.saveBulkRatings = this.saveBulkRatings.bind(this);
@@ -366,20 +386,21 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   }
 
   // =================== UTILITY METHODS ===================
- isTesterAssignedToStructure(structure, testerUserId) {
-  if (!structure || !testerUserId) {
-    return false;
+  isTesterAssignedToStructure(structure, testerUserId) {
+    if (!structure || !testerUserId) {
+      return false;
+    }
+
+    const normalizedTesterUserId = testerUserId?.toString?.() || String(testerUserId);
+    const assignedTesters = Array.isArray(structure.testing_assignment?.testers)
+      ? structure.testing_assignment.testers
+      : [];
+
+    return assignedTesters.some((tester) => {
+      const assignedUserId = tester?.user_id?.toString?.() || tester?.user_id;
+      return assignedUserId === normalizedTesterUserId;
+    });
   }
-
-  const assignedTesters = Array.isArray(structure.testing_assignment?.testers)
-    ? structure.testing_assignment.testers
-    : [];
-
-  return assignedTesters.some((tester) => {
-    const assignedUserId = tester?.user_id?.toString?.() || tester?.user_id;
-    return assignedUserId === testerUserId;
-  });
-}
 
  isSubmittedForTesting(structure) {
   if (!structure) {
@@ -548,7 +569,7 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   };
  }
 
- async findUserStructure(userId, structureId, requestUser = null) {
+  async findUserStructure(userId, structureId, requestUser = null) {
   // If requestUser is provided and has privileged access, search across all users
   if (requestUser && hasPrivilegedAccess(requestUser)) {
     console.log('🔓 Privileged user accessing structure:', structureId);
@@ -574,19 +595,18 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   }
   
   return { user, structure };
-}
+  }
 
   // Find structure across all users (for remarks functionality and privileged access)
   async findStructureAcrossUsers(structureId) {
-    const users = await User.find({ 'structures._id': structureId });
-    
-    for (const user of users) {
+    const user = await User.findOne({ 'structures._id': structureId });
+    if (user) {
       const structure = user.structures.id(structureId);
       if (structure) {
         return { user, structure };
       }
     }
-    
+
     throw new Error('Structure not found');
   }
 
@@ -4939,6 +4959,18 @@ async getUserImageStats(req, res) {
     return this.hasRoleFromRequest(req, 'TE') || this.hasRoleFromRequest(req, 'AD');
   }
 
+  ensureAssignedTesterForTestResultWrite(req, structure) {
+    if (this.hasRoleFromRequest(req, 'AD')) {
+      return;
+    }
+
+    if (this.hasRoleFromRequest(req, 'TE') && !this.isTesterAssignedToStructure(structure, req.user.userId)) {
+      const error = new Error('This structure is not assigned to the current tester');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
   ensureTestResultWriteAccess(req) {
     if (!this.canManageTestResults(req)) {
       const error = new Error('Only Test Engineers or Admins can manage test results');
@@ -5077,6 +5109,30 @@ async getUserImageStats(req, res) {
     };
   }
 
+  serializeTestResultEntry(entry) {
+    if (!entry) {
+      return null;
+    }
+
+    const source = typeof entry.toObject === 'function'
+      ? entry.toObject({ depopulate: true })
+      : { ...entry };
+
+    return {
+      test_id: source.test_id || '',
+      test_name: source.test_name || '',
+      component_type: source.component_type || '',
+      component_id: source.component_id || '',
+      test_date: source.test_date || null,
+      test_results: source.test_results && typeof source.test_results === 'object'
+        ? source.test_results
+        : {},
+      tested_by: source.tested_by || '',
+      remarks: source.remarks || '',
+      test_report_pdf: source.test_report_pdf || null
+    };
+  }
+
   async ensureValidTestFormat(testName) {
     const formatExists = await TestFormat.exists({ test_name: testName });
     if (!formatExists) {
@@ -5087,6 +5143,22 @@ async getUserImageStats(req, res) {
   }
 
   async getStructureForTestingRequest(req, structureId) {
+    const isTeUser = this.hasRoleFromRequest(req, 'TE');
+    const isVeUser = this.hasRoleFromRequest(req, 'VE');
+    const isAdUser = this.hasRoleFromRequest(req, 'AD');
+
+    if (isTeUser || isVeUser || isAdUser || hasPrivilegedAccess(req.user)) {
+      const result = await this.findStructureAcrossUsers(structureId);
+
+      if (isTeUser && !this.canTesterViewStructure(result.structure, req.user.userId)) {
+        const error = new Error('Structure not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      return result;
+    }
+
     return this.findUserStructure(req.user.userId, structureId, req.user);
   }
 
@@ -5094,12 +5166,15 @@ async getUserImageStats(req, res) {
     try {
       const { structure } = await this.getStructureForTestingRequest(req, req.params.id);
       const target = this.resolveTestResultTarget(structure, req.params);
+      const results = target.collection
+        .map((entry) => this.serializeTestResultEntry(entry))
+        .filter(Boolean);
 
       return sendSuccessResponse(res, 'Test results retrieved successfully', {
         scope: target.scope,
         target_label: target.label,
-        total: target.collection.length,
-        results: target.collection
+        total: results.length,
+        results
       });
     } catch (error) {
       return sendErrorResponse(res, 'Failed to retrieve test results', error.statusCode || 500, error.message);
@@ -5119,7 +5194,7 @@ async getUserImageStats(req, res) {
       return sendSuccessResponse(res, 'Test result retrieved successfully', {
         scope: target.scope,
         target_label: target.label,
-        result: testResult
+        result: this.serializeTestResultEntry(testResult)
       });
     } catch (error) {
       return sendErrorResponse(res, 'Failed to retrieve test result', error.statusCode || 500, error.message);
@@ -5128,10 +5203,10 @@ async getUserImageStats(req, res) {
 
   async createTestResult(req, res) {
     try {
-      this.ensureTestResultWriteAccess(req);
-      await this.ensureValidTestFormat(req.body.test_name);
-
       const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      this.ensureTestResultWriteAccess(req);
+      this.ensureAssignedTesterForTestResultWrite(req, structure);
+      await this.ensureValidTestFormat(req.body.test_name);
       const target = this.resolveTestResultTarget(structure, req.params);
       const testResult = this.buildTestResultDocument(req);
 
@@ -5142,7 +5217,7 @@ async getUserImageStats(req, res) {
       return sendCreatedResponse(res, {
         scope: target.scope,
         target_label: target.label,
-        result: testResult
+        result: this.serializeTestResultEntry(testResult)
       }, 'Test result created successfully');
     } catch (error) {
       return sendErrorResponse(res, 'Failed to create test result', error.statusCode || 500, error.message);
@@ -5151,10 +5226,10 @@ async getUserImageStats(req, res) {
 
   async updateTestResult(req, res) {
     try {
-      this.ensureTestResultWriteAccess(req);
-      await this.ensureValidTestFormat(req.body.test_name);
-
       const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      this.ensureTestResultWriteAccess(req);
+      this.ensureAssignedTesterForTestResultWrite(req, structure);
+      await this.ensureValidTestFormat(req.body.test_name);
       const target = this.resolveTestResultTarget(structure, req.params);
       const resultIndex = target.collection.findIndex((entry) => entry.test_id === req.params.testId);
 
@@ -5172,7 +5247,7 @@ async getUserImageStats(req, res) {
       return sendUpdatedResponse(res, {
         scope: target.scope,
         target_label: target.label,
-        result: updatedResult
+        result: this.serializeTestResultEntry(updatedResult)
       }, 'Test result updated successfully');
     } catch (error) {
       return sendErrorResponse(res, 'Failed to update test result', error.statusCode || 500, error.message);
@@ -5181,9 +5256,9 @@ async getUserImageStats(req, res) {
 
   async deleteTestResult(req, res) {
     try {
-      this.ensureTestResultWriteAccess(req);
-
       const { user: structureOwner, structure } = await this.getStructureForTestingRequest(req, req.params.id);
+      this.ensureTestResultWriteAccess(req);
+      this.ensureAssignedTesterForTestResultWrite(req, structure);
       const target = this.resolveTestResultTarget(structure, req.params);
       const resultIndex = target.collection.findIndex((entry) => entry.test_id === req.params.testId);
 
@@ -5198,7 +5273,7 @@ async getUserImageStats(req, res) {
       return sendSuccessResponse(res, 'Test result deleted successfully', {
         scope: target.scope,
         target_label: target.label,
-        result: deletedResult
+        result: this.serializeTestResultEntry(deletedResult)
       });
     } catch (error) {
       return sendErrorResponse(res, 'Failed to delete test result', error.statusCode || 500, error.message);
@@ -8161,6 +8236,66 @@ this.completeValidation = this.completeValidation.bind(this);
 this.approveStructure = this.approveStructure.bind(this);
 this.getWorkflowHistory = this.getWorkflowHistory.bind(this);
 this.buildWorkflowTimeline = this.buildWorkflowTimeline.bind(this);
+this.getStructureTestResults = this.getStructureTestResults.bind(this);
+this.createStructureTestResult = this.createStructureTestResult.bind(this);
+this.getStructureTestResultById = this.getStructureTestResultById.bind(this);
+this.updateStructureTestResult = this.updateStructureTestResult.bind(this);
+this.deleteStructureTestResult = this.deleteStructureTestResult.bind(this);
+this.getFloorTestResults = this.getFloorTestResults.bind(this);
+this.createFloorTestResult = this.createFloorTestResult.bind(this);
+this.getFloorTestResultById = this.getFloorTestResultById.bind(this);
+this.updateFloorTestResult = this.updateFloorTestResult.bind(this);
+this.deleteFloorTestResult = this.deleteFloorTestResult.bind(this);
+this.getFlatTestResults = this.getFlatTestResults.bind(this);
+this.createFlatTestResult = this.createFlatTestResult.bind(this);
+this.getFlatTestResultById = this.getFlatTestResultById.bind(this);
+this.updateFlatTestResult = this.updateFlatTestResult.bind(this);
+this.deleteFlatTestResult = this.deleteFlatTestResult.bind(this);
+this.getBlockTestResults = this.getBlockTestResults.bind(this);
+this.createBlockTestResult = this.createBlockTestResult.bind(this);
+this.getBlockTestResultById = this.getBlockTestResultById.bind(this);
+this.updateBlockTestResult = this.updateBlockTestResult.bind(this);
+this.deleteBlockTestResult = this.deleteBlockTestResult.bind(this);
+this.getStructureTestResults = this.getStructureTestResults.bind(this);
+this.createStructureTestResult = this.createStructureTestResult.bind(this);
+this.getStructureTestResultById = this.getStructureTestResultById.bind(this);
+this.updateStructureTestResult = this.updateStructureTestResult.bind(this);
+this.deleteStructureTestResult = this.deleteStructureTestResult.bind(this);
+this.getFloorTestResults = this.getFloorTestResults.bind(this);
+this.createFloorTestResult = this.createFloorTestResult.bind(this);
+this.getFloorTestResultById = this.getFloorTestResultById.bind(this);
+this.updateFloorTestResult = this.updateFloorTestResult.bind(this);
+this.deleteFloorTestResult = this.deleteFloorTestResult.bind(this);
+this.getFlatTestResults = this.getFlatTestResults.bind(this);
+this.createFlatTestResult = this.createFlatTestResult.bind(this);
+this.getFlatTestResultById = this.getFlatTestResultById.bind(this);
+this.updateFlatTestResult = this.updateFlatTestResult.bind(this);
+this.deleteFlatTestResult = this.deleteFlatTestResult.bind(this);
+this.getBlockTestResults = this.getBlockTestResults.bind(this);
+this.createBlockTestResult = this.createBlockTestResult.bind(this);
+this.getBlockTestResultById = this.getBlockTestResultById.bind(this);
+this.updateBlockTestResult = this.updateBlockTestResult.bind(this);
+this.deleteBlockTestResult = this.deleteBlockTestResult.bind(this);
+this.getStructureTestResults = this.getStructureTestResults.bind(this);
+this.createStructureTestResult = this.createStructureTestResult.bind(this);
+this.getStructureTestResultById = this.getStructureTestResultById.bind(this);
+this.updateStructureTestResult = this.updateStructureTestResult.bind(this);
+this.deleteStructureTestResult = this.deleteStructureTestResult.bind(this);
+this.getFloorTestResults = this.getFloorTestResults.bind(this);
+this.createFloorTestResult = this.createFloorTestResult.bind(this);
+this.getFloorTestResultById = this.getFloorTestResultById.bind(this);
+this.updateFloorTestResult = this.updateFloorTestResult.bind(this);
+this.deleteFloorTestResult = this.deleteFloorTestResult.bind(this);
+this.getFlatTestResults = this.getFlatTestResults.bind(this);
+this.createFlatTestResult = this.createFlatTestResult.bind(this);
+this.getFlatTestResultById = this.getFlatTestResultById.bind(this);
+this.updateFlatTestResult = this.updateFlatTestResult.bind(this);
+this.deleteFlatTestResult = this.deleteFlatTestResult.bind(this);
+this.getBlockTestResults = this.getBlockTestResults.bind(this);
+this.createBlockTestResult = this.createBlockTestResult.bind(this);
+this.getBlockTestResultById = this.getBlockTestResultById.bind(this);
+this.updateBlockTestResult = this.updateBlockTestResult.bind(this);
+this.deleteBlockTestResult = this.deleteBlockTestResult.bind(this);
 
  this.getStructureTestResults = this.getStructureTestResults.bind(this);
  this.createStructureTestResult = this.createStructureTestResult.bind(this);
