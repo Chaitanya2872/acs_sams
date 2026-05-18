@@ -896,42 +896,24 @@ const ensureColumns = (worksheet) => {
 
 const addObservationSection = (worksheet, startRow, observations) => {
   let row = startRow;
-  addMergedSectionRow(worksheet, row, 'OBSERVATIONS', COLORS.SECTION, 3);
+  addMergedSectionRow(worksheet, row, 'OBSERVATIONS', COLORS.SECTION, 4);
   row += 1;
-  addTableHeader(worksheet, row, ['S. No', 'Location / Remarks', 'Category'], COLORS.PRIMARY);
+  addTableHeader(worksheet, row, ['S. No', 'Location', 'Remarks', 'Category'], COLORS.PRIMARY);
   row += 1;
 
   if (observations.length === 0) {
-    worksheet.addRow(['', 'No observations recorded', '']);
-    styleRowCells(worksheet, row, 1, 3);
+    worksheet.addRow(['', 'No observations recorded', '', '']);
+    styleRowCells(worksheet, row, 1, 4);
     return row + 1;
   }
 
-  const grouped = observations.reduce((acc, item) => {
-    if (!acc.has(item.location)) acc.set(item.location, []);
-    acc.get(item.location).push(item);
-    return acc;
-  }, new Map());
-
-  grouped.forEach((locationObservations, location) => {
-    addMergedSectionRow(worksheet, row, safeText(location).toUpperCase(), COLORS.SUBSECTION, 3);
+  observations.forEach((item, index) => {
+    worksheet.getCell(row, 1).value = index + 1;
+    worksheet.getCell(row, 2).value = item.location || 'N/A';
+    worksheet.getCell(row, 3).value = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
+    worksheet.getCell(row, 4).value = item.category;
+    styleRowCells(worksheet, row, 1, 4);
     row += 1;
-
-    ['STRUCTURAL DISTRESS', 'NON-STRUCTURAL DISTRESS'].forEach((category) => {
-      const categoryRows = locationObservations.filter((item) => item.category === category);
-      if (categoryRows.length === 0) return;
-
-      addMergedSectionRow(worksheet, row, category, COLORS.SUBSECTION, 3);
-      row += 1;
-
-      categoryRows.forEach((item, index) => {
-        worksheet.getCell(row, 1).value = index + 1;
-        worksheet.getCell(row, 2).value = `${item.component}: ${item.remarks}`;
-        worksheet.getCell(row, 3).value = category;
-        styleRowCells(worksheet, row, 1, 3);
-        row += 1;
-      });
-    });
   });
 
   return row;
@@ -974,14 +956,14 @@ const addImageSection = (worksheet, startRow, title, rows, isTesting = false) =>
 
 const addTestSection = (worksheet, startRow, tests) => {
   let row = startRow;
-  addMergedSectionRow(worksheet, row, 'TEST RESULTS', COLORS.SECTION, 6);
+  addMergedSectionRow(worksheet, row, 'TEST RESULTS', COLORS.SECTION, 7);
   row += 1;
 
   if (tests.length === 0) {
-    addTableHeader(worksheet, row, ['S. No', 'Test Name', 'Location', 'Tested By', 'Date', 'Remarks / Result'], COLORS.PRIMARY);
+    addTableHeader(worksheet, row, ['S. No', 'Test Name', 'Location', 'Tested By', 'Date', 'Result', 'Remarks'], COLORS.PRIMARY);
     row += 1;
-    worksheet.addRow(['', 'No test results recorded', '', '', '', '']);
-    styleRowCells(worksheet, row, 1, 6);
+    worksheet.addRow(['', 'No test results recorded', '', '', '', '', '']);
+    styleRowCells(worksheet, row, 1, 7);
     return row + 1;
   }
 
@@ -993,9 +975,9 @@ const addTestSection = (worksheet, startRow, tests) => {
 
   let testIndex = 1;
   grouped.forEach((testRows, testName) => {
-    addMergedSectionRow(worksheet, row, `${testIndex}. ${testName}`, COLORS.SUBSECTION, 6);
+    addMergedSectionRow(worksheet, row, `${testIndex}. ${testName}`, COLORS.SUBSECTION, 7);
     row += 1;
-    addTableHeader(worksheet, row, ['S. No', 'Location', 'Component', 'Tested By', 'Date', 'Remarks / Result'], COLORS.PRIMARY);
+    addTableHeader(worksheet, row, ['S. No', 'Location', 'Component', 'Tested By', 'Date', 'Result', 'Remarks'], COLORS.PRIMARY);
     row += 1;
 
     testRows.forEach((item, index) => {
@@ -1004,8 +986,9 @@ const addTestSection = (worksheet, startRow, tests) => {
       worksheet.getCell(row, 3).value = [item.component_type, item.component_id].filter(Boolean).join(' / ');
       worksheet.getCell(row, 4).value = item.tested_by || 'N/A';
       worksheet.getCell(row, 5).value = item.test_date || '';
-      worksheet.getCell(row, 6).value = [item.result_summary, item.remarks].filter(Boolean).join(' | ') || 'N/A';
-      styleRowCells(worksheet, row, 1, 6);
+      worksheet.getCell(row, 6).value = item.result_summary || 'N/A';
+      worksheet.getCell(row, 7).value = item.remarks || 'N/A';
+      styleRowCells(worksheet, row, 1, 7);
       row += 1;
     });
 
@@ -1113,6 +1096,7 @@ const addStructureHeader = (worksheet, structureExport, filtersApplied) => {
     ['UID', safeText(structure.structural_identity?.uid, 'N/A')],
     ['Structure Type', safeText(structure.structural_identity?.type_of_structure, 'N/A')],
     ['Structure Subtype', safeText(structure.structural_identity?.structure_subtype, 'N/A')],
+    ['Total Floors', safeText(structure.geometric_details?.number_of_floors)],
     ['Owner / Employee', `${buildOwnerLabel(owner)}${owner?.profile?.employee_id ? ` (${owner.profile.employee_id})` : ''}`],
     ['Organization', safeText(owner?.profile?.organization || structure.administration?.organization, 'N/A')],
     ['Location', [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code].filter(Boolean).join(' / ') || 'N/A'],
@@ -1392,6 +1376,7 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   pdfKeyValue(doc, 'Structure Type', structure.structural_identity?.type_of_structure || '');
   pdfKeyValue(doc, 'Structure Subtype', structure.structural_identity?.structure_subtype || '');
   pdfKeyValue(doc, 'Age Of Structure', safeText(structure.structural_identity?.age_of_structure));
+  pdfKeyValue(doc, 'Total Floors', safeText(structure.geometric_details?.number_of_floors));
   pdfKeyValue(doc, 'Owner / Employee', ownerEmployee || '');
   pdfKeyValue(doc, 'Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || '');
   pdfKeyValue(doc, 'Location', locationSummary);
@@ -1407,24 +1392,22 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
 
   pdfSectionTitle(doc, 'OBSERVATIONS');
   if (!observations.length) {
-    pdfTableRow(doc, ['S. No', 'Location/Remarks'], [60, 475], { header: true });
+    pdfTableRow(doc, ['S. No', 'Location', 'Remarks', 'Category'], [45, 120, 275, 95], { header: true });
   } else {
-    const grouped = groupObservationsForPdf(observations);
-    pdfTableRow(doc, ['S. No', 'Location/Remarks'], [60, 475], { header: true });
+    pdfTableRow(doc, ['S. No', 'Location', 'Remarks', 'Category'], [45, 120, 275, 95], { header: true });
 
-    grouped.forEach((locationRows, location) => {
-      pdfTableRow(doc, ['', location.toUpperCase()], [60, 475], { header: true });
-      [
-        ['STRUCTURAL DISTRESS', locationRows.structural],
-        ['NON-STRUCTURAL DISTRESS', locationRows.nonStructural]
-      ].forEach(([label, rows]) => {
-        if (!rows.length) return;
-        pdfTableRow(doc, ['', label], [60, 475], { header: true });
-        rows.forEach((item, rowIndex) => {
-          const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
-          pdfTableRow(doc, [String(rowIndex + 1), text], [60, 475], { fontSize: 9 });
-        });
-      });
+    observations.forEach((item, rowIndex) => {
+      pdfTableRow(
+        doc,
+        [
+          String(rowIndex + 1),
+          item.location || 'N/A',
+          item.remarks ? `${item.component}: ${item.remarks}` : item.component,
+          item.category || 'N/A'
+        ],
+        [45, 120, 275, 95],
+        { fontSize: 8 }
+      );
     });
   }
 
@@ -1706,29 +1689,16 @@ const renderWordImageGrid = (rows, type) => {
 };
 
 const renderObservationSectionWord = (observations) => {
-  const grouped = groupObservationsForWord(observations);
-
-  if (!grouped.size) {
-    return '<table><thead><tr><th class="sno-col">S. No</th><th>Location/Remarks</th></tr></thead><tbody></tbody></table>';
+  if (!observations.length) {
+    return '<table><thead><tr><th class="sno-col">S. No</th><th>Location</th><th>Remarks</th><th>Category</th></tr></thead><tbody></tbody></table>';
   }
 
-  const rows = ['<table><thead><tr><th class="sno-col">S. No</th><th>Location/Remarks</th></tr></thead><tbody>'];
-  grouped.forEach((group, location) => {
-    rows.push(`<tr class="obs-location-row"><td colspan="2">${escapeHtml(location)}</td></tr>`);
-
-    const categories = [
-      ['STRUCTURAL DISTRESS', group.structural],
-      ['NON-STRUCTURAL DISTRESS', group.nonStructural]
-    ];
-
-    categories.forEach(([label, items]) => {
-      if (!items.length) return;
-      rows.push(`<tr class="obs-category-row"><td colspan="2">${escapeHtml(label)}</td></tr>`);
-      items.forEach((item, index) => {
-        const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
-        rows.push(`<tr><td class="sno-col center">${index + 1}</td><td>${escapeHtml(text)}</td></tr>`);
-      });
-    });
+  const rows = ['<table><thead><tr><th class="sno-col">S. No</th><th>Location</th><th>Remarks</th><th>Category</th></tr></thead><tbody>'];
+  observations.forEach((item, index) => {
+    const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
+    rows.push(
+      `<tr><td class="sno-col center">${index + 1}</td><td>${escapeHtml(item.location || 'N/A')}</td><td>${escapeHtml(text)}</td><td>${escapeHtml(item.category || 'N/A')}</td></tr>`
+    );
   });
   rows.push('</tbody></table>');
   return rows.join('');
@@ -1886,6 +1856,7 @@ const renderStructureWord = (structureExport, filtersApplied, index, total) => {
     ['Structure Type', structure.structural_identity?.type_of_structure || ''],
     ['Structure Subtype', structure.structural_identity?.structure_subtype || ''],
     ['Age Of Structure', safeText(structure.structural_identity?.age_of_structure)],
+    ['Total Floors', safeText(structure.geometric_details?.number_of_floors)],
     ['Owner / Employee', ownerEmployee || ''],
     ['Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || ''],
     ['Location', locationSummary],

@@ -1358,6 +1358,7 @@ userSchema.index({ role: 1 });
 userSchema.index({ is_active: 1 });
 userSchema.index({ created_at: -1 });
 
+userSchema.index({ 'structures._id': 1 }, { sparse: true });
 userSchema.index({ 'structures.structural_identity.structural_identity_number': 1 }, { sparse: true });
 userSchema.index({ 'structures.structural_identity.uid': 1 });
 userSchema.index({ 'structures.status': 1 });

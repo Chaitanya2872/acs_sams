@@ -279,6 +279,7 @@ router.post('/verify-email', debugMiddleware,  validateOTP, async (req, res) => 
  * @access  Public
  */
 router.post('/login', debugMiddleware,  async (req, res) => {
+  const requestStartedAt = Date.now();
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({
@@ -303,13 +304,22 @@ router.post('/login', debugMiddleware,  async (req, res) => {
       });
     }
     
-    console.log('🔐 Processing login for:', identifier);
+    console.log(`🔐 Processing login for: ${identifier}`);
     const result = await authService.login({ identifier, password });
     setRefreshTokenCookie(res, result.refreshToken);
+    console.log(`🔐 Login response sent in ${Date.now() - requestStartedAt}ms`);
     res.status(200).json(result);
   } catch (error) {
     console.error('Login error:', error);
-    res.status(401).json({
+    const isAuthError = [
+      'Invalid credentials',
+      'Please verify your email before logging in',
+      'Account is inactive. Please contact support.',
+      'Email/Username and password are required'
+    ].includes(error.message);
+
+    console.log(`🔐 Login failed in ${Date.now() - requestStartedAt}ms`);
+    res.status(isAuthError ? 401 : 500).json({
       success: false,
       error: error.message
     });

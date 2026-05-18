@@ -404,50 +404,29 @@ class AuthService {
   async login(loginData) {
     try {
       const { identifier, password } = loginData;
+      const loginStartedAt = Date.now();
 
       if (!identifier || !password) {
         throw new Error('Email/Username and password are required');
       }
 
-      console.log('🔐 Login attempt for:', identifier);
+      console.log(`🔐 Login request received for ${identifier}`);
 
-      // FIXED: Find user with better query structure
+      const userLookupStartedAt = Date.now();
       const user = await User.findOne({
         $or: [
           { email: identifier.toLowerCase() },
           { username: identifier }
-        ],
-        is_active: true
-      }).select('+password'); // Explicitly select password field
-
-      console.log('👤 User found:', user ? 'Yes' : 'No');
-      if (user) {
-        console.log('👤 User details:', {
-          id: user._id,
-          email: user.email,
-          username: user.username,
-          is_active: user.is_active,
-          isEmailVerified: user.isEmailVerified
-        });
-      }
+        ]
+      }).select('+password username email role permissions is_active isEmailVerified -structures');
+      console.log(`🔐 Login user lookup completed in ${Date.now() - userLookupStartedAt}ms`);
 
       if (!user) {
-        // Debug: Check if user exists but is inactive
-        const inactiveUser = await User.findOne({
-          $or: [
-            { email: identifier.toLowerCase() },
-            { username: identifier }
-          ]
-        });
-        
-        if (inactiveUser) {
-          console.log('⚠️ User exists but is inactive:', {
-            is_active: inactiveUser.is_active
-          });
-          throw new Error('Account is inactive. Please contact support.');
-        }
-        
         throw new Error('Invalid credentials');
+      }
+
+      if (!user.is_active) {
+        throw new Error('Account is inactive. Please contact support.');
       }
 
       // Check if email is verified
@@ -456,9 +435,12 @@ class AuthService {
       }
 
       // Compare password
+      const passwordValidationStartedAt = Date.now();
       const isPasswordValid = await this.comparePassword(password, user.password);
+      console.log(
+        `🔐 Login password validation completed in ${Date.now() - passwordValidationStartedAt}ms`
+      );
       if (!isPasswordValid) {
-        console.log('❌ Password validation failed');
         throw new Error('Invalid credentials');
       }
 
@@ -478,9 +460,11 @@ class AuthService {
       }
 
       // Generate token pair
+      const tokenGenerationStartedAt = Date.now();
       const tokens = this.generateTokenPair(user._id, user.role);
+      console.log(`🔐 Login token generation completed in ${Date.now() - tokenGenerationStartedAt}ms`);
 
-      console.log('✅ Login successful for:', user.email);
+      console.log(`✅ Login successful for ${user.email} in ${Date.now() - loginStartedAt}ms`);
 
       return {
         success: true,

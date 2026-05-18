@@ -569,7 +569,7 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   };
  }
 
-  async findUserStructure(userId, structureId, requestUser = null) {
+ async findUserStructure(userId, structureId, requestUser = null) {
   // If requestUser is provided and has privileged access, search across all users
   if (requestUser && hasPrivilegedAccess(requestUser)) {
     console.log('🔓 Privileged user accessing structure:', structureId);
@@ -595,6 +595,42 @@ this.isCloudinaryConfigured = this.isCloudinaryConfigured.bind(this);
   }
   
   return { user, structure };
+  }
+
+  async findUserStructureProjected(userId, structureId, requestUser = null, projection = {}) {
+    const structureMatch = { _id: structureId };
+    const structureProjection = {
+      structures: { $elemMatch: structureMatch },
+      ...projection
+    };
+
+    let user = null;
+
+    if (requestUser && hasPrivilegedAccess(requestUser)) {
+      console.log('🔐 Privileged projected structure access:', structureId);
+      user = await User.findOne({ 'structures._id': structureId }, structureProjection).lean();
+    } else {
+      user = await User.findOne(
+        { _id: userId, 'structures._id': structureId },
+        structureProjection
+      ).lean();
+    }
+
+    if (!user) {
+      throw new Error('Structure not found');
+    }
+
+    const structure = Array.isArray(user.structures) ? user.structures[0] : null;
+    if (!structure) {
+      throw new Error('Structure not found');
+    }
+
+    const isTeUser = requestUser && this.hasRoleFromRequest(requestUser, 'TE');
+    if (isTeUser && !this.canTesterViewStructure(structure, userId)) {
+      throw new Error('Structure not found');
+    }
+
+    return { user, structure };
   }
 
   // Find structure across all users (for remarks functionality and privileged access)
@@ -1458,8 +1494,22 @@ async saveBlockRatings(req, res) {
 
   async getFloors(req, res) {
     try {
+      const requestStartedAt = Date.now();
       const { id } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+      console.log(`🏢 Floors request started for structure ${id} by user ${req.user.userId}`);
+
+      const dbQueryStartedAt = Date.now();
+      const { structure } = await this.findUserStructureProjected(
+        req.user.userId,
+        id,
+        req.user,
+        {
+          username: 1,
+          email: 1,
+          role: 1
+        }
+      );
+      console.log(`🏢 Floors structure lookup completed in ${Date.now() - dbQueryStartedAt}ms`);
       
       const floors = structure.geometric_details?.floors || [];
       const floorsData = floors.map(floor => ({
@@ -1482,6 +1532,10 @@ async saveBlockRatings(req, res) {
         floors: floorsData
       });
 
+      console.log(
+        `🏢 Floors response sent for structure ${id} in ${Date.now() - requestStartedAt}ms`
+      );
+
     } catch (error) {
       console.error('❌ Get floors error:', error);
       sendErrorResponse(res, 'Failed to get floors', 500, error.message);
@@ -1490,8 +1544,22 @@ async saveBlockRatings(req, res) {
 
   async getFloorById(req, res) {
     try {
+      const requestStartedAt = Date.now();
       const { id, floorId } = req.params;
-      const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
+      console.log(`🏢 Floor details request started for structure ${id}, floor ${floorId}`);
+
+      const dbQueryStartedAt = Date.now();
+      const { structure } = await this.findUserStructureProjected(
+        req.user.userId,
+        id,
+        req.user,
+        {
+          username: 1,
+          email: 1,
+          role: 1
+        }
+      );
+      console.log(`🏢 Floor details lookup completed in ${Date.now() - dbQueryStartedAt}ms`);
       
       const floor = structure.geometric_details?.floors?.find(f => f.floor_id === floorId);
       if (!floor) {
@@ -1514,6 +1582,10 @@ async saveBlockRatings(req, res) {
           flats: floor.flats || []
         }
       });
+
+      console.log(
+        `🏢 Floor details response sent for structure ${id}, floor ${floorId} in ${Date.now() - requestStartedAt}ms`
+      );
 
     } catch (error) {
       console.error('❌ Get floor error:', error);
