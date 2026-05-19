@@ -26,7 +26,7 @@ const {
 const router = express.Router();
 
 // ✅ Import multer upload middleware (handles Cloudinary uploads)
-const { uploadMultiple, handleUploadError } = require('../middlewares/upload');
+const { uploadSingle, uploadMultiple, handleUploadError } = require('../middlewares/upload');
 
 // ✅ Middleware: when the request is multipart/form-data, the `structures` field
 //    arrives as a raw JSON string (not a parsed array). Parse it here so that
@@ -453,12 +453,16 @@ router.post('/initialize', structureController.initializeStructure);
 
 // =================== LOCATION DETAILS ===================
 router.post('/:id/location', 
+  uploadSingle,
+  handleUploadError,
   locationValidation, 
   handleValidationErrors, 
   structureController.saveLocationScreen
 );
 router.get('/:id/location', structureController.getLocationScreen);
 router.put('/:id/location', 
+  uploadSingle,
+  handleUploadError,
   locationValidation, 
   handleValidationErrors, 
   structureController.updateLocationScreen

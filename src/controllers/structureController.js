@@ -903,6 +903,7 @@ async saveLocationScreen(req, res) {
       latitude, 
       address 
     } = req.body;
+    const uploadedStructureImage = req.file?.path || req.file?.secure_url || null;
     
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
@@ -1006,7 +1007,8 @@ async saveLocationScreen(req, res) {
       location_code: location_code,
       longitude: parseFloat(longitude),
       latitude: parseFloat(latitude),
-      address: address || ''
+      address: address || '',
+      structure_image: uploadedStructureImage || structure.location?.structure_image || ''
     };
     
     structure.creation_info.last_updated_date = new Date();
@@ -1032,6 +1034,7 @@ async saveLocationScreen(req, res) {
       age_of_structure: structure.structural_identity.age_of_structure,       // ⭐ NEW
       commercial_subtype: structure.structural_identity.commercial_subtype,
       location: structure.location,
+      structure_image: structure.location?.structure_image || '',
       formatted_display: generatedNumbers.formatted_display,
       status: structure.status,
       message: 'Location details saved successfully'
@@ -1061,7 +1064,8 @@ async saveLocationScreen(req, res) {
       location: structure.location || { 
         longitude: null,
         latitude: null,
-        address: ''
+        address: '',
+        structure_image: ''
       }
     });
 
@@ -4142,8 +4146,10 @@ async getAllStructures(req, res) {
         structural_identity_number: structure.structural_identity?.structural_identity_number,
         client_name: structure.administrative?.client_name || structure.administration?.client_name,
         location: {
-          city_name: structure.structural_identity?.city_name,
-          state_code: structure.structural_identity?.state_code,
+          city_name: structure.location?.city_name || '',
+          state_code: structure.location?.state_code || '',
+          address: structure.location?.address || '',
+          structure_image: structure.location?.structure_image || '',
           coordinates: structure.location?.coordinates
         },
         type_of_structure: structure.structural_identity?.type_of_structure,

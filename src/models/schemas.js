@@ -1004,6 +1004,10 @@ const structureSchema = new mongoose.Schema({
       type: String,
       trim: true,
       maxlength: 500
+    },
+    structure_image: {
+      type: String,
+      trim: true
     }
   },
   
