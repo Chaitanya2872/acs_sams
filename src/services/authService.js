@@ -133,6 +133,9 @@ class AuthService {
 
   // Compare password
   async comparePassword(password, hashedPassword) {
+    if (typeof password !== 'string' || typeof hashedPassword !== 'string') {
+      throw new Error('Stored account password is missing or invalid');
+    }
     return await bcrypt.compare(password, hashedPassword);
   }
 
@@ -434,6 +437,12 @@ class AuthService {
       // Check if email is verified
       if (!user.isEmailVerified) {
         throw new Error('Please verify your email before logging in');
+      }
+
+      if (typeof user.password !== 'string' || user.password.trim().length === 0) {
+        throw new Error(
+          'Stored account password is missing or invalid. Please reset the password or contact support.'
+        );
       }
 
       // Compare password
