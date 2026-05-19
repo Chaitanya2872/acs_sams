@@ -5,6 +5,8 @@ const { User, OTP } = require('../models/schemas');
 const emailService = require('./emailService');
 const { normalizePermissions } = require('../utils/accessControl');
 
+const BCRYPT_HASH_REGEX = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+
 class AuthService {
   constructor() {
     // Get JWT secrets from your .env configuration
@@ -137,6 +139,10 @@ class AuthService {
       throw new Error('Stored account password is missing or invalid');
     }
     return await bcrypt.compare(password, hashedPassword);
+  }
+
+  isBcryptHash(value) {
+    return typeof value === 'string' && BCRYPT_HASH_REGEX.test(value.trim());
   }
 
   // Validate password strength
@@ -447,7 +453,19 @@ class AuthService {
 
       // Compare password
       const passwordValidationStartedAt = Date.now();
-      const isPasswordValid = await this.comparePassword(password, user.password);
+      let isPasswordValid = false;
+      const normalizedStoredPassword = user.password.trim();
+
+      if (this.isBcryptHash(normalizedStoredPassword)) {
+        isPasswordValid = await this.comparePassword(password, normalizedStoredPassword);
+      } else {
+        // Support legacy plaintext passwords once, then migrate them to bcrypt.
+        isPasswordValid = password === normalizedStoredPassword;
+        if (isPasswordValid) {
+          user.password = await this.hashPassword(password);
+          await user.save();
+        }
+      }
       console.log(
         `🔐 Login password validation completed in ${Date.now() - passwordValidationStartedAt}ms`
       );

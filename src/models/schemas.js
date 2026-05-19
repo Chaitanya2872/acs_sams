@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const { normalizePermissions } = require('../utils/accessControl');
+
+const BCRYPT_HASH_REGEX = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
 
 const isValidPhotoReference = (value) => {
   // Allow empty/null — photo is optional; undefined values are skipped by Mongoose
@@ -1390,10 +1393,23 @@ structureSchema.virtual('total_units').get(function() {
 });
 
 // =================== MIDDLEWARE ===================
-userSchema.pre('save', function(next) {
-  this.updated_at = new Date();
-  this.permissions = normalizePermissions(this.permissions, this.role);
-  next();
+userSchema.pre('save', async function(next) {
+  try {
+    this.updated_at = new Date();
+    this.permissions = normalizePermissions(this.permissions, this.role);
+
+    if (this.isModified('password') && typeof this.password === 'string') {
+      const normalizedPassword = this.password.trim();
+      if (normalizedPassword && !BCRYPT_HASH_REGEX.test(normalizedPassword)) {
+        const saltRounds = parseInt(process.env.BCRYPT_ROUNDS, 10) || 12;
+        this.password = await bcrypt.hash(normalizedPassword, saltRounds);
+      }
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 testFormatSchema.pre('save', function(next) {
