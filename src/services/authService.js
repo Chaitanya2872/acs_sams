@@ -418,7 +418,9 @@ class AuthService {
           { email: identifier.toLowerCase() },
           { username: identifier }
         ]
-      }).select('+password username email role permissions is_active isEmailVerified -structures');
+      }).select(
+        '+password username email role roles permissions is_active isEmailVerified'
+      );
       console.log(`🔐 Login user lookup completed in ${Date.now() - userLookupStartedAt}ms`);
 
       if (!user) {
