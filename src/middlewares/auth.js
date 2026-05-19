@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models/schemas');
 const { hasModulePermission, normalizePermissions } = require('../utils/accessControl');
+const { getUserRoles, hasRole, getPrimaryRole } = require('../utils/roles');
 
 /**
  * Middleware to authenticate JWT token
@@ -46,15 +47,16 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // 🔧 FIXED: Check for empty array and fall back to single role
-    const userRoles = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
+    const userRoles = getUserRoles(user);
+    const primaryRole = getPrimaryRole(user);
 
     req.user = {
       userId: user._id,
       username: user.username,
       email: user.email,
-      role: user.role,
+      role: primaryRole,
       roles: userRoles,
-      permissions: normalizePermissions(user.permissions, user.role),
+      permissions: normalizePermissions(user.permissions, primaryRole),
       isEmailVerified: user.isEmailVerified,
       is_active: user.is_active
     };
@@ -97,8 +99,7 @@ const authorizeRole = (allowedRoles) => {
     }
 
     // 🔧 FIXED: Check for empty array
-    const userRoles = (req.user.roles && req.user.roles.length > 0) ? req.user.roles : [req.user.role];
-    const hasAllowedRole = allowedRoles.some(role => userRoles.includes(role));
+    const hasAllowedRole = allowedRoles.some((role) => hasRole(req.user, role));
     
     if (!hasAllowedRole) {
       return res.status(403).json({
@@ -140,10 +141,9 @@ const hasPrivilegedAccess = (user) => {
   if (!user) return false;
   
   // 🔧 FIXED: Check for empty array
-  const userRoles = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
   const privilegedRoles = ['AD', 'VE', 'TE', 'admin'];
   
-  return privilegedRoles.some(role => userRoles.includes(role));
+  return privilegedRoles.some((role) => hasRole(user, role));
 };
 
 /**
@@ -180,7 +180,7 @@ const authorizeModuleAction = (moduleKey, action) => {
       });
     }
 
-    if (hasPrivilegedAccess(req.user) && req.user.role === 'AD') {
+    if (hasPrivilegedAccess(req.user) && hasRole(req.user, 'AD')) {
       return next();
     }
 

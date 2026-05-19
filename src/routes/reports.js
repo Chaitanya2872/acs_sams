@@ -7,6 +7,7 @@ const puppeteer = require('puppeteer-core');
 const mongoose = require('mongoose');
 const { User } = require('../models/schemas');
 const { authenticateToken } = require('../middlewares/auth');
+const { getUserRoles, hasRole } = require('../utils/roles');
 
 const router = express.Router();
 
@@ -283,8 +284,7 @@ const summarizeMethodology = (rows) => {
 };
 
 const isAdminUser = (user) => {
-  const roles = Array.isArray(user?.roles) ? user.roles : [];
-  return ['admin', 'AD'].includes(user?.role) || roles.includes('admin') || roles.includes('AD');
+  return hasRole(user, 'admin') || hasRole(user, 'AD');
 };
 
 const canViewAllStructures = (user) => {
@@ -299,7 +299,8 @@ const checkExportPermissions = (req, res, next) => {
     });
   }
 
-  const hasOwnReportAccess = ['FE', 'field_engineer'].includes(req.user.role);
+  const hasOwnReportAccess =
+    hasRole(req.user, 'FE') || getUserRoles(req.user).includes('field_engineer');
   const hasPermission =
     isAdminUser(req.user) ||
     hasOwnReportAccess ||

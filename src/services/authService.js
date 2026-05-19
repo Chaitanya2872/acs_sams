@@ -428,7 +428,7 @@ class AuthService {
           { username: identifier }
         ]
       }).select(
-        '+password username email role roles permissions is_active isEmailVerified'
+        'password username email role roles permissions is_active isEmailVerified'
       );
       console.log(`🔐 Login user lookup completed in ${Date.now() - userLookupStartedAt}ms`);
 
@@ -704,7 +704,7 @@ class AuthService {
       }
 
       // Get user with password field
-      const user = await User.findById(userId).select('+password');
+      const user = await User.findById(userId).select('password');
       if (!user) {
         throw new Error('User not found');
       }

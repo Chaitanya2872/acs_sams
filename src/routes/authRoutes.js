@@ -3,6 +3,7 @@ const router = express.Router();
 const authService = require('../services/authService');
 const emailService = require('../services/emailService');
 const { authenticateToken } = require('../middlewares/auth');
+const { hasRole } = require('../utils/roles');
 const rateLimit = require('express-rate-limit');
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
@@ -604,7 +605,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
 router.get('/test-email', authenticateToken, async (req, res) => {
   try {
     // Check if user is admin
-    if (req.user.role !== 'admin') {
+    if (!hasRole(req.user, 'admin') && !hasRole(req.user, 'AD')) {
       return res.status(403).json({
         success: false,
         error: 'Admin access required'
