@@ -1785,8 +1785,8 @@ const distressDimensionsValidation = [
   
   body('distress_dimensions.unit')
     .optional()
-    .isIn(['mm', 'cm', 'm', 'inch', 'feet'])
-    .withMessage('Unit must be one of: mm, cm, m, inch, feet')
+    .isIn(["NO'S", 'SQM', 'CUM'])
+    .withMessage("Unit must be one of: NO'S, SQM, CUM")
 ];
 
 const pdfFilesValidation = [

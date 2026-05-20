@@ -148,6 +148,41 @@ const normalizeDistressTypes = (distressTypesInput) => {
   return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
 };
 
+const normalizeDistressDimensions = (dimensionsInput) => {
+  if (!dimensionsInput || typeof dimensionsInput !== 'object') return undefined;
+
+  const length = toNumber(dimensionsInput.length);
+  const breadth = toNumber(dimensionsInput.breadth);
+  const height = toNumber(dimensionsInput.height);
+  const rawUnit = (dimensionsInput.unit || '').toString().trim().toUpperCase();
+  const unit = rawUnit === 'SQM' || rawUnit === 'CUM' ? rawUnit : "NO'S";
+
+  if (unit === "NO'S") {
+    return {
+      length: 0,
+      breadth: 0,
+      height: 0,
+      unit
+    };
+  }
+
+  if (unit === 'SQM') {
+    return {
+      length,
+      breadth,
+      height: 0,
+      unit
+    };
+  }
+
+  return {
+    length,
+    breadth,
+    height,
+    unit
+  };
+};
+
 const RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS = [
   { key: 'brick_plaster', label: 'Brick/Plaster' },
   { key: 'doors_windows', label: 'Doors & Windows' },
@@ -2033,7 +2068,16 @@ async getFlatCombinedRatings(req, res) {
     // ✅ Helper function to convert array format to single object (backward compatible)
     const convertArrayToSingle = (componentArray) => {
       if (!componentArray || !Array.isArray(componentArray) || componentArray.length === 0) {
-        return { rating: null, condition_comment: '', photo: '', photos: [], inspection_date: null };
+        return {
+          rating: null,
+          condition_comment: '',
+          photo: '',
+          photos: [],
+          inspection_date: null,
+          distress_dimensions: undefined,
+          repair_methodology: '',
+          distress_types: []
+        };
       }
       // Return first item for backward compatibility
       const component = componentArray[0];
@@ -2045,6 +2089,9 @@ async getFlatCombinedRatings(req, res) {
         photos: componentPhotos,
         inspection_date: component.inspection_date || null,
         inspector_notes: component.inspector_notes || '',
+        distress_dimensions: normalizeDistressDimensions(component.distress_dimensions),
+        repair_methodology: component.repair_methodology || '',
+        distress_types: normalizeDistressTypes(component.distress_types) || [],
         _id: component._id,
         name: component.name
       };
@@ -2141,6 +2188,13 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
   const inspectorNotes = ratingData.inspector_notes 
     ? ratingData.inspector_notes.trim().substring(0, 2000) 
     : '';
+  const distressDimensions = normalizeDistressDimensions(
+    ratingData.distress_dimensions
+  );
+  const repairMethodology = ratingData.repair_methodology
+    ? ratingData.repair_methodology.trim().substring(0, 2000)
+    : '';
+  const distressTypes = normalizeDistressTypes(ratingData.distress_types);
 
   // ✅ Create the rating component object
   const ratingComponent = {
@@ -2151,7 +2205,10 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     photos: photos,
     condition_comment: conditionComment,
     inspection_date: inspectionDate || new Date(),
-    inspector_notes: inspectorNotes
+    inspector_notes: inspectorNotes,
+    distress_dimensions: distressDimensions,
+    repair_methodology: repairMethodology || undefined,
+    distress_types: distressTypes
   };
 
   console.log(`✅ Created rating component for ${componentName}:`, {
@@ -3041,6 +3098,13 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
   const inspectorNotes = ratingData.inspector_notes 
     ? ratingData.inspector_notes.trim().substring(0, 2000) 
     : '';
+  const distressDimensions = normalizeDistressDimensions(
+    ratingData.distress_dimensions
+  );
+  const repairMethodology = ratingData.repair_methodology
+    ? ratingData.repair_methodology.trim().substring(0, 2000)
+    : '';
+  const distressTypes = normalizeDistressTypes(ratingData.distress_types);
 
   // Create and return the rating component object
   const ratingComponent = {
@@ -3051,7 +3115,10 @@ createRatingComponent(ratingData, inspectionDate, componentName) {
     condition_comment: conditionComment,
     inspection_date: inspectionDate || new Date(),
     photos: photos,
-    inspector_notes: inspectorNotes
+    inspector_notes: inspectorNotes,
+    distress_dimensions: distressDimensions,
+    repair_methodology: repairMethodology || undefined,
+    distress_types: distressTypes
   };
 
   console.log(`✅ Created rating component for ${componentName}:`, {
@@ -6649,7 +6716,8 @@ async saveFlatStructuralComponentsBulk(req, res) {
           condition_comment: comp.condition_comment,
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
-          distress_dimensions: comp.distress_dimensions || undefined,
+          distress_dimensions:
+            normalizeDistressDimensions(comp.distress_dimensions),
           repair_methodology: comp.repair_methodology || undefined,
           distress_types: normalizeDistressTypes(comp.distress_types),
           pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
@@ -6824,7 +6892,8 @@ async saveFlatNonStructuralComponentsBulk(req, res) {
           condition_comment: comp.condition_comment,
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
-          distress_dimensions: comp.distress_dimensions || undefined,
+          distress_dimensions:
+            normalizeDistressDimensions(comp.distress_dimensions),
           repair_methodology: comp.repair_methodology || undefined,
           pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
         };
@@ -7083,7 +7152,8 @@ async saveFloorStructuralComponentsBulk(req, res) {
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
           // ⭐ NEW: Add distress fields if provided
-          distress_dimensions: comp.distress_dimensions || undefined,
+          distress_dimensions:
+            normalizeDistressDimensions(comp.distress_dimensions),
           repair_methodology: comp.repair_methodology || undefined,
           pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
         };
@@ -7332,7 +7402,8 @@ async saveFloorNonStructuralComponentsBulk(req, res) {
           inspector_notes: comp.inspector_notes || '',
           inspection_date: inspectionDate,
           // ⭐ NEW: Add distress fields if provided
-          distress_dimensions: comp.distress_dimensions || undefined,
+          distress_dimensions:
+            normalizeDistressDimensions(comp.distress_dimensions),
           repair_methodology: comp.repair_methodology || undefined,
           distress_types: normalizeDistressTypes(comp.distress_types),
           pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
