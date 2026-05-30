@@ -73,11 +73,14 @@ const normalizeDistressDimensionsValue = (value) => {
   return { length, breadth, height, unit };
 };
 
-const normalizeNestedDistressDimensions = (node) => {
+const normalizeNestedDistressDimensions = (node, visited = new WeakSet()) => {
   if (!node || typeof node !== 'object') return;
 
+  if (visited.has(node)) return;
+  visited.add(node);
+
   if (Array.isArray(node)) {
-    node.forEach((entry) => normalizeNestedDistressDimensions(entry));
+    node.forEach((entry) => normalizeNestedDistressDimensions(entry, visited));
     return;
   }
 
@@ -90,7 +93,10 @@ const normalizeNestedDistressDimensions = (node) => {
     }
   }
 
-  Object.values(node).forEach((entry) => normalizeNestedDistressDimensions(entry));
+  Object.keys(node).forEach((key) => {
+    if (key === 'distress_dimensions') return;
+    normalizeNestedDistressDimensions(node[key], visited);
+  });
 };
 
 // =================== DISTRESS DIMENSIONS SCHEMA ===================
