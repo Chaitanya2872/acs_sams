@@ -40,6 +40,59 @@ const normalizeDistressTypes = (value) => {
   return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
 };
 
+const normalizeDistressDimensionsValue = (value) => {
+  if (!value || typeof value !== 'object') return undefined;
+
+  const toNumber = (input) => {
+    if (input === null || typeof input === 'undefined') return 0;
+    const parsed = typeof input === 'string' ? Number(input.trim()) : Number(input);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const length = toNumber(value.length);
+  const breadth = toNumber(value.breadth);
+  const height = toNumber(value.height);
+  const rawUnit = (value.unit || '').toString().trim().toUpperCase();
+  const unit =
+    rawUnit === 'RM' || rawUnit === 'SQM' || rawUnit === 'CUM'
+      ? rawUnit
+      : "NO'S";
+
+  if (unit === "NO'S") {
+    return { length: 0, breadth: 0, height: 0, unit };
+  }
+
+  if (unit === 'RM') {
+    return { length, breadth: 0, height: 0, unit };
+  }
+
+  if (unit === 'SQM') {
+    return { length, breadth, height: 0, unit };
+  }
+
+  return { length, breadth, height, unit };
+};
+
+const normalizeNestedDistressDimensions = (node) => {
+  if (!node || typeof node !== 'object') return;
+
+  if (Array.isArray(node)) {
+    node.forEach((entry) => normalizeNestedDistressDimensions(entry));
+    return;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(node, 'distress_dimensions')) {
+    const normalized = normalizeDistressDimensionsValue(node.distress_dimensions);
+    if (normalized) {
+      node.distress_dimensions = normalized;
+    } else {
+      delete node.distress_dimensions;
+    }
+  }
+
+  Object.values(node).forEach((entry) => normalizeNestedDistressDimensions(entry));
+};
+
 // =================== DISTRESS DIMENSIONS SCHEMA ===================
 const distressDimensionsSchema = {
   length: {
@@ -1393,6 +1446,17 @@ structureSchema.virtual('total_units').get(function() {
 });
 
 // =================== MIDDLEWARE ===================
+userSchema.pre('validate', function(next) {
+  try {
+    if (Array.isArray(this.structures)) {
+      normalizeNestedDistressDimensions(this.structures);
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 userSchema.pre('save', async function(next) {
   try {
     this.updated_at = new Date();
