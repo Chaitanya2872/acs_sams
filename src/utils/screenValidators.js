@@ -194,8 +194,8 @@ const multiComponentRatingValidation = [
   
   body('structures.*.components.*.distress_dimensions.unit')
     .optional()
-    .isIn(['mm', 'cm', 'm', 'inch', 'feet'])
-    .withMessage('Unit must be one of: mm, cm, m, inch, feet'),
+    .isIn(["NO'S", 'RM', 'SQM', 'CUM'])
+    .withMessage("Unit must be one of: NO'S, RM, SQM, CUM"),
 
   // NEW: Repair methodology validation - MUST BE STRING, not boolean
   body('structures.*.components.*.repair_methodology')
@@ -1785,8 +1785,8 @@ const distressDimensionsValidation = [
   
   body('distress_dimensions.unit')
     .optional()
-    .isIn(["NO'S", 'SQM', 'CUM'])
-    .withMessage("Unit must be one of: NO'S, SQM, CUM")
+    .isIn(["NO'S", 'RM', 'SQM', 'CUM'])
+    .withMessage("Unit must be one of: NO'S, RM, SQM, CUM")
 ];
 
 const pdfFilesValidation = [

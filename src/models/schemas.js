@@ -59,7 +59,7 @@ const distressDimensionsSchema = {
   },
   unit: {
     type: String,
-    enum: ["NO'S", 'SQM', 'CUM'],
+    enum: ["NO'S", 'RM', 'SQM', 'CUM'],
     default: "NO'S"
   }
 };

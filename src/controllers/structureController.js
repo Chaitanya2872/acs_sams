@@ -155,11 +155,23 @@ const normalizeDistressDimensions = (dimensionsInput) => {
   const breadth = toNumber(dimensionsInput.breadth);
   const height = toNumber(dimensionsInput.height);
   const rawUnit = (dimensionsInput.unit || '').toString().trim().toUpperCase();
-  const unit = rawUnit === 'SQM' || rawUnit === 'CUM' ? rawUnit : "NO'S";
+  const unit =
+    rawUnit === 'RM' || rawUnit === 'SQM' || rawUnit === 'CUM'
+      ? rawUnit
+      : "NO'S";
 
   if (unit === "NO'S") {
     return {
       length: 0,
+      breadth: 0,
+      height: 0,
+      unit
+    };
+  }
+
+  if (unit === 'RM') {
+    return {
+      length,
       breadth: 0,
       height: 0,
       unit
@@ -181,6 +193,26 @@ const normalizeDistressDimensions = (dimensionsInput) => {
     height,
     unit
   };
+};
+
+const normalizeNestedDistressDimensions = (value) => {
+  if (!value || typeof value !== 'object') return;
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => normalizeNestedDistressDimensions(entry));
+    return;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, 'distress_dimensions')) {
+    const normalized = normalizeDistressDimensions(value.distress_dimensions);
+    if (normalized) {
+      value.distress_dimensions = normalized;
+    } else {
+      delete value.distress_dimensions;
+    }
+  }
+
+  Object.values(value).forEach((entry) => normalizeNestedDistressDimensions(entry));
 };
 
 const RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS = [
@@ -7907,6 +7939,10 @@ async submitForTesting(req, res) {
     if (notes) {
       structure.general_notes = notes;
     }
+
+    // Re-normalize any legacy nested distress units such as `cm` before
+    // saving the whole structure document during workflow transitions.
+    normalizeNestedDistressDimensions(structure);
     
     structure.creation_info.last_updated_date = new Date();
     await structureOwner.save();
