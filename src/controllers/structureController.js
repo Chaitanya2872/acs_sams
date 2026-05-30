@@ -195,11 +195,14 @@ const normalizeDistressDimensions = (dimensionsInput) => {
   };
 };
 
-const normalizeNestedDistressDimensions = (value) => {
+const normalizeNestedDistressDimensions = (value, visited = new WeakSet()) => {
   if (!value || typeof value !== 'object') return;
 
+  if (visited.has(value)) return;
+  visited.add(value);
+
   if (Array.isArray(value)) {
-    value.forEach((entry) => normalizeNestedDistressDimensions(entry));
+    value.forEach((entry) => normalizeNestedDistressDimensions(entry, visited));
     return;
   }
 
@@ -212,7 +215,10 @@ const normalizeNestedDistressDimensions = (value) => {
     }
   }
 
-  Object.values(value).forEach((entry) => normalizeNestedDistressDimensions(entry));
+  Object.keys(value).forEach((key) => {
+    if (key === 'distress_dimensions') return;
+    normalizeNestedDistressDimensions(value[key], visited);
+  });
 };
 
 const RCC_FLAT_NON_STRUCTURAL_COMPONENT_OPTIONS = [
