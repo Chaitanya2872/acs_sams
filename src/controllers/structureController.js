@@ -2377,13 +2377,19 @@ validateComponentForSubtype(componentType, structureSubtype, structureType) {
  * Purpose: Validate bulk components against structure type
  */
 async validateComponentsForStructureType(structure, componentsData) {
-  const structureSubtype = structure.structural_identity?.structure_subtype || 'rcc';
-  const structureType = structure.structural_identity?.type_of_structure || 'residential';
+  const structureSubtype = String(
+    structure.structural_identity?.structure_subtype || 'rcc'
+  ).trim().toLowerCase();
+  const structureType = String(
+    structure.structural_identity?.type_of_structure || 'residential'
+  ).trim().toLowerCase();
   
   const errors = [];
   
   for (const structureData of componentsData) {
-    const componentType = structureData.component_type;
+    const componentType = String(structureData.component_type || '')
+      .trim()
+      .toLowerCase();
     
     const validation = this.validateComponentForSubtype(
       componentType,
@@ -3562,6 +3568,7 @@ async getFloorRatings(req, res) {
       floor_label_name: floor.floor_label_name,
       floor_height: floor.floor_height,
       total_area_sq_mts: floor.total_area_sq_mts,
+      testing_required: floor.testing_required === true,
       
       // Structural ratings with all components
       structural_rating: {
@@ -6933,6 +6940,7 @@ async saveFlatNonStructuralComponentsBulk(req, res) {
           distress_dimensions:
             normalizeDistressDimensions(comp.distress_dimensions),
           repair_methodology: comp.repair_methodology || undefined,
+          distress_types: normalizeDistressTypes(comp.distress_types),
           pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
         };
       });
@@ -7193,6 +7201,7 @@ async saveFloorStructuralComponentsBulk(req, res) {
           distress_dimensions:
             normalizeDistressDimensions(comp.distress_dimensions),
           repair_methodology: comp.repair_methodology || undefined,
+          distress_types: normalizeDistressTypes(comp.distress_types),
           pdf_files: resolvedDocs.length > 0 ? resolvedDocs : undefined
         };
       });
