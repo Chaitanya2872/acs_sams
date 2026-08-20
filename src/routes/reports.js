@@ -1237,42 +1237,103 @@ const groupTests = (tests) =>
     return acc;
   }, new Map());
 
-const buildStructureMetaItems = (structureExport, filtersApplied) => {
-  const { structure, owner } = structureExport;
-  const ownerEmployee = [buildOwnerLabel(owner), owner?.profile?.employee_id ? `(${owner.profile.employee_id})` : '']
+// Schema enums are stored as snake_case codes; report readers expect words.
+const ACRONYMS = new Set(['rcc', 'uid', 'id', 'nos']);
+
+const prettifyEnum = (value) => {
+  const source = safeText(value);
+  if (!source) return '';
+  return source
+    .split(/[_\s]+/)
     .filter(Boolean)
+    .map((word) =>
+      ACRONYMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
     .join(' ');
-  const locationSummary = [
-    structure.location?.state_code,
-    structure.location?.district_code,
-    structure.location?.city_name,
-    structure.location?.location_code
-  ]
-    .filter(Boolean)
-    .join(' / ');
-  const coordinates = [formatCoordinate(structure.location?.latitude), formatCoordinate(structure.location?.longitude)]
-    .filter(Boolean)
-    .join(', ');
+};
+
+const withUnit = (value, unit) => {
+  const text = safeText(value);
+  return text ? `${text} ${unit}` : '';
+};
+
+/**
+ * Structure / location / administrative details, grouped into labelled tables so the
+ * report reads as a proper detail sheet rather than one long key-value list.
+ * Rows are [label, value] pairs; `{ span: true }` makes a row occupy the full width.
+ */
+const buildStructureDetailSections = (structureExport, filtersApplied) => {
+  const { structure, owner } = structureExport;
+  const identity = structure.structural_identity || {};
+  const location = structure.location || {};
+  // NOTE: the schema field is `administrative`; `administration` is kept as a fallback
+  // only because older documents were written with that key.
+  const administrative = structure.administrative || structure.administration || {};
+  const geometry = structure.geometric_details || {};
+  const creation = structure.creation_info || {};
 
   return [
-    ['Structure ID', safeText(structure.structural_identity?.structural_identity_number)],
-    ['UID', safeText(structure.structural_identity?.uid)],
-    ['Structure Type', safeText(structure.structural_identity?.type_of_structure)],
-    ['Structure Subtype', safeText(structure.structural_identity?.structure_subtype)],
-    ['Age Of Structure', safeText(structure.structural_identity?.age_of_structure)],
-    ['Total Floors', safeText(structure.geometric_details?.number_of_floors)],
-    ['Owner / Employee', ownerEmployee],
-    ['Organization', safeText(owner?.profile?.organization || structure.administration?.organization)],
-    ['Location', locationSummary],
-    ['Coordinates', coordinates],
-    ['Block Name', collectBlockNames(structure)],
-    ['Structure Width', safeText(structure.geometric_details?.structure_width)],
-    ['Structure Length', safeText(structure.geometric_details?.structure_length)],
-    ['Structure Height', safeText(structure.geometric_details?.structure_height)],
-    ['Status', safeText(structure.status)],
-    ['Created Date', formatDate(structure.creation_info?.created_date)],
-    ['Last Updated', formatDate(structure.creation_info?.last_updated_date)],
-    ['Applied Filters', safeText(filtersApplied)]
+    {
+      title: 'STRUCTURE DETAILS',
+      rows: [
+        ['Structure Name', safeText(location.structure_name)],
+        ['Structure ID', safeText(identity.structural_identity_number)],
+        ['UID', safeText(identity.uid)],
+        ['Type Of Structure', prettifyEnum(identity.type_of_structure)],
+        ['Structure Subtype', prettifyEnum(identity.structure_subtype)],
+        ['Commercial Subtype', prettifyEnum(identity.commercial_subtype)],
+        ['Age Of Structure', withUnit(identity.age_of_structure, 'Years')],
+        ['Year Of Construction', safeText(geometry.year_of_construction)],
+        ['Number Of Floors', safeText(geometry.number_of_floors)],
+        ['Basement Floors', safeText(geometry.basement_floors)],
+        ['Total Built-Up Area', withUnit(geometry.total_built_up_area_sq_mts, 'Sq.M')],
+        ['Total Carpet Area', withUnit(geometry.total_carpet_area_sq_mts, 'Sq.M')],
+        ['Structure Length', withUnit(geometry.structure_length, 'M')],
+        ['Structure Width', withUnit(geometry.structure_width, 'M')],
+        ['Structure Height', withUnit(geometry.structure_height, 'M')],
+        ['Parking Type', prettifyEnum(geometry.parking_type)],
+        ['Parking Floor Type', prettifyEnum(geometry.parking_floor_type)],
+        ['Block Names', collectBlockNames(structure), { span: true }]
+      ]
+    },
+    {
+      title: 'LOCATION DETAILS',
+      rows: [
+        ['State Code', safeText(location.state_code)],
+        ['District Code', safeText(location.district_code)],
+        ['City Name', safeText(location.city_name)],
+        ['Location Code', safeText(location.location_code)],
+        ['Zip Code', safeText(location.zip_code)],
+        ['Latitude', formatCoordinate(location.latitude)],
+        ['Longitude', formatCoordinate(location.longitude)],
+        ['Address', safeText(location.address), { span: true }]
+      ]
+    },
+    {
+      title: 'ADMINISTRATIVE DETAILS',
+      rows: [
+        ['Client Name', safeText(administrative.client_name)],
+        ['Custodian', safeText(administrative.custodian)],
+        ['Engineer Designation', safeText(administrative.engineer_designation)],
+        ['Contact Details', safeText(administrative.contact_details)],
+        ['Email ID', safeText(administrative.email_id)],
+        ['Organization', safeText(administrative.organization || owner?.profile?.organization)],
+        ['Inspected By', buildOwnerLabel(owner)],
+        ['Employee ID', safeText(owner?.profile?.employee_id)]
+      ]
+    },
+    {
+      title: 'REPORT DETAILS',
+      rows: [
+        ['Status', prettifyEnum(structure.status)],
+        ['Created Date', formatDate(creation.created_date)],
+        ['Last Updated', formatDate(creation.last_updated_date)],
+        ['Report Generated', formatDate(new Date())],
+        ['Applied Filters', safeText(filtersApplied), { span: true }]
+      ]
+    }
   ];
 };
 
@@ -1296,7 +1357,7 @@ const prepareStructureReport = async (structureExport, filtersApplied) => {
   return {
     ...structureExport,
     filtersApplied: safeText(filtersApplied),
-    metaItems: buildStructureMetaItems(structureExport, filtersApplied),
+    detailSections: buildStructureDetailSections(structureExport, filtersApplied),
     observations,
     observationGroups: groupObservationsByLocation(observations),
     quantifications,
@@ -1365,15 +1426,56 @@ const buildFilterSummary = (query = {}) => {
 
 const QUANT_COLUMN_COUNT = 8;
 
-const renderMetaTable = (metaItems) => `
-  <table class="meta-table">
-    <tbody>
-      ${metaItems
-        .map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${value ? escapeHtml(value) : '&nbsp;'}</td></tr>`)
-        .join('')}
-    </tbody>
-  </table>
-`;
+/**
+ * Renders a detail section as a 4-column table (Label | Value | Label | Value),
+ * so ~20 fields stay compact and aligned instead of running down the page.
+ */
+const renderDetailSectionHtml = (section) => {
+  const cell = (label, value) =>
+    `<td class="detail-label">${escapeHtml(label)}</td><td class="detail-value">${
+      safeText(value) ? escapeHtml(value) : '&nbsp;'
+    }</td>`;
+
+  const rows = [];
+  let pending = null;
+
+  section.rows.forEach(([label, value, options]) => {
+    if (options?.span) {
+      if (pending) {
+        rows.push(`<tr>${cell(pending[0], pending[1])}<td>&nbsp;</td><td>&nbsp;</td></tr>`);
+        pending = null;
+      }
+      rows.push(
+        `<tr><td class="detail-label">${escapeHtml(label)}</td><td class="detail-value" colspan="3">${
+          safeText(value) ? escapeHtml(value) : '&nbsp;'
+        }</td></tr>`
+      );
+      return;
+    }
+
+    if (pending) {
+      rows.push(`<tr>${cell(pending[0], pending[1])}${cell(label, value)}</tr>`);
+      pending = null;
+    } else {
+      pending = [label, value];
+    }
+  });
+
+  if (pending) {
+    rows.push(`<tr>${cell(pending[0], pending[1])}<td>&nbsp;</td><td>&nbsp;</td></tr>`);
+  }
+
+  return `
+    <table class="detail-table">
+      <thead>
+        <tr><th colspan="4" class="detail-heading">${escapeHtml(section.title)}</th></tr>
+      </thead>
+      <tbody>${rows.join('')}</tbody>
+    </table>
+  `;
+};
+
+const renderDetailSectionsHtml = (sections) => sections.map(renderDetailSectionHtml).join('');
 
 /**
  * OBSERVATIONS, in the client's format:
@@ -1638,7 +1740,7 @@ const renderStructureHtml = (prepared, imageRef) => `
   <section class="report-block">
     <div class="brand">SAMS</div>
     <div><span class="highlight-label">OUTPUT / REPORT FORMAT:</span></div>
-    ${renderMetaTable(prepared.metaItems)}
+    ${renderDetailSectionsHtml(prepared.detailSections)}
     ${renderSection(
       'OBSERVATIONS',
       renderObservationsHtml(prepared.observationGroups),
@@ -1714,7 +1816,16 @@ const REPORT_STYLES = `
   th { font-weight: bold; background: #ffffff; }
   .center { text-align: center; }
   .sno-col { width: 50px; text-align: center; }
-  .meta-table td:first-child { font-weight: bold; width: 170px; }
+  .detail-table { margin-bottom: 8pt; }
+  .detail-heading {
+    background: #d9e2f3;
+    font-weight: bold;
+    text-align: center;
+    font-size: 11pt;
+    letter-spacing: 0.5px;
+  }
+  .detail-label { font-weight: bold; width: 21%; background: #f7f7f7; }
+  .detail-value { width: 29%; }
   .obs-location-row td {
     color: #0070c0;
     font-weight: bold;
@@ -2053,8 +2164,39 @@ const renderStructurePdf = (doc, prepared, index) => {
   doc.y = labelY + 22;
   pdfResetX(doc);
 
-  prepared.metaItems.forEach(([label, value]) => pdfKeyValue(doc, label, value));
-  doc.moveDown(0.5);
+  // Structure / location / administrative details as 4-column tables.
+  const detailWidths = [110, 152, 110, 151];
+  const detailSpanWidths = [110, PDF_CONTENT_WIDTH - 110];
+
+  prepared.detailSections.forEach((section) => {
+    pdfBandRow(doc, section.title, '#D9E2F3');
+
+    let pending = null;
+    const flush = () => {
+      if (!pending) return;
+      pdfTableRow(doc, [pending[0], pending[1], '', ''], detailWidths);
+      pending = null;
+    };
+
+    section.rows.forEach(([label, value, options]) => {
+      if (options?.span) {
+        flush();
+        pdfTableRow(doc, [label, safeText(value)], detailSpanWidths);
+        return;
+      }
+      if (pending) {
+        pdfTableRow(doc, [pending[0], pending[1], label, safeText(value)], detailWidths);
+        pending = null;
+      } else {
+        pending = [label, safeText(value)];
+      }
+    });
+
+    flush();
+    doc.moveDown(0.3);
+  });
+
+  doc.moveDown(0.2);
 
   // OBSERVATIONS
   pdfSectionTitle(doc, 'OBSERVATIONS');
@@ -2331,17 +2473,19 @@ const writeRow = (worksheet, rowNumber, values, options = {}) => {
   return rowNumber + 1;
 };
 
+// Column 1 doubles as the "S. No" column and the detail-table label column, hence the
+// wider-than-usual first column.
 const ensureColumns = (worksheet) => {
   worksheet.columns = [
-    { width: 8 },
-    { width: 40 },
+    { width: 14 },
+    { width: 34 },
     { width: 10 },
     { width: 10 },
-    { width: 10 },
-    { width: 10 },
+    { width: 14 },
+    { width: 12 },
     { width: 18 },
-    { width: 32 },
-    { width: 24 }
+    { width: 30 },
+    { width: 14 }
   ];
 };
 
@@ -2628,18 +2772,63 @@ const addStructureHeader = (worksheet, prepared) => {
   addMergedSectionRow(worksheet, 2, 'OUTPUT / REPORT FORMAT', COLORS.HIGHLIGHT, 9);
 
   let row = 4;
-  prepared.metaItems.forEach(([label, value]) => {
-    worksheet.getCell(row, 1).value = label;
-    worksheet.getCell(row, 2).value = value;
-    worksheet.mergeCells(row, 2, row, 9);
-    styleRowCells(worksheet, row, 1, 9, {
-      fill: row % 2 === 0 ? solidFill('FFF7F7F7') : undefined
-    });
+
+  // Label | Value | Label | Value across the 9 columns, matching the Word/PDF layout.
+  const writeDetailPair = (left, right) => {
+    worksheet.getCell(row, 1).value = left[0];
+    worksheet.getCell(row, 2).value = left[1];
+    worksheet.mergeCells(row, 2, row, 4);
+    if (right) {
+      worksheet.getCell(row, 5).value = right[0];
+      worksheet.getCell(row, 6).value = right[1];
+      worksheet.mergeCells(row, 6, row, 9);
+    } else {
+      worksheet.mergeCells(row, 5, row, 9);
+    }
+    styleRowCells(worksheet, row, 1, 9);
     worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
+    worksheet.getCell(row, 1).fill = solidFill('FFF7F7F7');
+    if (right) {
+      worksheet.getCell(row, 5).font = { ...FONTS.BODY, bold: true };
+      worksheet.getCell(row, 5).fill = solidFill('FFF7F7F7');
+    }
+    row += 1;
+  };
+
+  prepared.detailSections.forEach((section) => {
+    addMergedSectionRow(worksheet, row, section.title, COLORS.SECTION, 9, { horizontal: 'center' });
+    row += 1;
+
+    let pending = null;
+    section.rows.forEach(([label, value, options]) => {
+      if (options?.span) {
+        if (pending) {
+          writeDetailPair(pending, null);
+          pending = null;
+        }
+        worksheet.getCell(row, 1).value = label;
+        worksheet.getCell(row, 2).value = safeText(value);
+        worksheet.mergeCells(row, 2, row, 9);
+        styleRowCells(worksheet, row, 1, 9);
+        worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
+        worksheet.getCell(row, 1).fill = solidFill('FFF7F7F7');
+        row += 1;
+        return;
+      }
+
+      if (pending) {
+        writeDetailPair(pending, [label, safeText(value)]);
+        pending = null;
+      } else {
+        pending = [label, safeText(value)];
+      }
+    });
+
+    if (pending) writeDetailPair(pending, null);
     row += 1;
   });
 
-  return row + 1;
+  return row;
 };
 
 const writeStructureWorksheet = (workbook, worksheet, prepared) => {
