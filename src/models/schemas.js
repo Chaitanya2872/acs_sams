@@ -50,6 +50,7 @@ const normalizeDistressDimensionsValue = (value) => {
   };
 
   const length = toNumber(value.length);
+  const number = toNumber(value.number);
   const breadth = toNumber(value.breadth);
   const height = toNumber(value.height);
   const rawUnit = (value.unit || '').toString().trim().toUpperCase();
@@ -59,7 +60,7 @@ const normalizeDistressDimensionsValue = (value) => {
       : "NO'S";
 
   if (unit === "NO'S") {
-    return { length: 0, breadth: 0, height: 0, unit };
+    return { number, length: 0, breadth: 0, height: 0, unit };
   }
 
   if (unit === 'RM') {
@@ -101,6 +102,11 @@ const normalizeNestedDistressDimensions = (node, visited = new WeakSet()) => {
 
 // =================== DISTRESS DIMENSIONS SCHEMA ===================
 const distressDimensionsSchema = {
+  number: {
+    type: Number,
+    min: [0, 'No. cannot be negative'],
+    max: [10000, 'No. cannot exceed 10000'],
+  },
   length: {
     type: Number,
     min: [0, 'Length cannot be negative'],

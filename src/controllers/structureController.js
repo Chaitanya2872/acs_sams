@@ -152,6 +152,7 @@ const normalizeDistressDimensions = (dimensionsInput) => {
   if (!dimensionsInput || typeof dimensionsInput !== 'object') return undefined;
 
   const length = toNumber(dimensionsInput.length);
+  const number = toNumber(dimensionsInput.number);
   const breadth = toNumber(dimensionsInput.breadth);
   const height = toNumber(dimensionsInput.height);
   const rawUnit = (dimensionsInput.unit || '').toString().trim().toUpperCase();
@@ -162,6 +163,7 @@ const normalizeDistressDimensions = (dimensionsInput) => {
 
   if (unit === "NO'S") {
     return {
+      number,
       length: 0,
       breadth: 0,
       height: 0,
