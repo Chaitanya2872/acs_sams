@@ -3,6 +3,8 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
 const puppeteer = require('puppeteer-core');
 const mongoose = require('mongoose');
 const { User } = require('../models/schemas');
@@ -16,9 +18,11 @@ const COLORS = {
   SECONDARY: 'FF4F81BD',
   SECTION: 'FFD9E2F3',
   SUBSECTION: 'FFE2F0D9',
+  LOCATION: 'FFDDEBF7',
   BORDER: 'FFBFBFBF',
   TEXT: 'FF1F1F1F',
   WHITE: 'FFFFFFFF',
+  HIGHLIGHT: 'FFFFF200',
   NOTE: 'FFFCE4D6'
 };
 
@@ -28,6 +32,9 @@ const FONTS = {
   BODY: { name: 'Calibri', size: 10 },
   SMALL: { name: 'Calibri', size: 9 }
 };
+
+const STRUCTURAL_SECTION = 'STRUCTURAL DISTRESS';
+const NON_STRUCTURAL_SECTION = 'NON-STRUCTURAL DISTRESS';
 
 const STRUCTURAL_COMPONENTS = [
   ['beams', 'Beams'],
@@ -88,17 +95,58 @@ const TEST_NAME_LABELS = {
   custom: 'CUSTOM TEST'
 };
 
+// Report notes reproduced from the agreed SAMS OUTPUT format.
+const QUANTIFICATION_NOTES = [
+  'The distress, L, B, H, Repair methodology entered in the structural rating screen should reflect in this table format.',
+  'Need editing option in this table format.',
+  'Structural and non-structural distress should reflect in this table separately.'
+];
+
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PDF_MIME = 'application/pdf';
 const WORD_MIME = 'application/msword';
 
 const BROWSER_CANDIDATES = [
   process.env.PUPPETEER_EXECUTABLE_PATH,
+  process.env.CHROME_PATH,
+  // Windows
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  // Linux / containers
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/microsoft-edge',
+  '/snap/bin/chromium',
+  // macOS
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
 ].filter(Boolean);
+
+// Guard rails so a structure with hundreds of site photos cannot exhaust memory.
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 60 * 1024 * 1024;
+const MAX_EMBEDDED_IMAGES = 300;
+const IMAGE_FETCH_TIMEOUT_MS = 15000;
+
+const IMAGE_MIME_BY_EXT = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml'
+};
+
+const EXCEL_IMAGE_EXTENSIONS = {
+  'image/jpeg': 'jpeg',
+  'image/png': 'png',
+  'image/gif': 'gif'
+};
 
 const isPdfFormat = (format) => format === 'pdf';
 const isWordFormat = (format) => ['word', 'doc', 'docx'].includes(format);
@@ -133,6 +181,9 @@ const flattenMixedObject = (value) => {
   if (Array.isArray(value)) {
     return value.map((item) => flattenMixedObject(item)).filter(Boolean).join(', ');
   }
+  if (value instanceof Map) {
+    return flattenMixedObject(Object.fromEntries(value.entries()));
+  }
   if (typeof value === 'object') {
     return Object.entries(value)
       .filter(([, current]) => current !== null && current !== undefined && current !== '')
@@ -148,39 +199,34 @@ const toNumber = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
-const inferQuantityValue = (entry) => {
-  const explicit = toNumber(entry.quantity);
-  if (explicit !== null) return explicit;
-
-  const length = toNumber(entry.length);
-  const breadth = toNumber(entry.breadth);
-  const height = toNumber(entry.height);
-  const nos = toNumber(entry.nos) || 1;
-
-  if (length !== null && breadth !== null && height !== null) {
-    return nos * length * breadth * height;
-  }
-
-  if (length !== null && breadth !== null) {
-    return nos * length * breadth;
-  }
-
-  if (length !== null) {
-    return nos * length;
-  }
-
-  return nos;
+// Mongoose defaults L/B/H and quantity to 0, so 0 means "not captured" here, not "zero metres".
+const toDimension = (value) => {
+  const num = toNumber(value);
+  return num !== null && num > 0 ? num : null;
 };
 
-const inferUnit = (entry) => {
-  const provided = safeText(entry.unit).toUpperCase();
-  if (provided) return provided;
+const toCount = (value) => {
+  const num = toNumber(value);
+  return num !== null && num > 0 ? num : 1;
+};
 
-  const breadth = toNumber(entry.breadth);
-  const height = toNumber(entry.height);
-  if (height !== null) return 'CUM';
-  if (breadth !== null) return 'SQM';
-  if (toNumber(entry.length) !== null) return 'RM';
+/**
+ * Canonical quantity rule taken from the SAMS OUTPUT format:
+ * quantity = Nos x product of every dimension that was actually captured.
+ * (1 x 1 x 1.5 x 0.3 = 0.45, 5 x 10 = 50, no dimensions at all = Nos.)
+ */
+const computeQuantity = ({ nos, length, breadth, height }) => {
+  const count = toCount(nos);
+  return [length, breadth, height]
+    .filter((dimension) => dimension !== null && dimension !== undefined)
+    .reduce((total, dimension) => total * dimension, count);
+};
+
+const inferUnitFromDimensions = ({ length, breadth, height }) => {
+  const dimensions = [length, breadth, height].filter((value) => value !== null && value !== undefined);
+  if (dimensions.length >= 3) return 'CUM';
+  if (dimensions.length === 2) return 'SQM';
+  if (dimensions.length === 1) return 'RM';
   return "NO'S";
 };
 
@@ -190,97 +236,70 @@ const formatApproxQuantity = (value) => {
   return String(Number(numeric.toFixed(2)));
 };
 
-const calculateMethodologySummaryValue = (row, methodKey) => {
-  const nos = toNumber(row.nos) || 1;
-  const length = toNumber(row.length);
-  const breadth = toNumber(row.breadth);
-  const height = toNumber(row.height);
-  const safeLength = length ?? 0;
-  const safeBreadth = breadth ?? 0;
-  const safeHeight = height ?? 0;
-
-  if (methodKey.includes('epoxy grouting') || methodKey.includes('cement grouting')) {
-    return {
-      quantity: safeLength * 8 || nos * 8,
-      units: 'KGS'
-    };
+/**
+ * Unit / multiplier rules per repair methodology, per the client's Bill of Quantity summary.
+ * Grouting is billed by weight: actual running-metre quantity x 8 = KGS.
+ */
+const REPAIR_METHOD_RULES = [
+  { keywords: ['epoxy grouting', 'cement grouting', 'grouting'], units: 'KGS', multiplier: 8 },
+  { keywords: ['micro concrete', 'microconcrete', 'concrete jacketing', 'jacketing', 'encasement'], units: 'CUM' },
+  {
+    keywords: [
+      'polymer modified mortar',
+      'replastering',
+      'replaster',
+      'plastering',
+      'plaster',
+      'repainting',
+      'painting',
+      'paint'
+    ],
+    units: 'SQM'
   }
+];
 
-  if (
-    methodKey.includes('micro concrete') ||
-    methodKey.includes('concrete jacketing') ||
-    methodKey.includes('encasement')
-  ) {
-    return {
-      quantity: nos * (safeLength || 1) * (safeBreadth || 1) * (safeHeight || 1),
-      units: 'CUM'
-    };
-  }
+const resolveRepairRule = (methodKey) =>
+  REPAIR_METHOD_RULES.find((rule) => rule.keywords.some((keyword) => methodKey.includes(keyword))) || null;
 
-  if (
-    methodKey.includes('polymer modified mortar') ||
-    methodKey.includes('replaster') ||
-    methodKey.includes('replastering') ||
-    methodKey.includes('repainting') ||
-    methodKey.includes('painting') ||
-    methodKey.includes('plaster')
-  ) {
-    return {
-      quantity: nos * (safeLength || 1) * (safeBreadth || 1),
-      units: 'SQM'
-    };
-  }
-
-  if (
-    methodKey.includes('replacement of') ||
-    methodKey.includes('replacement ') ||
-    methodKey.includes('pipe') ||
-    methodKey.includes('piping')
-  ) {
-    if (length !== null) {
-      return {
-        quantity: nos * safeLength,
-        units: 'RM'
-      };
-    }
-
-    return {
-      quantity: nos,
-      units: "NO'S"
-    };
-  }
-
-  return {
-    quantity: inferQuantityValue(row),
-    units: inferUnit(row)
-  };
-};
-
+/**
+ * Sums the quantification rows per repair methodology so the Bill of Quantity summary
+ * always reflects exactly what is printed in the quantification table above it.
+ */
 const summarizeMethodology = (rows) => {
   const summaryMap = new Map();
 
   rows.forEach((row) => {
     const method = safeText(row.repair_methodology, 'Not Specified');
     const key = method.toLowerCase();
-    const { quantity, units } = calculateMethodologySummaryValue(row, key);
+    const rule = resolveRepairRule(key);
+    const quantity = toNumber(row.quantity) ?? 0;
 
     if (!summaryMap.has(key)) {
       summaryMap.set(key, {
         description: method,
-        quantity: 0,
-        units
+        actual: 0,
+        multiplier: rule?.multiplier || 1,
+        units: rule?.units || row.unit || inferUnitFromDimensions(row)
       });
     }
 
     const current = summaryMap.get(key);
-    current.quantity += quantity;
-    if (!current.units) current.units = units;
+    current.actual += quantity;
+    if (!current.units) current.units = row.unit || inferUnitFromDimensions(row);
   });
 
-  return Array.from(summaryMap.values()).map((item) => ({
-    ...item,
-    quantity: Number(item.quantity.toFixed(2))
-  }));
+  return Array.from(summaryMap.values()).map((item) => {
+    const actual = Number(item.actual.toFixed(2));
+    const quantity = Number((item.actual * item.multiplier).toFixed(2));
+    return {
+      description:
+        item.multiplier > 1
+          ? `${item.description} (actual quantity ${actual} multiplied by ${item.multiplier})`
+          : item.description,
+      quantity,
+      units: item.units
+    };
+  });
 };
 
 const isAdminUser = (user) => {
@@ -354,24 +373,206 @@ const getFileExtension = (value) => {
 };
 
 const isImageSource = (value) => {
-  const ext = getFileExtension(value);
-  if (ext) {
-    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'].includes(ext);
-  }
-
   const source = safeText(value);
-  return /^data:image\//i.test(source);
+  if (!source) return false;
+  if (/^data:image\//i.test(source)) return true;
+
+  const ext = getFileExtension(source);
+  if (ext) return Boolean(IMAGE_MIME_BY_EXT[ext]);
+
+  // Cloudinary delivery URLs frequently have no extension; treat the image folder as a hint.
+  return /\/image\/upload\//i.test(source);
 };
 
 const getAttachmentLabel = (value) => {
   const source = safeText(value);
   if (!source) return '';
-  if (isImageSource(source)) return 'Embedded image';
+  if (/^data:/i.test(source)) return 'Embedded file';
 
-  const normalized = source.replace(/\\/g, '/');
+  const normalized = source.replace(/\\/g, '/').split('?')[0];
   const name = normalized.split('/').pop();
   return safeText(name, source);
 };
+
+// =================== IMAGE LOADING ===================
+
+const imageAssetCache = new Map();
+let embeddedImageBytes = 0;
+let embeddedImageCount = 0;
+let embeddedImageSequence = 0;
+
+const resetImageBudget = () => {
+  embeddedImageBytes = 0;
+  embeddedImageCount = 0;
+  embeddedImageSequence = 0;
+  imageAssetCache.clear();
+};
+
+const resolveLocalImagePath = (source) => {
+  const value = safeText(source);
+  if (!value) return null;
+
+  const normalized = value.replace(/\\/g, '/').split('?')[0];
+  const relative = normalized.replace(/^\/+/, '');
+  const projectRoot = path.resolve(__dirname, '..', '..');
+
+  const candidates = [
+    normalized,
+    path.resolve(process.cwd(), relative),
+    path.resolve(projectRoot, relative),
+    path.resolve(projectRoot, 'uploads', path.basename(relative)),
+    path.resolve(projectRoot, 'public', relative)
+  ];
+
+  return (
+    candidates.find((candidate) => {
+      try {
+        return Boolean(candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile();
+      } catch (error) {
+        return false;
+      }
+    }) || null
+  );
+};
+
+const fetchRemoteBinary = (url, redirectsLeft = 4) =>
+  new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+
+    let request;
+    try {
+      const client = url.startsWith('https:') ? https : http;
+      request = client.get(url, { timeout: IMAGE_FETCH_TIMEOUT_MS }, (response) => {
+        const status = response.statusCode || 0;
+
+        if (status >= 300 && status < 400 && response.headers.location && redirectsLeft > 0) {
+          response.resume();
+          const next = new URL(response.headers.location, url).toString();
+          fetchRemoteBinary(next, redirectsLeft - 1).then(finish);
+          return;
+        }
+
+        if (status !== 200) {
+          response.resume();
+          finish(null);
+          return;
+        }
+
+        const chunks = [];
+        let size = 0;
+        response.on('data', (chunk) => {
+          size += chunk.length;
+          if (size > MAX_IMAGE_BYTES) {
+            response.destroy();
+            finish(null);
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on('end', () =>
+          finish({ buffer: Buffer.concat(chunks), contentType: safeText(response.headers['content-type']) })
+        );
+        response.on('error', () => finish(null));
+      });
+    } catch (error) {
+      finish(null);
+      return;
+    }
+
+    request.on('timeout', () => {
+      request.destroy();
+      finish(null);
+    });
+    request.on('error', () => finish(null));
+  });
+
+const normalizeImageMimeType = (contentType, source) => {
+  const declared = safeText(contentType).split(';')[0].toLowerCase();
+  if (declared.startsWith('image/')) return declared;
+  return IMAGE_MIME_BY_EXT[getFileExtension(source)] || 'image/jpeg';
+};
+
+/**
+ * Resolves a photo reference (Cloudinary URL, /uploads path, data URI) to a real
+ * buffer so it can be embedded into Word (MHTML), PDF and Excel exports.
+ */
+const loadImageAsset = async (source) => {
+  const value = safeText(source);
+  if (!value) return null;
+  if (imageAssetCache.has(value)) return imageAssetCache.get(value);
+
+  const register = (asset) => {
+    imageAssetCache.set(value, asset);
+    return asset;
+  };
+
+  if (embeddedImageCount >= MAX_EMBEDDED_IMAGES || embeddedImageBytes >= MAX_TOTAL_IMAGE_BYTES) {
+    return register(null);
+  }
+
+  let buffer = null;
+  let mimeType = '';
+
+  try {
+    const dataUriMatch = value.match(/^data:([^;,]+);base64,(.*)$/i);
+    if (dataUriMatch) {
+      buffer = Buffer.from(dataUriMatch[2], 'base64');
+      mimeType = dataUriMatch[1].toLowerCase();
+    } else if (/^https?:\/\//i.test(value)) {
+      const fetched = await fetchRemoteBinary(value);
+      if (fetched) {
+        buffer = fetched.buffer;
+        mimeType = normalizeImageMimeType(fetched.contentType, value);
+      }
+    } else {
+      const localPath = resolveLocalImagePath(value);
+      if (localPath) {
+        const stats = fs.statSync(localPath);
+        if (stats.size <= MAX_IMAGE_BYTES) {
+          buffer = fs.readFileSync(localPath);
+          mimeType = IMAGE_MIME_BY_EXT[getFileExtension(localPath)] || 'image/jpeg';
+        }
+      }
+    }
+  } catch (error) {
+    buffer = null;
+  }
+
+  if (!buffer || !buffer.length || buffer.length > MAX_IMAGE_BYTES) {
+    return register(null);
+  }
+
+  embeddedImageBytes += buffer.length;
+  embeddedImageCount += 1;
+  embeddedImageSequence += 1;
+
+  const extension = Object.keys(IMAGE_MIME_BY_EXT).find((ext) => IMAGE_MIME_BY_EXT[ext] === mimeType) || '.jpg';
+  const asset = {
+    buffer,
+    mimeType: mimeType || 'image/jpeg',
+    fileName: `sams_image_${String(embeddedImageSequence).padStart(3, '0')}${extension}`,
+    dataUri: `data:${mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`
+  };
+
+  return register(asset);
+};
+
+const attachImageAssets = async (rows) => {
+  for (const row of rows) {
+    // Sequential on purpose: keeps the memory/byte budget deterministic.
+    // eslint-disable-next-line no-await-in-loop
+    row.asset = await loadImageAsset(row.source);
+  }
+  return rows;
+};
+
+// =================== QUERY HELPERS ===================
 
 const getUserMatch = (reqUser, query) => {
   const match = { is_active: true };
@@ -492,6 +693,8 @@ const fetchStructuresForExport = async (reqUser, query = {}, singleStructureMatc
   return User.aggregate(buildAggregationPipeline(reqUser, query, singleStructureMatch));
 };
 
+// =================== DATA COLLECTION ===================
+
 const getCustomComponentEntries = (value) => {
   if (!value) return [];
 
@@ -551,6 +754,25 @@ const getObservationText = (entry) => {
   return distressTypes || '';
 };
 
+// The component instance schema exposes both `photo` (legacy single) and `photos` (array).
+const getEntryPhotos = (entry) => {
+  const single = safeText(entry?.photo);
+  const many = Array.isArray(entry?.photos) ? entry.photos : [];
+  const pdfImages = (Array.isArray(entry?.pdf_files) ? entry.pdf_files : [])
+    .map((file) => safeText(file?.file_path || file?.filename))
+    .filter((file) => file && isImageSource(file));
+
+  return Array.from(new Set([single, ...many.map((item) => safeText(item)), ...pdfImages].filter(Boolean)));
+};
+
+const getEntryDocuments = (entry) =>
+  (Array.isArray(entry?.pdf_files) ? entry.pdf_files : [])
+    .map((file) => ({
+      name: safeText(file?.filename, getAttachmentLabel(file?.file_path)),
+      source: safeText(file?.file_path || file?.filename)
+    }))
+    .filter((file) => file.source && !isImageSource(file.source));
+
 const buildObservationLookup = (structuralContainer, nonStructuralContainer) => {
   const lookup = new Map();
 
@@ -575,21 +797,24 @@ const buildObservationLookup = (structuralContainer, nonStructuralContainer) => 
 };
 
 const resolveQuantificationLocation = (entry, observationLookup, scopeLabel) => {
+  const explicit = safeText(entry?.location_of_distress);
+  if (explicit) return explicit;
+
   const categoryKey = normalizeComponentLookupKey(entry?.category);
   const observationText = categoryKey ? observationLookup.get(categoryKey) : '';
-  return safeText(observationText, safeText(entry?.location_of_distress, scopeLabel));
+  return safeText(observationText, scopeLabel);
 };
 
-const buildDerivedQuantificationRows = (entries, scopeLabel) => {
+const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
   const rows = [];
 
   entries.forEach(({ componentLabel, entry }) => {
     const observationText = getObservationText(entry);
     const dimensions = entry?.distress_dimensions || {};
     const number = toNumber(dimensions.number);
-    const length = toNumber(dimensions.length);
-    const breadth = toNumber(dimensions.breadth);
-    const height = toNumber(dimensions.height);
+    const length = toDimension(dimensions.length);
+    const breadth = toDimension(dimensions.breadth);
+    const height = toDimension(dimensions.height);
     const repairMethodology = safeText(entry?.repair_methodology, 'Not Specified');
     const hasDimensions = length !== null || breadth !== null || height !== null;
     const hasContent = Boolean(observationText || hasDimensions || safeText(entry?.repair_methodology));
@@ -609,15 +834,16 @@ const buildDerivedQuantificationRows = (entries, scopeLabel) => {
 
     rows.push({
       scopeLabel,
+      section,
       category: componentLabel,
-      location_of_distress: safeText(observationText, componentLabel),
+      location_of_distress: safeText(observationText, `${componentLabel} - ${scopeLabel}`),
       distress: componentLabel,
       nos: quantBase.nos,
-      length: quantBase.length,
-      breadth: quantBase.breadth,
-      height: quantBase.height,
-      quantity: inferQuantityValue(quantBase),
-      unit: inferUnit(quantBase),
+      length,
+      breadth,
+      height,
+      quantity: computeQuantity(quantBase),
+      unit: safeText(dimensions.unit) || inferUnitFromDimensions(quantBase),
       repair_methodology: repairMethodology
     });
   });
@@ -625,43 +851,40 @@ const buildDerivedQuantificationRows = (entries, scopeLabel) => {
   return rows;
 };
 
-const collectScopeDerivedQuantifications = (scopeLabel, structuralContainer, nonStructuralContainer) =>
-  buildDerivedQuantificationRows(getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS), scopeLabel)
-    .concat(buildDerivedQuantificationRows(getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS), scopeLabel));
-
-const collectDerivedQuantificationsForContainer = (scopeLabel, container, componentMap) =>
-  buildDerivedQuantificationRows(getComponentEntries(container, componentMap), scopeLabel);
-
 const collectObservationsFromScope = (scopeType, scope, structuralContainer, nonStructuralContainer) => {
   const observations = [];
   const locationLabel = buildLocationLabel(scopeType, scope);
 
-  const appendEntries = (entries, category) => {
+  const appendEntries = (entries, section) => {
     entries.forEach(({ componentLabel, entry }) => {
       const note = getObservationText(entry);
       const distressTypes = Array.isArray(entry?.distress_types)
         ? entry.distress_types.map((item) => safeText(item)).filter(Boolean).join(', ')
         : '';
-      const photos = Array.isArray(entry?.photos) ? entry.photos.filter(Boolean) : [];
+      const photos = getEntryPhotos(entry);
+      const documents = getEntryDocuments(entry);
+      const rating = toNumber(entry?.rating);
 
-      if (!note && photos.length === 0) {
+      if (!note && photos.length === 0 && documents.length === 0 && rating === null) {
         return;
       }
 
       observations.push({
         location: locationLabel,
-        category,
-        component: componentLabel,
+        category: section,
+        component: safeText(entry?.name) ? `${componentLabel} (${safeText(entry.name)})` : componentLabel,
         remarks: note || '',
+        rating,
         photos,
+        documents,
         repair_methodology: safeText(entry?.repair_methodology),
         distress: distressTypes || componentLabel
       });
     });
   };
 
-  appendEntries(getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS), 'STRUCTURAL DISTRESS');
-  appendEntries(getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS), 'NON-STRUCTURAL DISTRESS');
+  appendEntries(getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS), STRUCTURAL_SECTION);
+  appendEntries(getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS), NON_STRUCTURAL_SECTION);
 
   return observations;
 };
@@ -707,19 +930,28 @@ const collectQuantifications = (structure) => {
   const rows = [];
   const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
 
-  const addRows = (entries, scopeLabel, category, observationLookup) => {
+  const addRows = (entries, scopeLabel, section, observationLookup) => {
     (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      const length = toDimension(entry.length);
+      const breadth = toDimension(entry.breadth);
+      const height = toDimension(entry.height);
+      const nos = toCount(entry.nos);
+      const explicitQuantity = toNumber(entry.quantity);
+      const computed = computeQuantity({ nos, length, breadth, height });
+
       rows.push({
         scopeLabel,
-        category,
+        section,
+        category: safeText(entry.category, section),
         location_of_distress: resolveQuantificationLocation(entry, observationLookup, scopeLabel),
-        distress: safeText(entry.category, category),
-        nos: toNumber(entry.nos) ?? 1,
-        length: toNumber(entry.length),
-        breadth: toNumber(entry.breadth),
-        height: toNumber(entry.height),
-        quantity: inferQuantityValue(entry),
-        unit: inferUnit(entry),
+        distress: safeText(entry.category, section),
+        nos,
+        length,
+        breadth,
+        height,
+        // A saved quantity of 0 is the schema default, not a real measurement.
+        quantity: explicitQuantity && explicitQuantity > 0 ? explicitQuantity : computed,
+        unit: safeText(entry.unit).toUpperCase() || inferUnitFromDimensions({ length, breadth, height }),
         repair_methodology: safeText(entry.repair_methodology, 'Not Specified')
       });
     });
@@ -737,15 +969,27 @@ const collectQuantifications = (structure) => {
     const hasSavedNonStructural = Array.isArray(nonStructuralEntries) && nonStructuralEntries.length > 0;
 
     if (hasSavedStructural) {
-      addRows(structuralEntries, scopeLabel, 'STRUCTURAL DISTRESS', observationLookup);
+      addRows(structuralEntries, scopeLabel, STRUCTURAL_SECTION, observationLookup);
     } else {
-      rows.push(...collectDerivedQuantificationsForContainer(scopeLabel, structuralContainer, STRUCTURAL_COMPONENTS));
+      rows.push(
+        ...buildDerivedQuantificationRows(
+          getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS),
+          scopeLabel,
+          STRUCTURAL_SECTION
+        )
+      );
     }
 
     if (hasSavedNonStructural) {
-      addRows(nonStructuralEntries, scopeLabel, 'NON-STRUCTURAL DISTRESS', observationLookup);
+      addRows(nonStructuralEntries, scopeLabel, NON_STRUCTURAL_SECTION, observationLookup);
     } else {
-      rows.push(...collectDerivedQuantificationsForContainer(scopeLabel, nonStructuralContainer, NON_STRUCTURAL_COMPONENTS));
+      rows.push(
+        ...buildDerivedQuantificationRows(
+          getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS),
+          scopeLabel,
+          NON_STRUCTURAL_SECTION
+        )
+      );
     }
   };
 
@@ -772,11 +1016,73 @@ const collectQuantifications = (structure) => {
 
     (Array.isArray(floor.blocks) ? floor.blocks : []).forEach((block) => {
       const blockLabel = `${floorLabel} / Block ${safeText(block.block_name || block.block_number, block.block_id || 'N/A')}`;
-      rows.push(...collectScopeDerivedQuantifications(blockLabel, block.structural_rating, block.non_structural_rating));
+      addSavedOrDerivedRows({
+        structuralEntries: block.quantifications?.structural,
+        nonStructuralEntries: block.quantifications?.non_structural,
+        scopeLabel: blockLabel,
+        structuralContainer: block.structural_rating,
+        nonStructuralContainer: block.non_structural_rating
+      });
     });
   });
 
   return rows;
+};
+
+// Every field the mobile/web clients have used for "upload multiple files per test format".
+const TEST_ATTACHMENT_ARRAY_KEYS = [
+  'test_report_pdfs',
+  'test_reports',
+  'test_files',
+  'test_images',
+  'attachments',
+  'files',
+  'documents',
+  'images',
+  'photos',
+  'pdf_files',
+  'excel_files'
+];
+
+const normalizeAttachment = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const source = safeText(value);
+    return source ? { name: getAttachmentLabel(source), source } : null;
+  }
+  if (typeof value === 'object') {
+    const source = safeText(value.file_path || value.url || value.path || value.secure_url || value.filename);
+    if (!source) return null;
+    return { name: safeText(value.filename || value.name, getAttachmentLabel(source)), source };
+  }
+  return null;
+};
+
+const collectTestAttachments = (entry) => {
+  const attachments = [];
+
+  const push = (value) => {
+    const attachment = normalizeAttachment(value);
+    if (attachment) attachments.push(attachment);
+  };
+
+  push(entry?.test_report_pdf);
+
+  TEST_ATTACHMENT_ARRAY_KEYS.forEach((key) => {
+    const value = entry?.[key];
+    if (Array.isArray(value)) {
+      value.forEach(push);
+    } else if (value) {
+      push(value);
+    }
+  });
+
+  const seen = new Set();
+  return attachments.filter((attachment) => {
+    if (seen.has(attachment.source)) return false;
+    seen.add(attachment.source);
+    return true;
+  });
 };
 
 const collectTests = (structure) => {
@@ -784,6 +1090,7 @@ const collectTests = (structure) => {
 
   const addTests = (entries, scopeLabel) => {
     (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      const attachments = collectTestAttachments(entry);
       tests.push({
         scopeLabel,
         test_name: safeText(TEST_NAME_LABELS[entry.test_name], safeText(entry.test_name, 'TEST')),
@@ -793,7 +1100,7 @@ const collectTests = (structure) => {
         component_type: safeText(entry.component_type),
         component_id: safeText(entry.component_id),
         result_summary: flattenMixedObject(entry.test_results),
-        attachment: safeText(entry.test_report_pdf?.file_path || entry.test_report_pdf?.filename)
+        attachments
       });
     });
   };
@@ -821,308 +1128,281 @@ const collectTests = (structure) => {
 };
 
 const collectPhotoRows = (observations, tests) => {
-  const inspectionImages = observations.flatMap((observation) =>
-    observation.photos.map((photo, index) => ({
-      location: observation.location,
-      caption: observation.remarks || observation.component,
-      source: photo,
-      serial: index + 1
-    }))
-  );
+  const inspectionImages = [];
+  observations.forEach((observation) => {
+    observation.photos.forEach((photo) => {
+      inspectionImages.push({
+        serial: inspectionImages.length + 1,
+        location: observation.location,
+        category: observation.category,
+        caption: observation.remarks || observation.component,
+        source: photo
+      });
+    });
+  });
 
-  const testingImages = tests
-    .filter((test) => test.attachment && isImageSource(test.attachment))
-    .map((test, index) => ({
-      serial: index + 1,
-      test_name: test.test_name,
-      scopeLabel: test.scopeLabel,
-      source: test.attachment
-    }));
+  const testingImages = [];
+  tests.forEach((test) => {
+    test.attachments
+      .filter((attachment) => isImageSource(attachment.source))
+      .forEach((attachment) => {
+        testingImages.push({
+          serial: testingImages.length + 1,
+          test_name: test.test_name,
+          scopeLabel: test.scopeLabel,
+          caption: `${test.test_name} - ${test.scopeLabel}`,
+          source: attachment.source
+        });
+      });
+  });
 
   return { inspectionImages, testingImages };
 };
 
-const setCellBorder = (cell) => {
-  cell.border = {
-    top: { style: 'thin', color: { argb: COLORS.BORDER } },
-    left: { style: 'thin', color: { argb: COLORS.BORDER } },
-    bottom: { style: 'thin', color: { argb: COLORS.BORDER } },
-    right: { style: 'thin', color: { argb: COLORS.BORDER } }
+const collectFileAttachments = (observations, tests) => {
+  const files = [];
+
+  observations.forEach((observation) => {
+    observation.documents.forEach((document) => {
+      files.push({
+        location: observation.location,
+        context: observation.component,
+        name: document.name,
+        source: document.source
+      });
+    });
+  });
+
+  tests.forEach((test) => {
+    test.attachments
+      .filter((attachment) => !isImageSource(attachment.source))
+      .forEach((attachment) => {
+        files.push({
+          location: test.scopeLabel,
+          context: test.test_name,
+          name: attachment.name,
+          source: attachment.source
+        });
+      });
+  });
+
+  return files;
+};
+
+const groupObservationsByLocation = (observations) =>
+  observations.reduce((acc, item) => {
+    if (!acc.has(item.location)) {
+      acc.set(item.location, { structural: [], nonStructural: [] });
+    }
+
+    const bucket = item.category === STRUCTURAL_SECTION ? 'structural' : 'nonStructural';
+    acc.get(item.location)[bucket].push(item);
+    return acc;
+  }, new Map());
+
+/**
+ * Single line of the OBSERVATIONS table: the inspector remark, prefixed with the
+ * component when the remark does not already name it, so nothing is lost.
+ */
+const buildObservationLine = (item) => {
+  const component = safeText(item.component);
+  const remarks = safeText(item.remarks);
+
+  if (!remarks) {
+    const distress = safeText(item.distress);
+    return distress && distress !== component ? `${distress} observed on ${component}` : component || 'N/A';
+  }
+
+  const componentToken = component.split('(')[0].trim().toLowerCase();
+  if (componentToken && remarks.toLowerCase().includes(componentToken)) {
+    return remarks;
+  }
+
+  return component ? `${component}: ${remarks}` : remarks;
+};
+
+const groupQuantificationsBySection = (rows) => {
+  const sections = new Map([
+    [STRUCTURAL_SECTION, new Map()],
+    [NON_STRUCTURAL_SECTION, new Map()]
+  ]);
+
+  rows.forEach((row) => {
+    const section = row.section === STRUCTURAL_SECTION ? STRUCTURAL_SECTION : NON_STRUCTURAL_SECTION;
+    const groups = sections.get(section);
+    const key = safeText(row.distress || row.category, 'OTHER').toUpperCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+
+  return Array.from(sections.entries()).filter(([, groups]) => groups.size > 0);
+};
+
+const groupTests = (tests) =>
+  tests.reduce((acc, test) => {
+    if (!acc.has(test.test_name)) acc.set(test.test_name, []);
+    acc.get(test.test_name).push(test);
+    return acc;
+  }, new Map());
+
+// Schema enums are stored as snake_case codes; report readers expect words.
+const ACRONYMS = new Set(['rcc', 'uid', 'id', 'nos']);
+
+const prettifyEnum = (value) => {
+  const source = safeText(value);
+  if (!source) return '';
+  return source
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((word) =>
+      ACRONYMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
+    .join(' ');
+};
+
+const withUnit = (value, unit) => {
+  const text = safeText(value);
+  return text ? `${text} ${unit}` : '';
+};
+
+/**
+ * Structure / location / administrative details, grouped into labelled tables so the
+ * report reads as a proper detail sheet rather than one long key-value list.
+ * Rows are [label, value] pairs; `{ span: true }` makes a row occupy the full width.
+ */
+const buildStructureDetailSections = (structureExport, filtersApplied) => {
+  const { structure, owner } = structureExport;
+  const identity = structure.structural_identity || {};
+  const location = structure.location || {};
+  // NOTE: the schema field is `administrative`; `administration` is kept as a fallback
+  // only because older documents were written with that key.
+  const administrative = structure.administrative || structure.administration || {};
+  const geometry = structure.geometric_details || {};
+  const creation = structure.creation_info || {};
+
+  return [
+    {
+      title: 'STRUCTURE DETAILS',
+      rows: [
+        ['Structure Name', safeText(location.structure_name)],
+        ['Structure ID', safeText(identity.structural_identity_number)],
+        ['UID', safeText(identity.uid)],
+        ['Type Of Structure', prettifyEnum(identity.type_of_structure)],
+        ['Structure Subtype', prettifyEnum(identity.structure_subtype)],
+        ['Commercial Subtype', prettifyEnum(identity.commercial_subtype)],
+        ['Age Of Structure', withUnit(identity.age_of_structure, 'Years')],
+        ['Year Of Construction', safeText(geometry.year_of_construction)],
+        ['Number Of Floors', safeText(geometry.number_of_floors)],
+        ['Basement Floors', safeText(geometry.basement_floors)],
+        ['Total Built-Up Area', withUnit(geometry.total_built_up_area_sq_mts, 'Sq.M')],
+        ['Total Carpet Area', withUnit(geometry.total_carpet_area_sq_mts, 'Sq.M')],
+        ['Structure Length', withUnit(geometry.structure_length, 'M')],
+        ['Structure Width', withUnit(geometry.structure_width, 'M')],
+        ['Structure Height', withUnit(geometry.structure_height, 'M')],
+        ['Parking Type', prettifyEnum(geometry.parking_type)],
+        ['Parking Floor Type', prettifyEnum(geometry.parking_floor_type)],
+        ['Block Names', collectBlockNames(structure), { span: true }]
+      ]
+    },
+    {
+      title: 'LOCATION DETAILS',
+      rows: [
+        ['State Code', safeText(location.state_code)],
+        ['District Code', safeText(location.district_code)],
+        ['City Name', safeText(location.city_name)],
+        ['Location Code', safeText(location.location_code)],
+        ['Zip Code', safeText(location.zip_code)],
+        ['Latitude', formatCoordinate(location.latitude)],
+        ['Longitude', formatCoordinate(location.longitude)],
+        ['Address', safeText(location.address), { span: true }]
+      ]
+    },
+    {
+      title: 'ADMINISTRATIVE DETAILS',
+      rows: [
+        ['Client Name', safeText(administrative.client_name)],
+        ['Custodian', safeText(administrative.custodian)],
+        ['Engineer Designation', safeText(administrative.engineer_designation)],
+        ['Contact Details', safeText(administrative.contact_details)],
+        ['Email ID', safeText(administrative.email_id)],
+        ['Organization', safeText(administrative.organization || owner?.profile?.organization)],
+        ['Inspected By', buildOwnerLabel(owner)],
+        ['Employee ID', safeText(owner?.profile?.employee_id)]
+      ]
+    },
+    {
+      title: 'REPORT DETAILS',
+      rows: [
+        ['Status', prettifyEnum(structure.status)],
+        ['Created Date', formatDate(creation.created_date)],
+        ['Last Updated', formatDate(creation.last_updated_date)],
+        ['Report Generated', formatDate(new Date())],
+        ['Applied Filters', safeText(filtersApplied), { span: true }]
+      ]
+    }
+  ];
+};
+
+/**
+ * Collects everything the renderers need (including downloaded image buffers) once,
+ * so the Word / PDF / Excel writers stay synchronous and always agree with each other.
+ */
+const prepareStructureReport = async (structureExport, filtersApplied) => {
+  const observations = collectStructureObservations(structureExport.structure);
+  const quantifications = collectQuantifications(structureExport.structure);
+  const tests = collectTests(structureExport.structure);
+  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
+  const fileAttachments = collectFileAttachments(observations, tests);
+
+  await attachImageAssets(inspectionImages);
+  await attachImageAssets(testingImages);
+
+  const structuralQuantifications = quantifications.filter((row) => row.section === STRUCTURAL_SECTION);
+  const nonStructuralQuantifications = quantifications.filter((row) => row.section !== STRUCTURAL_SECTION);
+
+  return {
+    ...structureExport,
+    filtersApplied: safeText(filtersApplied),
+    detailSections: buildStructureDetailSections(structureExport, filtersApplied),
+    observations,
+    observationGroups: groupObservationsByLocation(observations),
+    quantifications,
+    quantificationSections: groupQuantificationsBySection(quantifications),
+    tests,
+    testGroups: groupTests(tests),
+    inspectionImages,
+    testingImages,
+    fileAttachments,
+    summary: {
+      structural: summarizeMethodology(structuralQuantifications),
+      nonStructural: summarizeMethodology(nonStructuralQuantifications),
+      combined: summarizeMethodology(quantifications)
+    }
   };
 };
 
-const styleRowCells = (worksheet, rowNumber, fromCol, toCol, options = {}) => {
-  for (let col = fromCol; col <= toCol; col += 1) {
-    const cell = worksheet.getCell(rowNumber, col);
-    cell.font = options.font || FONTS.BODY;
-    cell.alignment = options.alignment || { vertical: 'middle', wrapText: true };
-    if (options.fill) cell.fill = options.fill;
-    setCellBorder(cell);
+const prepareStructureReports = async (structures, filtersApplied) => {
+  resetImageBudget();
+  const prepared = [];
+  for (const structureExport of structures) {
+    // eslint-disable-next-line no-await-in-loop
+    prepared.push(await prepareStructureReport(structureExport, filtersApplied));
   }
+  return prepared;
 };
 
-const addMergedSectionRow = (worksheet, rowNumber, text, fillColor, columnCount) => {
-  worksheet.mergeCells(rowNumber, 1, rowNumber, columnCount);
-  const cell = worksheet.getCell(rowNumber, 1);
-  cell.value = text;
-  cell.font = FONTS.HEADER;
-  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
-  cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
-  setCellBorder(cell);
-  worksheet.getRow(rowNumber).height = 20;
-};
-
-const addTableHeader = (worksheet, rowNumber, headers, fillColor = COLORS.SECONDARY) => {
-  headers.forEach((header, index) => {
-    const cell = worksheet.getCell(rowNumber, index + 1);
-    cell.value = header;
-    cell.font = { ...FONTS.HEADER, color: { argb: COLORS.WHITE } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
-    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-    setCellBorder(cell);
-  });
-  worksheet.getRow(rowNumber).height = 22;
-};
-
-const ensureColumns = (worksheet) => {
-  worksheet.columns = [
-    { width: 8 },
-    { width: 34 },
-    { width: 20 },
-    { width: 10 },
-    { width: 10 },
-    { width: 10 },
-    { width: 10 },
-    { width: 16 },
-    { width: 30 }
-  ];
-};
-
-const addObservationSection = (worksheet, startRow, observations) => {
-  let row = startRow;
-  addMergedSectionRow(worksheet, row, 'OBSERVATIONS', COLORS.SECTION, 4);
-  row += 1;
-  addTableHeader(worksheet, row, ['S. No', 'Location', 'Remarks', 'Category'], COLORS.PRIMARY);
-  row += 1;
-
-  if (observations.length === 0) {
-    worksheet.addRow(['', 'No observations recorded', '', '']);
-    styleRowCells(worksheet, row, 1, 4);
-    return row + 1;
-  }
-
-  observations.forEach((item, index) => {
-    worksheet.getCell(row, 1).value = index + 1;
-    worksheet.getCell(row, 2).value = item.location || 'N/A';
-    worksheet.getCell(row, 3).value = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
-    worksheet.getCell(row, 4).value = item.category;
-    styleRowCells(worksheet, row, 1, 4);
-    row += 1;
-  });
-
-  return row;
-};
-
-const addImageSection = (worksheet, startRow, title, rows, isTesting = false) => {
-  let row = startRow;
-  addMergedSectionRow(worksheet, row, title, COLORS.SECTION, 4);
-  row += 1;
-
-  const headers = isTesting
-    ? ['S. No', 'Test Name', 'Location', 'File Reference']
-    : ['S. No', 'Caption', 'Location', 'Image Reference'];
-  addTableHeader(worksheet, row, headers, COLORS.PRIMARY);
-  row += 1;
-
-  if (rows.length === 0) {
-    worksheet.addRow(['', 'No files attached', '', '']);
-    styleRowCells(worksheet, row, 1, 4);
-    return row + 1;
-  }
-
-  rows.forEach((entry, index) => {
-    worksheet.getCell(row, 1).value = index + 1;
-    if (isTesting) {
-      worksheet.getCell(row, 2).value = entry.test_name;
-      worksheet.getCell(row, 3).value = entry.scopeLabel;
-      worksheet.getCell(row, 4).value = entry.source;
-    } else {
-      worksheet.getCell(row, 2).value = entry.caption;
-      worksheet.getCell(row, 3).value = entry.location;
-      worksheet.getCell(row, 4).value = entry.source;
-    }
-    styleRowCells(worksheet, row, 1, 4);
-    row += 1;
-  });
-
-  return row;
-};
-
-const addTestSection = (worksheet, startRow, tests) => {
-  let row = startRow;
-  addMergedSectionRow(worksheet, row, 'TEST RESULTS', COLORS.SECTION, 7);
-  row += 1;
-
-  if (tests.length === 0) {
-    addTableHeader(worksheet, row, ['S. No', 'Test Name', 'Location', 'Tested By', 'Date', 'Result', 'Remarks'], COLORS.PRIMARY);
-    row += 1;
-    worksheet.addRow(['', 'No test results recorded', '', '', '', '', '']);
-    styleRowCells(worksheet, row, 1, 7);
-    return row + 1;
-  }
-
-  const grouped = tests.reduce((acc, item) => {
-    if (!acc.has(item.test_name)) acc.set(item.test_name, []);
-    acc.get(item.test_name).push(item);
-    return acc;
-  }, new Map());
-
-  let testIndex = 1;
-  grouped.forEach((testRows, testName) => {
-    addMergedSectionRow(worksheet, row, `${testIndex}. ${testName}`, COLORS.SUBSECTION, 7);
-    row += 1;
-    addTableHeader(worksheet, row, ['S. No', 'Location', 'Component', 'Tested By', 'Date', 'Result', 'Remarks'], COLORS.PRIMARY);
-    row += 1;
-
-    testRows.forEach((item, index) => {
-      worksheet.getCell(row, 1).value = index + 1;
-      worksheet.getCell(row, 2).value = item.scopeLabel;
-      worksheet.getCell(row, 3).value = [item.component_type, item.component_id].filter(Boolean).join(' / ');
-      worksheet.getCell(row, 4).value = item.tested_by || 'N/A';
-      worksheet.getCell(row, 5).value = item.test_date || '';
-      worksheet.getCell(row, 6).value = item.result_summary || 'N/A';
-      worksheet.getCell(row, 7).value = item.remarks || 'N/A';
-      styleRowCells(worksheet, row, 1, 7);
-      row += 1;
-    });
-
-    testIndex += 1;
-  });
-
-  return row;
-};
-
-const addQuantificationSection = (worksheet, startRow, quantifications) => {
-  let row = startRow;
-  addMergedSectionRow(worksheet, row, 'QUANTIFICATION', COLORS.SECTION, 9);
-  row += 1;
-  addTableHeader(
-    worksheet,
-    row,
-    ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Length / Area / Volume', 'Repair Methodology'],
-    COLORS.PRIMARY
-  );
-  row += 1;
-
-  if (quantifications.length === 0) {
-    worksheet.addRow(['', 'No quantification entries recorded', '', '', '', '', '', '', '']);
-    styleRowCells(worksheet, row, 1, 9);
-    return row + 1;
-  }
-
-  const grouped = quantifications.reduce((acc, item) => {
-    if (!acc.has(item.category)) acc.set(item.category, []);
-    acc.get(item.category).push(item);
-    return acc;
-  }, new Map());
-
-  grouped.forEach((entries, category) => {
-    addMergedSectionRow(worksheet, row, category, COLORS.SUBSECTION, 9);
-    row += 1;
-
-    entries.forEach((entry, index) => {
-      worksheet.getCell(row, 1).value = index + 1;
-      worksheet.getCell(row, 2).value = entry.location_of_distress;
-      worksheet.getCell(row, 3).value = entry.distress;
-      worksheet.getCell(row, 4).value = entry.nos;
-      worksheet.getCell(row, 5).value = entry.length ?? '';
-      worksheet.getCell(row, 6).value = entry.breadth ?? '';
-      worksheet.getCell(row, 7).value = entry.height ?? '';
-      worksheet.getCell(row, 8).value = formatApproxQuantity(entry.quantity);
-      worksheet.getCell(row, 9).value = entry.repair_methodology;
-      styleRowCells(worksheet, row, 1, 9);
-      row += 1;
+const collectReportAssets = (preparedStructures) => {
+  const assets = new Map();
+  preparedStructures.forEach((prepared) => {
+    [...prepared.inspectionImages, ...prepared.testingImages].forEach((row) => {
+      if (row.asset && !assets.has(row.asset.fileName)) {
+        assets.set(row.asset.fileName, row.asset);
+      }
     });
   });
-
-  return row;
-};
-
-const addMethodologySummary = (worksheet, startRow, quantifications) => {
-  let row = startRow;
-  const summaryRows = summarizeMethodology(quantifications);
-
-  addTableHeader(worksheet, row, ['S. No', 'Description', 'Quantity', 'Units'], COLORS.PRIMARY);
-  row += 1;
-
-  if (summaryRows.length === 0) {
-    worksheet.addRow(['', 'No methodology summary available', '', '']);
-    styleRowCells(worksheet, row, 1, 4);
-    return row + 1;
-  }
-
-  summaryRows.forEach((entry, index) => {
-    worksheet.getCell(row, 1).value = index + 1;
-    worksheet.getCell(row, 2).value = entry.description;
-    worksheet.getCell(row, 3).value = entry.quantity;
-    worksheet.getCell(row, 4).value = entry.units;
-    styleRowCells(worksheet, row, 1, 4);
-    row += 1;
-  });
-
-  addMergedSectionRow(
-    worksheet,
-    row,
-    'Note: Observation-to-quantification linkage depends on saved quantification rows. TODO: add explicit observation linkage in the data model if the client needs one-to-one traceability.',
-    COLORS.NOTE,
-    4
-  );
-
-  return row + 1;
-};
-
-const addStructureHeader = (worksheet, structureExport, filtersApplied) => {
-  const { structure, owner } = structureExport;
-
-  worksheet.mergeCells('A1:F1');
-  worksheet.getCell('A1').value = 'SAMS';
-  worksheet.getCell('A1').font = FONTS.TITLE;
-  worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' };
-
-  worksheet.mergeCells('A2:F2');
-  worksheet.getCell('A2').value = 'OUTPUT / REPORT FORMAT';
-  worksheet.getCell('A2').font = FONTS.HEADER;
-  worksheet.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.SECTION } };
-  worksheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left' };
-
-  const summaryRows = [
-    ['Structure ID', safeText(structure.structural_identity?.structural_identity_number, 'N/A')],
-    ['UID', safeText(structure.structural_identity?.uid, 'N/A')],
-    ['Structure Type', safeText(structure.structural_identity?.type_of_structure, 'N/A')],
-    ['Structure Subtype', safeText(structure.structural_identity?.structure_subtype, 'N/A')],
-    ['Total Floors', safeText(structure.geometric_details?.number_of_floors)],
-    ['Owner / Employee', `${buildOwnerLabel(owner)}${owner?.profile?.employee_id ? ` (${owner.profile.employee_id})` : ''}`],
-    ['Organization', safeText(owner?.profile?.organization || structure.administration?.organization, 'N/A')],
-    ['Location', [structure.location?.state_code, structure.location?.district_code, structure.location?.city_name, structure.location?.location_code].filter(Boolean).join(' / ') || 'N/A'],
-    ['Created Date', formatDate(structure.creation_info?.created_date) || 'N/A'],
-    ['Last Updated', formatDate(structure.creation_info?.last_updated_date) || 'N/A'],
-    ['Applied Filters', filtersApplied || 'None']
-  ];
-
-  let row = 4;
-  summaryRows.forEach(([label, value]) => {
-    worksheet.getCell(row, 1).value = label;
-    worksheet.getCell(row, 2).value = value;
-    styleRowCells(worksheet, row, 1, 2, {
-      fill: row % 2 === 0
-        ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F7' } }
-        : undefined
-    });
-    worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
-    row += 1;
-  });
-
-  return row + 1;
+  return Array.from(assets.values());
 };
 
 const buildFilterSummary = (query = {}) => {
@@ -1150,6 +1430,556 @@ const buildFilterSummary = (query = {}) => {
   return parts.join(', ');
 };
 
+// =================== HTML (WORD + PDF) RENDERING ===================
+
+const QUANT_COLUMN_COUNT = 8;
+
+/**
+ * Renders a detail section as a 4-column table (Label | Value | Label | Value),
+ * so ~20 fields stay compact and aligned instead of running down the page.
+ */
+const renderDetailSectionHtml = (section) => {
+  const cell = (label, value) =>
+    `<td class="detail-label">${escapeHtml(label)}</td><td class="detail-value">${
+      safeText(value) ? escapeHtml(value) : '&nbsp;'
+    }</td>`;
+
+  const rows = [];
+  let pending = null;
+
+  section.rows.forEach(([label, value, options]) => {
+    if (options?.span) {
+      if (pending) {
+        rows.push(`<tr>${cell(pending[0], pending[1])}<td>&nbsp;</td><td>&nbsp;</td></tr>`);
+        pending = null;
+      }
+      rows.push(
+        `<tr><td class="detail-label">${escapeHtml(label)}</td><td class="detail-value" colspan="3">${
+          safeText(value) ? escapeHtml(value) : '&nbsp;'
+        }</td></tr>`
+      );
+      return;
+    }
+
+    if (pending) {
+      rows.push(`<tr>${cell(pending[0], pending[1])}${cell(label, value)}</tr>`);
+      pending = null;
+    } else {
+      pending = [label, value];
+    }
+  });
+
+  if (pending) {
+    rows.push(`<tr>${cell(pending[0], pending[1])}<td>&nbsp;</td><td>&nbsp;</td></tr>`);
+  }
+
+  return `
+    <table class="detail-table">
+      <thead>
+        <tr><th colspan="4" class="detail-heading">${escapeHtml(section.title)}</th></tr>
+      </thead>
+      <tbody>${rows.join('')}</tbody>
+    </table>
+  `;
+};
+
+const renderDetailSectionsHtml = (sections) => sections.map(renderDetailSectionHtml).join('');
+
+/**
+ * OBSERVATIONS, in the client's format:
+ * S. No | Location/Remarks, grouped by location then by structural / non-structural,
+ * with the serial number restarting inside each distress group.
+ */
+const renderObservationsHtml = (observationGroups) => {
+  const rows = [
+    '<table class="obs-table"><thead><tr><th class="sno-col">S. No</th><th>Location/Remarks</th></tr></thead><tbody>'
+  ];
+
+  if (!observationGroups.size) {
+    rows.push('<tr><td class="sno-col center">&nbsp;</td><td>No observations recorded</td></tr>');
+  }
+
+  observationGroups.forEach((buckets, location) => {
+    rows.push(`<tr class="obs-location-row"><td colspan="2">${escapeHtml(location).toUpperCase()}</td></tr>`);
+
+    [
+      [STRUCTURAL_SECTION, buckets.structural],
+      [NON_STRUCTURAL_SECTION, buckets.nonStructural]
+    ].forEach(([sectionLabel, items]) => {
+      if (!items.length) return;
+      rows.push(`<tr class="obs-category-row"><td colspan="2">${escapeHtml(sectionLabel)}</td></tr>`);
+      items.forEach((item, index) => {
+        rows.push(
+          `<tr><td class="sno-col center">${index + 1}</td><td>${escapeHtml(buildObservationLine(item))}</td></tr>`
+        );
+      });
+    });
+  });
+
+  rows.push('</tbody></table>');
+  return rows.join('');
+};
+
+/**
+ * Word has no flexbox, so the 2-up image grid must be a real table.
+ */
+const renderImageGridHtml = (rows, imageRef) => {
+  if (!rows.length) {
+    return '<p class="empty-state">No images attached.</p>';
+  }
+
+  const cells = rows.map((row) => {
+    const src = imageRef(row.asset);
+    const caption = safeText(row.caption, 'Untitled');
+    const meta = safeText(row.location || row.scopeLabel);
+    const body = src
+      ? `<img src="${escapeHtml(src)}" width="300" alt="${escapeHtml(caption)}" />`
+      : `<span class="image-missing">Image could not be embedded (${escapeHtml(getAttachmentLabel(row.source))})</span>`;
+
+    return `
+      <td class="image-cell">
+        <div class="image-box">${body}</div>
+        <div class="caption-title">${escapeHtml(caption)}</div>
+        ${meta ? `<div class="caption-meta">${escapeHtml(meta)}</div>` : ''}
+      </td>
+    `;
+  });
+
+  const tableRows = [];
+  for (let index = 0; index < cells.length; index += 2) {
+    const pair = cells.slice(index, index + 2);
+    if (pair.length === 1) pair.push('<td class="image-cell">&nbsp;</td>');
+    tableRows.push(`<tr>${pair.join('')}</tr>`);
+  }
+
+  return `<table class="image-grid"><tbody>${tableRows.join('')}</tbody></table>`;
+};
+
+const renderTestResultsHtml = (testGroups) => {
+  if (!testGroups.size) {
+    return '<p class="empty-state">No test results recorded.</p>';
+  }
+
+  let testIndex = 1;
+  const blocks = [];
+
+  testGroups.forEach((rows, testName) => {
+    const body = rows
+      .map(
+        (row) => `
+          <tr>
+            <td>${escapeHtml(row.scopeLabel)}</td>
+            <td>${escapeHtml([row.component_type, row.component_id].filter(Boolean).join(' / '))}</td>
+            <td>${escapeHtml(row.tested_by)}</td>
+            <td>${escapeHtml(row.test_date)}</td>
+            <td>${escapeHtml(row.result_summary)}</td>
+            <td>${escapeHtml(row.remarks)}</td>
+            <td>${
+              row.attachments.length
+                ? row.attachments.map((attachment) => escapeHtml(attachment.name)).join('<br />')
+                : '&nbsp;'
+            }</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    blocks.push(`
+      <div class="test-block">
+        <h3>${testIndex}. ${escapeHtml(testName)}</h3>
+        <table class="test-table">
+          <thead>
+            <tr>
+              <th>Location</th><th>Component</th><th>Tested By</th><th>Date</th>
+              <th>Result</th><th>Remarks</th><th>Attachments</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `);
+    testIndex += 1;
+  });
+
+  return blocks.join('');
+};
+
+/**
+ * QUANTIFICATION, in the client's format: structural and non-structural shown
+ * separately, then grouped by component (FOOTINGS / COLUMNS / WALLS / ...).
+ */
+const renderQuantificationHtml = (quantificationSections) => {
+  const header = `
+    <thead>
+      <tr>
+        <th rowspan="2" class="sno-col center">S.No</th>
+        <th rowspan="2">Location of Distress</th>
+        <th colspan="4" class="center">Distress</th>
+        <th rowspan="2" class="center">Length (Rm) /<br />Area (Sqm) /<br />Volume (Cum)</th>
+        <th rowspan="2">Repair Methodology</th>
+      </tr>
+      <tr>
+        <th class="center">Nos</th>
+        <th class="center">L (M)</th>
+        <th class="center">B (M)</th>
+        <th class="center">H (M)</th>
+      </tr>
+    </thead>
+  `;
+
+  if (!quantificationSections.length) {
+    return `<table class="quant-table">${header}<tbody><tr><td colspan="${QUANT_COLUMN_COUNT}">No quantification entries recorded</td></tr></tbody></table>`;
+  }
+
+  const parts = [`<table class="quant-table">${header}<tbody>`];
+
+  quantificationSections.forEach(([sectionLabel, groups]) => {
+    parts.push(
+      `<tr class="quant-section-row"><td colspan="${QUANT_COLUMN_COUNT}">${escapeHtml(sectionLabel)}</td></tr>`
+    );
+
+    groups.forEach((items, groupName) => {
+      parts.push(`<tr class="quant-group-row"><td colspan="${QUANT_COLUMN_COUNT}">${escapeHtml(groupName)}</td></tr>`);
+      let groupTotal = 0;
+
+      items.forEach((row, index) => {
+        groupTotal += toNumber(row.quantity) ?? 0;
+        parts.push(`
+          <tr>
+            <td class="center">${index + 1}</td>
+            <td>${escapeHtml(row.location_of_distress)}</td>
+            <td class="center">${escapeHtml(String(row.nos))}</td>
+            <td class="center">${escapeHtml(row.length ?? '')}</td>
+            <td class="center">${escapeHtml(row.breadth ?? '')}</td>
+            <td class="center">${escapeHtml(row.height ?? '')}</td>
+            <td class="center">${escapeHtml(formatApproxQuantity(row.quantity))}</td>
+            <td>${escapeHtml(row.repair_methodology)}</td>
+          </tr>
+        `);
+      });
+
+      parts.push(`
+        <tr class="quant-total-row">
+          <td colspan="6">Total - ${escapeHtml(groupName)}</td>
+          <td class="center">${escapeHtml(formatApproxQuantity(groupTotal))}</td>
+          <td>&nbsp;</td>
+        </tr>
+      `);
+    });
+  });
+
+  parts.push('</tbody></table>');
+  return parts.join('');
+};
+
+const renderSummaryTableHtml = (summaryRows) => `
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th class="sno-col center">S. No</th>
+        <th>Description</th>
+        <th class="center" style="width:110px;">Quantity</th>
+        <th class="center" style="width:90px;">Units</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${
+        summaryRows.length
+          ? summaryRows
+              .map(
+                (row, index) => `
+                  <tr>
+                    <td class="center">${index + 1}</td>
+                    <td>${escapeHtml(row.description)}</td>
+                    <td class="center">${escapeHtml(String(row.quantity))}</td>
+                    <td class="center">${escapeHtml(row.units)}</td>
+                  </tr>
+                `
+              )
+              .join('')
+          : `<tr><td colspan="4" class="center">No repair quantities recorded</td></tr>`
+      }
+    </tbody>
+  </table>
+`;
+
+const renderAttachmentsHtml = (fileAttachments) => {
+  if (!fileAttachments.length) {
+    return '<p class="empty-state">No additional documents attached.</p>';
+  }
+
+  return `
+    <table class="attachment-table">
+      <thead>
+        <tr><th class="sno-col center">S. No</th><th>Location</th><th>Context</th><th>File</th></tr>
+      </thead>
+      <tbody>
+        ${fileAttachments
+          .map(
+            (file, index) => `
+              <tr>
+                <td class="center">${index + 1}</td>
+                <td>${escapeHtml(file.location)}</td>
+                <td>${escapeHtml(file.context)}</td>
+                <td>${escapeHtml(file.name)}</td>
+              </tr>
+            `
+          )
+          .join('')}
+      </tbody>
+    </table>
+  `;
+};
+
+const renderNotesHtml = () => `
+  <div class="note-block">
+    <p><strong>Note :</strong></p>
+    ${QUANTIFICATION_NOTES.map((note, index) => `<p>${index + 1}. ${escapeHtml(note)}</p>`).join('')}
+  </div>
+`;
+
+const renderSection = (title, body, subtitle = '') => `
+  <h2 class="section-title">${escapeHtml(title)}</h2>
+  ${subtitle ? `<p class="section-note">${escapeHtml(subtitle)}</p>` : ''}
+  ${body}
+`;
+
+const renderStructureHtml = (prepared, imageRef) => `
+  <section class="report-block">
+    <div class="brand">SAMS</div>
+    <div><span class="highlight-label">OUTPUT / REPORT FORMAT:</span></div>
+    ${renderDetailSectionsHtml(prepared.detailSections)}
+    ${renderSection(
+      'OBSERVATIONS',
+      renderObservationsHtml(prepared.observationGroups),
+      'Observation given in the structural and non-structural shall be reflect in the table and images below the table in the output.'
+    )}
+    ${renderSection('INSPECTION IMAGES', renderImageGridHtml(prepared.inspectionImages, imageRef))}
+    <p class="section-note small-caps">The observation entered during the attaching the photo should reflect with image in small font</p>
+    ${renderSection(
+      'TEST RESULTS',
+      renderTestResultsHtml(prepared.testGroups),
+      'Provision for uploading multiple IMAGE OR PDF OR EXCEL files for each testing format.'
+    )}
+    <p class="section-note">Images attached during the testing should reflect below the test results in the output.</p>
+    ${renderSection('TESTING IMAGES', renderImageGridHtml(prepared.testingImages, imageRef))}
+    ${renderSection('ATTACHED FILES', renderAttachmentsHtml(prepared.fileAttachments))}
+    ${renderSection('QUANTIFICATION', renderQuantificationHtml(prepared.quantificationSections))}
+    ${renderSection(
+      'BILL OF QUANTITY SUMMARY - STRUCTURAL',
+      renderSummaryTableHtml(prepared.summary.structural),
+      'Quantities in the quantification table are summed for each repair methodology type.'
+    )}
+    ${renderSection('BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', renderSummaryTableHtml(prepared.summary.nonStructural))}
+    ${renderSection('BILL OF QUANTITY SUMMARY - TOTAL', renderSummaryTableHtml(prepared.summary.combined))}
+    ${renderNotesHtml()}
+  </section>
+`;
+
+const REPORT_STYLES = `
+  @page WordSection1 { size: 21cm 29.7cm; margin: 18mm 16mm; }
+  div.WordSection1 { page: WordSection1; }
+  body {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 11pt;
+    color: #1f1f1f;
+    background: #ffffff;
+    line-height: 1.35;
+  }
+  .brand {
+    text-align: center;
+    font-family: Calibri, Arial, sans-serif;
+    font-size: 22pt;
+    font-weight: bold;
+    margin-bottom: 8pt;
+  }
+  .highlight-label {
+    background: #fff200;
+    font-weight: bold;
+    font-size: 12pt;
+    padding: 2px 6px;
+    text-decoration: underline;
+  }
+  h2.section-title {
+    font-size: 13pt;
+    font-weight: bold;
+    text-decoration: underline;
+    margin: 16pt 0 4pt 0;
+  }
+  h3 { font-size: 11pt; font-weight: normal; margin: 8pt 0 4pt 0; }
+  .section-note { font-size: 10pt; margin: 0 0 6pt 0; }
+  .small-caps { font-size: 9pt; text-transform: uppercase; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10pt;
+    font-size: 10pt;
+  }
+  th, td {
+    border: 1px solid #7f7f7f;
+    padding: 4px 6px;
+    vertical-align: top;
+    text-align: left;
+  }
+  th { font-weight: bold; background: #ffffff; }
+  .center { text-align: center; }
+  .sno-col { width: 50px; text-align: center; }
+  .detail-table { margin-bottom: 8pt; }
+  .detail-heading {
+    background: #d9e2f3;
+    font-weight: bold;
+    text-align: center;
+    font-size: 11pt;
+    letter-spacing: 0.5px;
+  }
+  .detail-label { font-weight: bold; width: 21%; background: #f7f7f7; }
+  .detail-value { width: 29%; }
+  .obs-location-row td {
+    color: #0070c0;
+    font-weight: bold;
+    text-align: center;
+    font-size: 11pt;
+  }
+  .obs-category-row td { font-weight: bold; text-align: center; font-size: 10pt; }
+  .quant-section-row td {
+    background: #d9e2f3;
+    font-weight: bold;
+    text-align: center;
+    font-size: 10pt;
+  }
+  .quant-group-row td {
+    background: #fff200;
+    font-weight: bold;
+    text-align: center;
+    font-size: 10pt;
+  }
+  .quant-total-row td { font-weight: bold; background: #f2f2f2; }
+  .image-grid { border: none; }
+  .image-grid td { border: none; width: 50%; text-align: center; vertical-align: top; padding: 6px; }
+  .image-box { border: 1px solid #999999; padding: 3px; }
+  /* Word honours the width attribute on the tag; the max-* rules keep tall portrait
+     photos in check for the Chrome-rendered PDF. */
+  .image-box img { max-width: 100%; max-height: 280px; }
+  .image-missing { font-size: 9pt; font-style: italic; color: #888888; }
+  .caption-title { font-size: 9pt; margin-top: 3px; }
+  .caption-meta { font-size: 8pt; color: #555555; }
+  .empty-state { font-size: 10pt; color: #888888; font-style: italic; margin-bottom: 8pt; }
+  .note-block p { font-size: 10pt; margin: 2pt 0; }
+  .report-block { page-break-after: always; }
+  .report-block:last-child { page-break-after: auto; }
+`;
+
+const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>SAMS - Output / Report Format</title>
+    <!--[if gte mso 9]><xml>
+      <w:WordDocument>
+        <w:View>Print</w:View>
+        <w:Zoom>100</w:Zoom>
+        <w:DoNotOptimizeForBrowser/>
+      </w:WordDocument>
+    </xml><![endif]-->
+    <style>${REPORT_STYLES}</style>
+  </head>
+  <body>
+    <div class="WordSection1">
+      ${preparedStructures.map((prepared) => renderStructureHtml(prepared, imageRef)).join('')}
+    </div>
+  </body>
+</html>`;
+
+// =================== WORD (MHTML) OUTPUT ===================
+
+/**
+ * Word only reliably embeds images from an MHTML package (it ignores `data:` URIs
+ * in HTML-as-.doc files), so the Word export is built as multipart/related.
+ */
+const encodeQuotedPrintable = (input) => {
+  const bytes = Buffer.from(input, 'utf8');
+  const lines = [];
+  let line = '';
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index];
+    if (byte === 0x0d) continue;
+    if (byte === 0x0a) {
+      lines.push(line);
+      line = '';
+      continue;
+    }
+
+    const chunk =
+      byte >= 33 && byte <= 126 && byte !== 0x3d
+        ? String.fromCharCode(byte)
+        : `=${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+
+    if (line.length + chunk.length > 73) {
+      lines.push(`${line}=`);
+      line = '';
+    }
+    line += chunk;
+  }
+
+  lines.push(line);
+  return lines.join('\r\n');
+};
+
+const MHTML_BASE_LOCATION = 'file:///C:/SAMS/report';
+
+const buildWordMhtml = (html, assets) => {
+  const boundary = '----=_NextPart_SAMS_REPORT';
+  const parts = [
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/related; type="text/html"; boundary="${boundary}"`,
+    'X-Document-Type: Word.Document',
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset="utf-8"',
+    'Content-Transfer-Encoding: quoted-printable',
+    `Content-Location: ${MHTML_BASE_LOCATION}/report.htm`,
+    '',
+    encodeQuotedPrintable(html)
+  ];
+
+  assets.forEach((asset) => {
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${asset.mimeType}`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Location: ${MHTML_BASE_LOCATION}/${asset.fileName}`,
+      '',
+      asset.buffer.toString('base64').replace(/(.{76})/g, '$1\r\n')
+    );
+  });
+
+  parts.push(`--${boundary}--`, '');
+  return parts.join('\r\n');
+};
+
+const sendWordDocument = (res, preparedStructures, fileName) => {
+  const html = buildReportHtml(preparedStructures, (asset) => (asset ? asset.fileName : ''));
+  const assets = collectReportAssets(preparedStructures);
+  const buffer = Buffer.from(buildWordMhtml(html, assets), 'utf8');
+
+  res.setHeader('Content-Type', WORD_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.setHeader('Content-Length', String(buffer.length));
+  res.send(buffer);
+};
+
+// =================== PDF OUTPUT ===================
+
+// SAMS_PDF_RENDERER=auto (default) | browser | pdfkit
+const getPdfRendererMode = () => safeText(process.env.SAMS_PDF_RENDERER, 'auto').toLowerCase();
+
+const resolveBrowserExecutablePath = () => {
+  if (getPdfRendererMode() === 'pdfkit') return null;
+  return BROWSER_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
+};
+
+const PDF_CONTENT_WIDTH = 523;
+
 const ensurePdfSpace = (doc, requiredHeight = 24) => {
   const bottomLimit = doc.page.height - doc.page.margins.bottom;
   if (doc.y + requiredHeight > bottomLimit) {
@@ -1157,291 +1987,276 @@ const ensurePdfSpace = (doc, requiredHeight = 24) => {
   }
 };
 
-const pdfSectionTitle = (doc, title) => {
-  ensurePdfSpace(doc, 26);
-  doc
-    .font('Helvetica-Bold')
-    .fontSize(12)
-    .fillColor('#000000')
-    .text(title, { underline: true });
-  doc.moveDown(0.4);
-  doc.fillColor('#000000');
+// PDFKit keeps `doc.x` wherever the last positioned draw left it, which silently
+// squeezes every following paragraph into a narrow column. Always reset it first.
+const pdfResetX = (doc) => {
+  doc.x = doc.page.margins.left;
 };
 
-const pdfHighlightLabel = (doc, text) => {
-  const label = safeText(text, '');
-  const x = doc.page.margins.left;
-  const y = doc.y;
-  const width = doc.widthOfString(label, { font: 'Helvetica-Bold', size: 12 }) + 8;
-  const height = 16;
-
-  ensurePdfSpace(doc, height + 4);
-  doc.rect(x, y, width, height).fill('#FFF200');
+const pdfSectionTitle = (doc, title) => {
+  ensurePdfSpace(doc, 30);
+  pdfResetX(doc);
   doc
-    .fillColor('#000000')
     .font('Helvetica-Bold')
     .fontSize(12)
-    .text(label, x + 4, y + 3, { lineBreak: false });
-  doc.y = y + height + 6;
+    .fillColor('#000000')
+    .text(title, { underline: true, width: PDF_CONTENT_WIDTH });
+  pdfResetX(doc);
+  doc.moveDown(0.4);
+};
+
+const pdfParagraph = (doc, text, options = {}) => {
+  ensurePdfSpace(doc, 16);
+  pdfResetX(doc);
+  doc
+    .font(options.font || 'Helvetica')
+    .fontSize(options.fontSize || 9)
+    .fillColor(options.color || '#000000')
+    .text(safeText(text), { width: PDF_CONTENT_WIDTH });
+  doc.fillColor('#000000');
+  pdfResetX(doc);
 };
 
 const pdfKeyValue = (doc, label, value) => {
   ensurePdfSpace(doc, 18);
+  pdfResetX(doc);
   doc
     .font('Helvetica-Bold')
-    .fontSize(10)
-    .text(`${label}: `, { continued: true });
-  doc
-    .font('Helvetica')
-    .text(safeText(value, ''));
-};
-
-const pdfBullet = (doc, text, indent = 14) => {
-  ensurePdfSpace(doc, 20);
-  doc
-    .font('Helvetica')
-    .fontSize(10)
-    .text(`• ${safeText(text, 'N/A')}`, { indent });
+    .fontSize(9)
+    .fillColor('#000000')
+    .text(`${label}: `, { continued: true, width: PDF_CONTENT_WIDTH });
+  doc.font('Helvetica').text(safeText(value, '-'));
+  pdfResetX(doc);
 };
 
 const pdfTableRow = (doc, columns, widths, options = {}) => {
   const startX = doc.page.margins.left;
-  const lineHeight = options.lineHeight || 14;
-  const font = options.font || 'Helvetica';
-  const fontSize = options.fontSize || 9;
+  const fontSize = options.fontSize || 8;
   const isHeader = Boolean(options.header);
+  const font = isHeader ? 'Helvetica-Bold' : options.font || 'Helvetica';
 
-  const heights = columns.map((value, index) => {
-    const width = widths[index] - 6;
-    return doc.heightOfString(safeText(value, ''), { width, align: 'left' });
-  });
-  const rowHeight = Math.max(lineHeight, ...heights) + 6;
+  doc.font(font).fontSize(fontSize);
+  const heights = columns.map((value, index) =>
+    doc.heightOfString(safeText(value, ''), { width: widths[index] - 6, align: 'left' })
+  );
+  const rowHeight = Math.max(options.lineHeight || 12, ...heights) + 6;
   ensurePdfSpace(doc, rowHeight + 2);
 
+  const y = doc.y;
   let currentX = startX;
+
   columns.forEach((value, index) => {
     const width = widths[index];
+    if (options.fill) {
+      doc.rect(currentX, y, width, rowHeight).fill(options.fill);
+    }
+    doc.rect(currentX, y, width, rowHeight).lineWidth(0.5).strokeColor('#BFBFBF').stroke();
     doc
-      .rect(currentX, doc.y, width, rowHeight)
-      .lineWidth(0.5)
-      .strokeColor('#BFBFBF')
-      .stroke();
-
-    doc
-      .font(isHeader ? 'Helvetica-Bold' : font)
+      .font(font)
       .fontSize(fontSize)
       .fillColor('#000000')
-      .text(safeText(value, ''), currentX + 3, doc.y + 3, {
+      .text(safeText(value, ''), currentX + 3, y + 3, {
         width: width - 6,
-        align: 'left'
+        align: options.align || 'left'
       });
-
     currentX += width;
   });
 
-  doc.y += rowHeight;
+  doc.y = y + rowHeight;
+  pdfResetX(doc);
 };
 
-const groupObservationsForPdf = (observations) =>
-  observations.reduce((acc, item) => {
-    if (!acc.has(item.location)) {
-      acc.set(item.location, { structural: [], nonStructural: [] });
-    }
-
-    const bucket = item.category === 'STRUCTURAL DISTRESS' ? 'structural' : 'nonStructural';
-    acc.get(item.location)[bucket].push(item);
-    return acc;
-  }, new Map());
-
-const groupTestsForPdf = (tests) =>
-  tests.reduce((acc, test) => {
-    if (!acc.has(test.test_name)) acc.set(test.test_name, []);
-    acc.get(test.test_name).push(test);
-    return acc;
-  }, new Map());
-
-const groupQuantificationsForPdf = (rows) =>
-  rows.reduce((acc, row) => {
-    const key = safeText(row.distress, 'OTHER');
-    if (!acc.has(key)) acc.set(key, []);
-    acc.get(key).push(row);
-    return acc;
-  }, new Map());
-
-const getPdfImagePath = (source) => {
-  const value = safeText(source);
-  if (!value) return null;
-  if (/^https?:\/\//i.test(value) || /^data:/i.test(value)) return null;
-  if (fs.existsSync(value)) return value;
-  return null;
+const pdfBandRow = (doc, text, fillColor) => {
+  ensurePdfSpace(doc, 20);
+  const y = doc.y;
+  const x = doc.page.margins.left;
+  doc.rect(x, y, PDF_CONTENT_WIDTH, 15).fill(fillColor);
+  doc
+    .fillColor('#000000')
+    .font('Helvetica-Bold')
+    .fontSize(9)
+    .text(safeText(text), x, y + 4, { width: PDF_CONTENT_WIDTH, align: 'center' });
+  doc.y = y + 17;
+  pdfResetX(doc);
 };
 
-const renderPdfImageGrid = (doc, rows, type) => {
+const renderPdfImageGrid = (doc, rows) => {
   if (!rows.length) {
+    pdfParagraph(doc, 'No images attached.', { font: 'Helvetica-Oblique', color: '#888888' });
+    doc.moveDown(0.4);
     return;
   }
 
   const gap = 16;
-  const cardWidth = (doc.page.width - doc.page.margins.left - doc.page.margins.right - gap) / 2;
+  const cardWidth = (PDF_CONTENT_WIDTH - gap) / 2;
   const imageHeight = 150;
-  const captionHeight = 34;
-  const cardHeight = imageHeight + captionHeight;
+  const captionHeight = 30;
   const startX = doc.page.margins.left;
+  let rowTop = doc.y;
 
   rows.forEach((row, index) => {
     if (index % 2 === 0) {
-      ensurePdfSpace(doc, cardHeight + 20);
+      ensurePdfSpace(doc, imageHeight + captionHeight + 12);
+      rowTop = doc.y;
     }
 
     const x = index % 2 === 0 ? startX : startX + cardWidth + gap;
-    const y = doc.y;
-    const title = type === 'inspection' ? row.caption : row.test_name;
-    const meta = type === 'inspection' ? row.location : row.scopeLabel;
-    const imagePath = getPdfImagePath(row.source);
+    doc.rect(x, rowTop, cardWidth, imageHeight).lineWidth(0.5).strokeColor('#BFBFBF').stroke();
 
-    doc.rect(x, y, cardWidth, imageHeight).lineWidth(0.5).strokeColor('#BFBFBF').stroke();
-
-    if (imagePath) {
+    let rendered = false;
+    if (row.asset) {
       try {
-        doc.image(imagePath, x + 2, y + 2, {
+        doc.image(row.asset.buffer, x + 2, rowTop + 2, {
           fit: [cardWidth - 4, imageHeight - 4],
           align: 'center',
           valign: 'center'
         });
+        rendered = true;
       } catch (error) {
-        doc.font('Helvetica').fontSize(9).fillColor('#666666').text('Image could not be rendered', x + 8, y + 68, {
-          width: cardWidth - 16,
+        rendered = false;
+      }
+    }
+
+    if (!rendered) {
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .fillColor('#666666')
+        .text('Image could not be embedded', x + 6, rowTop + imageHeight / 2 - 6, {
+          width: cardWidth - 12,
           align: 'center'
         });
-      }
-    } else {
-      doc.font('Helvetica').fontSize(9).fillColor('#666666').text('Image not available in export', x + 8, y + 68, {
-        width: cardWidth - 16,
-        align: 'center'
-      });
     }
 
     doc
       .fillColor('#000000')
       .font('Helvetica')
-      .fontSize(9)
-      .text(safeText(title, 'Untitled'), x, y + imageHeight + 4, {
-        width: cardWidth,
-        align: 'center'
-      });
+      .fontSize(8)
+      .text(safeText(row.caption, 'Untitled'), x, rowTop + imageHeight + 3, { width: cardWidth, align: 'center' });
     doc
       .fillColor('#555555')
-      .fontSize(8)
-      .text(safeText(meta, ''), x, y + imageHeight + 16, {
+      .fontSize(7)
+      .text(safeText(row.location || row.scopeLabel), x, rowTop + imageHeight + 15, {
         width: cardWidth,
         align: 'center'
       });
+    doc.fillColor('#000000');
 
     if (index % 2 === 1 || index === rows.length - 1) {
-      doc.y = y + cardHeight + 10;
+      doc.y = rowTop + imageHeight + captionHeight + 6;
     }
   });
-  doc.fillColor('#000000');
+
+  pdfResetX(doc);
 };
 
-const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) => {
-  const observations = collectStructureObservations(structureExport.structure);
-  const quantifications = collectQuantifications(structureExport.structure);
-  const tests = collectTests(structureExport.structure);
-  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
-  const structure = structureExport.structure;
-  const summaryRows = summarizeMethodology(quantifications);
-  const ownerEmployee = [
-    buildOwnerLabel(structureExport.owner),
-    structureExport.owner?.profile?.employee_id ? `(${structureExport.owner.profile.employee_id})` : ''
-  ].filter(Boolean).join(' ');
-  const locationSummary = [
-    structure.location?.state_code,
-    structure.location?.district_code,
-    structure.location?.city_name,
-    structure.location?.location_code
-  ]
-    .filter(Boolean)
-    .join(' / ');
-  const coordinates = [formatCoordinate(structure.location?.latitude), formatCoordinate(structure.location?.longitude)]
-    .filter(Boolean)
-    .join(', ');
-  const blockNames = collectBlockNames(structure);
-
+const renderStructurePdf = (doc, prepared, index) => {
   if (index > 0) doc.addPage();
 
-  doc.font('Helvetica-Bold').fontSize(18).fillColor('#1F1F1F').text('SAMS', { align: 'center' });
+  pdfResetX(doc);
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(18)
+    .fillColor('#1F1F1F')
+    .text('SAMS', { align: 'center', width: PDF_CONTENT_WIDTH });
+  pdfResetX(doc);
+  doc.moveDown(0.3);
+
+  const labelY = doc.y;
+  doc.rect(doc.page.margins.left, labelY, 165, 16).fill('#FFF200');
+  doc
+    .fillColor('#000000')
+    .font('Helvetica-Bold')
+    .fontSize(11)
+    .text('OUTPUT / REPORT FORMAT:', doc.page.margins.left + 4, labelY + 4, { lineBreak: false });
+  doc.y = labelY + 22;
+  pdfResetX(doc);
+
+  // Structure / location / administrative details as 4-column tables.
+  const detailWidths = [110, 152, 110, 151];
+  const detailSpanWidths = [110, PDF_CONTENT_WIDTH - 110];
+
+  prepared.detailSections.forEach((section) => {
+    pdfBandRow(doc, section.title, '#D9E2F3');
+
+    let pending = null;
+    const flush = () => {
+      if (!pending) return;
+      pdfTableRow(doc, [pending[0], pending[1], '', ''], detailWidths);
+      pending = null;
+    };
+
+    section.rows.forEach(([label, value, options]) => {
+      if (options?.span) {
+        flush();
+        pdfTableRow(doc, [label, safeText(value)], detailSpanWidths);
+        return;
+      }
+      if (pending) {
+        pdfTableRow(doc, [pending[0], pending[1], label, safeText(value)], detailWidths);
+        pending = null;
+      } else {
+        pending = [label, safeText(value)];
+      }
+    });
+
+    flush();
+    doc.moveDown(0.3);
+  });
+
   doc.moveDown(0.2);
-  pdfHighlightLabel(doc, 'OUTPUT / REPORT FORMAT:');
-  doc.fillColor('#000000');
 
-  pdfKeyValue(doc, 'Structure ID', structure.structural_identity?.structural_identity_number || '');
-  pdfKeyValue(doc, 'UID', structure.structural_identity?.uid || '');
-  pdfKeyValue(doc, 'Structure Type', structure.structural_identity?.type_of_structure || '');
-  pdfKeyValue(doc, 'Structure Subtype', structure.structural_identity?.structure_subtype || '');
-  pdfKeyValue(doc, 'Age Of Structure', safeText(structure.structural_identity?.age_of_structure));
-  pdfKeyValue(doc, 'Total Floors', safeText(structure.geometric_details?.number_of_floors));
-  pdfKeyValue(doc, 'Owner / Employee', ownerEmployee || '');
-  pdfKeyValue(doc, 'Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || '');
-  pdfKeyValue(doc, 'Location', locationSummary);
-  pdfKeyValue(doc, 'Coordinates', coordinates);
-  pdfKeyValue(doc, 'Block Name', blockNames);
-  pdfKeyValue(doc, 'Structure Width', safeText(structure.geometric_details?.structure_width));
-  pdfKeyValue(doc, 'Structure Length', safeText(structure.geometric_details?.structure_length));
-  pdfKeyValue(doc, 'Structure Height', safeText(structure.geometric_details?.structure_height));
-  pdfKeyValue(doc, 'Created Date', formatDate(structure.creation_info?.created_date) || '');
-  pdfKeyValue(doc, 'Last Updated', formatDate(structure.creation_info?.last_updated_date) || '');
-  pdfKeyValue(doc, 'Applied Filters', filtersApplied || '');
-  doc.moveDown(0.6);
-
+  // OBSERVATIONS
   pdfSectionTitle(doc, 'OBSERVATIONS');
-  if (!observations.length) {
-    pdfTableRow(doc, ['S. No', 'Location', 'Remarks', 'Category'], [45, 120, 275, 95], { header: true });
+  const obsWidths = [45, PDF_CONTENT_WIDTH - 45];
+  pdfTableRow(doc, ['S. No', 'Location/Remarks'], obsWidths, { header: true });
+  if (!prepared.observationGroups.size) {
+    pdfTableRow(doc, ['', 'No observations recorded'], obsWidths);
   } else {
-    pdfTableRow(doc, ['S. No', 'Location', 'Remarks', 'Category'], [45, 120, 275, 95], { header: true });
-
-    observations.forEach((item, rowIndex) => {
-      pdfTableRow(
-        doc,
-        [
-          String(rowIndex + 1),
-          item.location || 'N/A',
-          item.remarks ? `${item.component}: ${item.remarks}` : item.component,
-          item.category || 'N/A'
-        ],
-        [45, 120, 275, 95],
-        { fontSize: 8 }
-      );
+    prepared.observationGroups.forEach((buckets, location) => {
+      pdfBandRow(doc, safeText(location).toUpperCase(), '#DDEBF7');
+      [
+        [STRUCTURAL_SECTION, buckets.structural],
+        [NON_STRUCTURAL_SECTION, buckets.nonStructural]
+      ].forEach(([sectionLabel, items]) => {
+        if (!items.length) return;
+        pdfBandRow(doc, sectionLabel, '#F2F2F2');
+        items.forEach((item, rowIndex) => {
+          pdfTableRow(doc, [String(rowIndex + 1), buildObservationLine(item)], obsWidths);
+        });
+      });
     });
   }
 
   pdfSectionTitle(doc, 'INSPECTION IMAGES');
-  renderPdfImageGrid(doc, inspectionImages, 'inspection');
+  renderPdfImageGrid(doc, prepared.inspectionImages);
 
+  // TEST RESULTS
   pdfSectionTitle(doc, 'TEST RESULTS');
-  if (!tests.length) {
-    doc.moveDown(0.1);
+  if (!prepared.testGroups.size) {
+    pdfParagraph(doc, 'No test results recorded.', { font: 'Helvetica-Oblique', color: '#888888' });
   } else {
-    const groupedTests = groupTestsForPdf(tests);
-
+    const testWidths = [95, 75, 60, 50, 95, 78, 70];
     let testIndex = 1;
-    groupedTests.forEach((rows, testName) => {
-      ensurePdfSpace(doc, 18);
-      doc.font('Helvetica').fontSize(12).fillColor('#000000').text(`${testIndex}. ${testName}`);
-      pdfTableRow(doc, ['Location', 'Component', 'Date', 'Result', 'Remarks', 'Attachment'], [120, 100, 55, 110, 85, 65], { header: true, fontSize: 8 });
-      rows.forEach((row, rowIndex) => {
+    prepared.testGroups.forEach((rows, testName) => {
+      ensurePdfSpace(doc, 20);
+      pdfParagraph(doc, `${testIndex}. ${testName}`, { font: 'Helvetica-Bold', fontSize: 10 });
+      pdfTableRow(doc, ['Location', 'Component', 'Tested By', 'Date', 'Result', 'Remarks', 'Attachments'], testWidths, {
+        header: true
+      });
+      rows.forEach((row) => {
         pdfTableRow(
           doc,
           [
             row.scopeLabel,
             [row.component_type, row.component_id].filter(Boolean).join(' / '),
-            row.test_date || '',
-            row.result_summary || '',
-            row.remarks || '',
-            row.attachment || ''
+            row.tested_by,
+            row.test_date,
+            row.result_summary,
+            row.remarks,
+            row.attachments.map((attachment) => attachment.name).join('\n')
           ],
-          [120, 100, 55, 110, 85, 65],
-          { fontSize: 8 }
+          testWidths
         );
       });
       testIndex += 1;
@@ -1450,85 +2265,596 @@ const renderStructurePdf = (doc, structureExport, filtersApplied, index, total) 
   }
 
   pdfSectionTitle(doc, 'TESTING IMAGES');
-  renderPdfImageGrid(doc, testingImages, 'testing');
+  renderPdfImageGrid(doc, prepared.testingImages);
 
-  pdfSectionTitle(doc, 'QUANTIFICATION');
-  if (!quantifications.length) {
-    doc.moveDown(0.1);
+  // ATTACHED FILES
+  pdfSectionTitle(doc, 'ATTACHED FILES');
+  if (!prepared.fileAttachments.length) {
+    pdfParagraph(doc, 'No additional documents attached.', { font: 'Helvetica-Oblique', color: '#888888' });
   } else {
-    const groupedQuantifications = groupQuantificationsForPdf(quantifications);
-    groupedQuantifications.forEach((rows, category) => {
-      ensurePdfSpace(doc, 18);
-      const startX = doc.page.margins.left;
-      const y = doc.y;
-      doc.rect(startX, y, 535, 16).fill('#FFF200');
-      doc
-        .fillColor('#000000')
-        .font('Helvetica-Bold')
-        .fontSize(10)
-        .text(category, startX, y + 4, { width: 535, align: 'center' });
-      doc.y = y + 18;
-      pdfTableRow(
-        doc,
-        ['S. No', 'Location of Distress', 'Distress', 'Nos', 'L', 'B', 'H', 'Length / Area / Volume', 'Repair Methodology'],
-        [32, 120, 78, 35, 35, 35, 35, 90, 75],
-        { header: true, fontSize: 8 }
-      );
-      rows.forEach((row, rowIndex) => {
+    const attachmentWidths = [40, 150, 150, PDF_CONTENT_WIDTH - 340];
+    pdfTableRow(doc, ['S. No', 'Location', 'Context', 'File'], attachmentWidths, { header: true });
+    prepared.fileAttachments.forEach((file, fileIndex) => {
+      pdfTableRow(doc, [String(fileIndex + 1), file.location, file.context, file.name], attachmentWidths);
+    });
+  }
+
+  // QUANTIFICATION
+  pdfSectionTitle(doc, 'QUANTIFICATION');
+  const quantWidths = [30, 128, 32, 32, 32, 32, 88, 149];
+  if (!prepared.quantificationSections.length) {
+    pdfTableRow(
+      doc,
+      ['S.No', 'Location of Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Rm / Sqm / Cum', 'Repair Methodology'],
+      quantWidths,
+      { header: true }
+    );
+    pdfTableRow(doc, ['', 'No quantification entries recorded', '', '', '', '', '', ''], quantWidths);
+  } else {
+    prepared.quantificationSections.forEach(([sectionLabel, groups]) => {
+      pdfBandRow(doc, sectionLabel, '#D9E2F3');
+      groups.forEach((items, groupName) => {
+        pdfBandRow(doc, groupName, '#FFF200');
         pdfTableRow(
           doc,
-          [
-            String(rowIndex + 1),
-            row.location_of_distress,
-            row.distress,
-            String(row.nos),
-            row.length ?? '',
-            row.breadth ?? '',
-            row.height ?? '',
-            formatApproxQuantity(row.quantity),
-            row.repair_methodology
-          ],
-          [32, 120, 78, 35, 35, 35, 35, 90, 75],
-          { fontSize: 8 }
+          ['S.No', 'Location of Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Rm / Sqm / Cum', 'Repair Methodology'],
+          quantWidths,
+          { header: true }
+        );
+        let groupTotal = 0;
+        items.forEach((row, rowIndex) => {
+          groupTotal += toNumber(row.quantity) ?? 0;
+          pdfTableRow(
+            doc,
+            [
+              String(rowIndex + 1),
+              row.location_of_distress,
+              String(row.nos),
+              row.length ?? '',
+              row.breadth ?? '',
+              row.height ?? '',
+              formatApproxQuantity(row.quantity),
+              row.repair_methodology
+            ],
+            quantWidths
+          );
+        });
+        // The label cell spans S.No..H, mirroring the colspan used in the Word/HTML table.
+        pdfTableRow(
+          doc,
+          [`Total - ${groupName}`, formatApproxQuantity(groupTotal), ''],
+          [quantWidths.slice(0, 6).reduce((sum, width) => sum + width, 0), quantWidths[6], quantWidths[7]],
+          { font: 'Helvetica-Bold' }
         );
       });
-      doc.moveDown(0.2);
     });
   }
 
-  pdfSectionTitle(doc, 'REPAIR METHODOLOGY SUMMARY');
-  if (!summaryRows.length) {
-    pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], [40, 320, 90, 90], { header: true });
-    pdfTableRow(doc, ['', '', '', ''], [40, 320, 90, 90]);
-  } else {
-    pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], [40, 320, 90, 90], { header: true });
-    summaryRows.forEach((row, rowIndex) => {
-      pdfTableRow(doc, [String(rowIndex + 1), row.description, String(row.quantity), row.units], [40, 320, 90, 90]);
-    });
-  }
+  // BOQ SUMMARIES
+  const summaryWidths = [40, 313, 90, 80];
+  [
+    ['BILL OF QUANTITY SUMMARY - STRUCTURAL', prepared.summary.structural],
+    ['BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', prepared.summary.nonStructural],
+    ['BILL OF QUANTITY SUMMARY - TOTAL', prepared.summary.combined]
+  ].forEach(([title, rows]) => {
+    pdfSectionTitle(doc, title);
+    pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], summaryWidths, { header: true });
+    if (!rows.length) {
+      pdfTableRow(doc, ['', 'No repair quantities recorded', '', ''], summaryWidths);
+    } else {
+      rows.forEach((row, rowIndex) => {
+        pdfTableRow(doc, [String(rowIndex + 1), row.description, String(row.quantity), row.units], summaryWidths);
+      });
+    }
+  });
 
+  // NOTES
+  pdfSectionTitle(doc, 'NOTE');
+  QUANTIFICATION_NOTES.forEach((note, noteIndex) => {
+    ensurePdfSpace(doc, 16);
+    pdfParagraph(doc, `${noteIndex + 1}. ${note}`);
+  });
 };
 
-const writeStructureWorksheet = (worksheet, structureExport, filtersApplied) => {
+const sendPdfBuffer = (res, buffer, fileName) => {
+  res.setHeader('Content-Type', PDF_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.setHeader('Content-Length', String(buffer.length));
+  res.send(buffer);
+};
+
+const renderPdfWithPdfKit = (preparedStructures) =>
+  new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 36, bufferPages: true });
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    try {
+      preparedStructures.forEach((prepared, index) => renderStructurePdf(doc, prepared, index));
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+const renderPdfWithBrowser = async (executablePath, html) => {
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      executablePath,
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
+
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'load', timeout: 60000 });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '12mm', right: '12mm', bottom: '12mm', left: '12mm' }
+    });
+    return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+};
+
+/**
+ * Renders with Chrome/Edge when one is installed (best fidelity) and otherwise falls
+ * back to the built-in PDFKit renderer, so PDF download never hard-fails on a server
+ * without a browser.
+ */
+const sendPdfReport = async (res, preparedStructures, fileName) => {
+  const executablePath = resolveBrowserExecutablePath();
+
+  if (executablePath) {
+    try {
+      const html = buildReportHtml(preparedStructures, (asset) => (asset ? asset.dataUri : ''));
+      const buffer = await renderPdfWithBrowser(executablePath, html);
+      return sendPdfBuffer(res, buffer, fileName);
+    } catch (error) {
+      console.error('Browser PDF rendering failed, falling back to PDFKit:', error.message);
+    }
+  }
+
+  const buffer = await renderPdfWithPdfKit(preparedStructures);
+  return sendPdfBuffer(res, buffer, fileName);
+};
+
+// =================== EXCEL OUTPUT ===================
+
+const setCellBorder = (cell) => {
+  cell.border = {
+    top: { style: 'thin', color: { argb: COLORS.BORDER } },
+    left: { style: 'thin', color: { argb: COLORS.BORDER } },
+    bottom: { style: 'thin', color: { argb: COLORS.BORDER } },
+    right: { style: 'thin', color: { argb: COLORS.BORDER } }
+  };
+};
+
+const styleRowCells = (worksheet, rowNumber, fromCol, toCol, options = {}) => {
+  for (let col = fromCol; col <= toCol; col += 1) {
+    const cell = worksheet.getCell(rowNumber, col);
+    cell.font = options.font || FONTS.BODY;
+    cell.alignment = options.alignment || { vertical: 'middle', wrapText: true };
+    if (options.fill) cell.fill = options.fill;
+    setCellBorder(cell);
+  }
+};
+
+const solidFill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+
+const addMergedSectionRow = (worksheet, rowNumber, text, fillColor, columnCount, options = {}) => {
+  worksheet.mergeCells(rowNumber, 1, rowNumber, columnCount);
+  const cell = worksheet.getCell(rowNumber, 1);
+  cell.value = text;
+  cell.font = options.font || FONTS.HEADER;
+  cell.fill = solidFill(fillColor);
+  cell.alignment = { vertical: 'middle', horizontal: options.horizontal || 'left', wrapText: true };
+  for (let col = 1; col <= columnCount; col += 1) {
+    setCellBorder(worksheet.getCell(rowNumber, col));
+  }
+  worksheet.getRow(rowNumber).height = 20;
+};
+
+const addTableHeader = (worksheet, rowNumber, headers, fillColor = COLORS.SECONDARY) => {
+  headers.forEach((header, index) => {
+    const cell = worksheet.getCell(rowNumber, index + 1);
+    cell.value = header;
+    cell.font = { ...FONTS.HEADER, color: { argb: COLORS.WHITE } };
+    cell.fill = solidFill(fillColor);
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    setCellBorder(cell);
+  });
+  worksheet.getRow(rowNumber).height = 22;
+};
+
+const writeRow = (worksheet, rowNumber, values, options = {}) => {
+  values.forEach((value, index) => {
+    worksheet.getCell(rowNumber, index + 1).value = value === null || value === undefined ? '' : value;
+  });
+  styleRowCells(worksheet, rowNumber, 1, values.length, options);
+  return rowNumber + 1;
+};
+
+// Column 1 doubles as the "S. No" column and the detail-table label column, hence the
+// wider-than-usual first column.
+const ensureColumns = (worksheet) => {
+  worksheet.columns = [
+    { width: 14 },
+    { width: 34 },
+    { width: 10 },
+    { width: 10 },
+    { width: 14 },
+    { width: 12 },
+    { width: 18 },
+    { width: 30 },
+    { width: 14 }
+  ];
+};
+
+const addExcelObservationSection = (worksheet, startRow, observationGroups) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'OBSERVATIONS', COLORS.SECTION, 9);
+  row += 1;
+  row = writeRow(
+    worksheet,
+    row,
+    [
+      'Observation given in the structural and non-structural shall be reflect in the table and images below the table in the output.'
+    ],
+    { font: FONTS.SMALL }
+  );
+  worksheet.mergeCells(row - 1, 1, row - 1, 9);
+
+  addTableHeader(worksheet, row, ['S. No', 'Location/Remarks'], COLORS.PRIMARY);
+  worksheet.mergeCells(row, 2, row, 9);
+  row += 1;
+
+  if (!observationGroups.size) {
+    worksheet.getCell(row, 1).value = '';
+    worksheet.getCell(row, 2).value = 'No observations recorded';
+    worksheet.mergeCells(row, 2, row, 9);
+    styleRowCells(worksheet, row, 1, 9);
+    return row + 1;
+  }
+
+  observationGroups.forEach((buckets, location) => {
+    addMergedSectionRow(worksheet, row, safeText(location).toUpperCase(), COLORS.LOCATION, 9, {
+      horizontal: 'center'
+    });
+    row += 1;
+
+    [
+      [STRUCTURAL_SECTION, buckets.structural],
+      [NON_STRUCTURAL_SECTION, buckets.nonStructural]
+    ].forEach(([sectionLabel, items]) => {
+      if (!items.length) return;
+      addMergedSectionRow(worksheet, row, sectionLabel, COLORS.SUBSECTION, 9, { horizontal: 'center' });
+      row += 1;
+
+      items.forEach((item, index) => {
+        worksheet.getCell(row, 1).value = index + 1;
+        worksheet.getCell(row, 2).value = buildObservationLine(item);
+        worksheet.mergeCells(row, 2, row, 9);
+        styleRowCells(worksheet, row, 1, 9);
+        row += 1;
+      });
+    });
+  });
+
+  return row;
+};
+
+const addExcelImageSection = (workbook, worksheet, startRow, title, rows) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, title, COLORS.SECTION, 9);
+  row += 1;
+  addTableHeader(worksheet, row, ['S. No', 'Caption', 'Location', 'Image', '', '', 'Source', '', ''], COLORS.PRIMARY);
+  worksheet.mergeCells(row, 4, row, 6);
+  worksheet.mergeCells(row, 7, row, 9);
+  row += 1;
+
+  if (!rows.length) {
+    worksheet.getCell(row, 1).value = '';
+    worksheet.getCell(row, 2).value = 'No images attached';
+    styleRowCells(worksheet, row, 1, 9);
+    return row + 1;
+  }
+
+  rows.forEach((entry, index) => {
+    worksheet.getCell(row, 1).value = index + 1;
+    worksheet.getCell(row, 2).value = safeText(entry.caption);
+    worksheet.getCell(row, 3).value = safeText(entry.location || entry.scopeLabel);
+    worksheet.getCell(row, 7).value = safeText(entry.source);
+    worksheet.mergeCells(row, 4, row, 6);
+    worksheet.mergeCells(row, 7, row, 9);
+    styleRowCells(worksheet, row, 1, 9);
+
+    const extension = entry.asset ? EXCEL_IMAGE_EXTENSIONS[entry.asset.mimeType] : null;
+    if (extension) {
+      try {
+        const imageId = workbook.addImage({ buffer: entry.asset.buffer, extension });
+        worksheet.getRow(row).height = 90;
+        worksheet.addImage(imageId, {
+          tl: { col: 3.1, row: row - 1 + 0.1 },
+          ext: { width: 160, height: 110 }
+        });
+      } catch (error) {
+        worksheet.getCell(row, 4).value = 'Image could not be embedded';
+      }
+    } else {
+      worksheet.getCell(row, 4).value = entry.asset ? 'Preview unsupported' : 'Image not available';
+    }
+
+    row += 1;
+  });
+
+  return row;
+};
+
+const addExcelTestSection = (worksheet, startRow, testGroups) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'TEST RESULTS', COLORS.SECTION, 9);
+  row += 1;
+
+  if (!testGroups.size) {
+    addTableHeader(
+      worksheet,
+      row,
+      ['S. No', 'Location', 'Component', 'Tested By', 'Date', 'Result', 'Remarks', 'Attachments', ''],
+      COLORS.PRIMARY
+    );
+    row += 1;
+    return writeRow(worksheet, row, ['', 'No test results recorded', '', '', '', '', '', '', '']);
+  }
+
+  let testIndex = 1;
+  testGroups.forEach((testRows, testName) => {
+    addMergedSectionRow(worksheet, row, `${testIndex}. ${testName}`, COLORS.SUBSECTION, 9);
+    row += 1;
+    addTableHeader(
+      worksheet,
+      row,
+      ['S. No', 'Location', 'Component', 'Tested By', 'Date', 'Result', 'Remarks', 'Attachments', ''],
+      COLORS.PRIMARY
+    );
+    worksheet.mergeCells(row, 8, row, 9);
+    row += 1;
+
+    testRows.forEach((item, index) => {
+      worksheet.getCell(row, 1).value = index + 1;
+      worksheet.getCell(row, 2).value = item.scopeLabel;
+      worksheet.getCell(row, 3).value = [item.component_type, item.component_id].filter(Boolean).join(' / ');
+      worksheet.getCell(row, 4).value = item.tested_by;
+      worksheet.getCell(row, 5).value = item.test_date;
+      worksheet.getCell(row, 6).value = item.result_summary;
+      worksheet.getCell(row, 7).value = item.remarks;
+      worksheet.getCell(row, 8).value = item.attachments.map((attachment) => attachment.name).join('\n');
+      worksheet.mergeCells(row, 8, row, 9);
+      styleRowCells(worksheet, row, 1, 9);
+      row += 1;
+    });
+
+    testIndex += 1;
+  });
+
+  return row;
+};
+
+const addExcelAttachmentSection = (worksheet, startRow, fileAttachments) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'ATTACHED FILES', COLORS.SECTION, 9);
+  row += 1;
+  addTableHeader(worksheet, row, ['S. No', 'Location', 'Context', 'File', '', 'Source', '', '', ''], COLORS.PRIMARY);
+  worksheet.mergeCells(row, 4, row, 5);
+  worksheet.mergeCells(row, 6, row, 9);
+  row += 1;
+
+  if (!fileAttachments.length) {
+    return writeRow(worksheet, row, ['', 'No additional documents attached', '', '', '', '', '', '', '']);
+  }
+
+  fileAttachments.forEach((file, index) => {
+    worksheet.getCell(row, 1).value = index + 1;
+    worksheet.getCell(row, 2).value = file.location;
+    worksheet.getCell(row, 3).value = file.context;
+    worksheet.getCell(row, 4).value = file.name;
+    worksheet.getCell(row, 6).value = file.source;
+    worksheet.mergeCells(row, 4, row, 5);
+    worksheet.mergeCells(row, 6, row, 9);
+    styleRowCells(worksheet, row, 1, 9);
+    row += 1;
+  });
+
+  return row;
+};
+
+const QUANT_HEADERS = [
+  'S. No',
+  'Location of Distress',
+  'Nos',
+  'L (M)',
+  'B (M)',
+  'H (M)',
+  'Length (Rm) / Area (Sqm) / Volume (Cum)',
+  'Repair Methodology',
+  'Unit'
+];
+
+const addExcelQuantificationSection = (worksheet, startRow, quantificationSections) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'QUANTIFICATION', COLORS.SECTION, 9);
+  row += 1;
+
+  if (!quantificationSections.length) {
+    addTableHeader(worksheet, row, QUANT_HEADERS, COLORS.PRIMARY);
+    row += 1;
+    return writeRow(worksheet, row, ['', 'No quantification entries recorded', '', '', '', '', '', '', '']);
+  }
+
+  quantificationSections.forEach(([sectionLabel, groups]) => {
+    addMergedSectionRow(worksheet, row, sectionLabel, COLORS.SECTION, 9, { horizontal: 'center' });
+    row += 1;
+
+    groups.forEach((items, groupName) => {
+      addMergedSectionRow(worksheet, row, groupName, COLORS.HIGHLIGHT, 9, { horizontal: 'center' });
+      row += 1;
+      addTableHeader(worksheet, row, QUANT_HEADERS, COLORS.PRIMARY);
+      row += 1;
+
+      let groupTotal = 0;
+      items.forEach((entry, index) => {
+        groupTotal += toNumber(entry.quantity) ?? 0;
+        row = writeRow(worksheet, row, [
+          index + 1,
+          entry.location_of_distress,
+          entry.nos,
+          entry.length ?? '',
+          entry.breadth ?? '',
+          entry.height ?? '',
+          Number(formatApproxQuantity(entry.quantity) || 0),
+          entry.repair_methodology,
+          entry.unit
+        ]);
+      });
+
+      row = writeRow(
+        worksheet,
+        row,
+        ['', `Total - ${groupName}`, '', '', '', '', Number(formatApproxQuantity(groupTotal) || 0), '', ''],
+        { font: { ...FONTS.BODY, bold: true }, fill: solidFill('FFF2F2F2') }
+      );
+    });
+  });
+
+  return row;
+};
+
+const addExcelSummarySection = (worksheet, startRow, title, summaryRows) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, title, COLORS.SECTION, 9);
+  row += 1;
+  addTableHeader(worksheet, row, ['S. No', 'Description', 'Quantity', 'Units', '', '', '', '', ''], COLORS.PRIMARY);
+  worksheet.mergeCells(row, 4, row, 9);
+  row += 1;
+
+  if (!summaryRows.length) {
+    return writeRow(worksheet, row, ['', 'No repair quantities recorded', '', '', '', '', '', '', '']);
+  }
+
+  summaryRows.forEach((entry, index) => {
+    worksheet.getCell(row, 1).value = index + 1;
+    worksheet.getCell(row, 2).value = entry.description;
+    worksheet.getCell(row, 3).value = entry.quantity;
+    worksheet.getCell(row, 4).value = entry.units;
+    worksheet.mergeCells(row, 4, row, 9);
+    styleRowCells(worksheet, row, 1, 9);
+    row += 1;
+  });
+
+  return row;
+};
+
+const addExcelNotes = (worksheet, startRow) => {
+  let row = startRow;
+  addMergedSectionRow(worksheet, row, 'NOTE', COLORS.NOTE, 9);
+  row += 1;
+  QUANTIFICATION_NOTES.forEach((note, index) => {
+    addMergedSectionRow(worksheet, row, `${index + 1}. ${note}`, COLORS.NOTE, 9, { font: FONTS.SMALL });
+    row += 1;
+  });
+  return row;
+};
+
+const addStructureHeader = (worksheet, prepared) => {
+  worksheet.mergeCells('A1:I1');
+  worksheet.getCell('A1').value = 'SAMS';
+  worksheet.getCell('A1').font = FONTS.TITLE;
+  worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+
+  addMergedSectionRow(worksheet, 2, 'OUTPUT / REPORT FORMAT', COLORS.HIGHLIGHT, 9);
+
+  let row = 4;
+
+  // Label | Value | Label | Value across the 9 columns, matching the Word/PDF layout.
+  const writeDetailPair = (left, right) => {
+    worksheet.getCell(row, 1).value = left[0];
+    worksheet.getCell(row, 2).value = left[1];
+    worksheet.mergeCells(row, 2, row, 4);
+    if (right) {
+      worksheet.getCell(row, 5).value = right[0];
+      worksheet.getCell(row, 6).value = right[1];
+      worksheet.mergeCells(row, 6, row, 9);
+    } else {
+      worksheet.mergeCells(row, 5, row, 9);
+    }
+    styleRowCells(worksheet, row, 1, 9);
+    worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
+    worksheet.getCell(row, 1).fill = solidFill('FFF7F7F7');
+    if (right) {
+      worksheet.getCell(row, 5).font = { ...FONTS.BODY, bold: true };
+      worksheet.getCell(row, 5).fill = solidFill('FFF7F7F7');
+    }
+    row += 1;
+  };
+
+  prepared.detailSections.forEach((section) => {
+    addMergedSectionRow(worksheet, row, section.title, COLORS.SECTION, 9, { horizontal: 'center' });
+    row += 1;
+
+    let pending = null;
+    section.rows.forEach(([label, value, options]) => {
+      if (options?.span) {
+        if (pending) {
+          writeDetailPair(pending, null);
+          pending = null;
+        }
+        worksheet.getCell(row, 1).value = label;
+        worksheet.getCell(row, 2).value = safeText(value);
+        worksheet.mergeCells(row, 2, row, 9);
+        styleRowCells(worksheet, row, 1, 9);
+        worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
+        worksheet.getCell(row, 1).fill = solidFill('FFF7F7F7');
+        row += 1;
+        return;
+      }
+
+      if (pending) {
+        writeDetailPair(pending, [label, safeText(value)]);
+        pending = null;
+      } else {
+        pending = [label, safeText(value)];
+      }
+    });
+
+    if (pending) writeDetailPair(pending, null);
+    row += 1;
+  });
+
+  return row;
+};
+
+const writeStructureWorksheet = (workbook, worksheet, prepared) => {
   ensureColumns(worksheet);
 
-  const observations = collectStructureObservations(structureExport.structure);
-  const quantifications = collectQuantifications(structureExport.structure);
-  const tests = collectTests(structureExport.structure);
-  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
-
-  let row = addStructureHeader(worksheet, structureExport, filtersApplied);
-  row = addObservationSection(worksheet, row, observations);
-  row += 1;
-  row = addImageSection(worksheet, row, 'INSPECTION IMAGES', inspectionImages, false);
-  row += 1;
-  row = addTestSection(worksheet, row, tests);
-  row += 1;
-  row = addImageSection(worksheet, row, 'TESTING IMAGES', testingImages, true);
-  row += 1;
-  row = addQuantificationSection(worksheet, row, quantifications);
-  row += 1;
-  addMethodologySummary(worksheet, row, quantifications);
+  let row = addStructureHeader(worksheet, prepared);
+  row = addExcelObservationSection(worksheet, row, prepared.observationGroups) + 1;
+  row = addExcelImageSection(workbook, worksheet, row, 'INSPECTION IMAGES', prepared.inspectionImages) + 1;
+  row = addExcelTestSection(worksheet, row, prepared.testGroups) + 1;
+  row = addExcelImageSection(workbook, worksheet, row, 'TESTING IMAGES', prepared.testingImages) + 1;
+  row = addExcelAttachmentSection(worksheet, row, prepared.fileAttachments) + 1;
+  row = addExcelQuantificationSection(worksheet, row, prepared.quantificationSections) + 1;
+  row = addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - STRUCTURAL', prepared.summary.structural) + 1;
+  row =
+    addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', prepared.summary.nonStructural) +
+    1;
+  row = addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - TOTAL', prepared.summary.combined) + 1;
+  addExcelNotes(worksheet, row);
 
   worksheet.views = [{ state: 'frozen', ySplit: 3 }];
 };
@@ -1542,569 +2868,90 @@ const createWorkbook = (reqUser) => {
   return workbook;
 };
 
-const createPdfDocument = () =>
-  new PDFDocument({
-    size: 'A4',
-    margin: 36,
-    bufferPages: true
-  });
-
 const sendWorkbook = async (res, workbook, fileName) => {
+  const buffer = await workbook.xlsx.writeBuffer();
+  const normalized = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   res.setHeader('Content-Type', EXCEL_MIME);
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-  await workbook.xlsx.write(res);
-  res.end();
+  res.setHeader('Content-Length', String(normalized.length));
+  res.send(normalized);
 };
 
-const sendPdf = (res, doc, fileName) =>
-  new Promise((resolve, reject) => {
-    res.setHeader('Content-Type', PDF_MIME);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    doc.on('error', reject);
-    res.on('finish', resolve);
-    doc.pipe(res);
-    doc.end();
-  });
+const buildExcelReport = (reqUser, preparedStructures, { withIndex = false } = {}) => {
+  const workbook = createWorkbook(reqUser);
 
-const renderWordTable = (headers, rows, options = {}) => `
-  <table class="${options.className || ''}">
-    <thead>
-      <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
-    </thead>
-    <tbody>
-      ${
-        rows.length
-          ? rows
-              .map(
-                (row) => `<tr>${row.map((cell) => `<td>${cell === null ? '&nbsp;' : escapeHtml(cell) || '&nbsp;'}</td>`).join('')}</tr>`
-              )
-              .join('')
-          : `<tr><td colspan="${headers.length}">&nbsp;</td></tr>`
-      }
-    </tbody>
-  </table>
-`;
-
-const renderWordSection = (title, body, subtitle = '') => `
-  <h2 class="section-title">${escapeHtml(title)}</h2>
-  ${subtitle ? `<p class="section-note">${escapeHtml(subtitle)}</p>` : ''}
-  ${body}
-`;
-
-const toWordImageSource = (value) => {
-  const source = safeText(value);
-  if (!source) return '';
-  if (/^https?:\/\//i.test(source) || /^data:/i.test(source)) return source;
-
-  const candidatePaths = [source, path.resolve(source)];
-  const existingPath = candidatePaths.find((candidate) => {
-    try {
-      return fs.existsSync(candidate);
-    } catch (error) {
-      return false;
-    }
-  });
-
-  if (!existingPath) {
-    return '';
+  let indexSheet = null;
+  if (withIndex) {
+    indexSheet = workbook.addWorksheet('Report Index');
+    indexSheet.columns = [
+      { header: 'S. No', key: 'serial', width: 8 },
+      { header: 'Structure ID', key: 'structureId', width: 24 },
+      { header: 'Owner', key: 'owner', width: 24 },
+      { header: 'Location', key: 'location', width: 24 },
+      { header: 'Status', key: 'status', width: 16 },
+      { header: 'Worksheet', key: 'worksheet', width: 24 }
+    ];
+    addTableHeader(indexSheet, 1, ['S. No', 'Structure ID', 'Owner', 'Location', 'Status', 'Worksheet'], COLORS.PRIMARY);
   }
 
-  const extension = getFileExtension(existingPath);
-  const mimeTypeMap = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.svg': 'image/svg+xml'
-  };
+  preparedStructures.forEach((prepared, index) => {
+    const structureId = safeText(
+      prepared.structure.structural_identity?.structural_identity_number,
+      String(prepared.structure._id)
+    );
+    const sheetName = sanitizeWorksheetName(`${index + 1}_${structureId}`, `Structure_${index + 1}`);
+    const worksheet = workbook.addWorksheet(sheetName);
+    writeStructureWorksheet(workbook, worksheet, prepared);
 
-  const mimeType = mimeTypeMap[extension];
-  if (!mimeType) {
-    return encodeURI(`file:///${existingPath.replace(/\\/g, '/')}`);
-  }
-
-  try {
-    const buffer = fs.readFileSync(existingPath);
-    return `data:${mimeType};base64,${buffer.toString('base64')}`;
-  } catch (error) {
-    return encodeURI(`file:///${existingPath.replace(/\\/g, '/')}`);
-  }
-};
-
-const groupObservationsForWord = (observations) =>
-  observations.reduce((acc, item) => {
-    if (!acc.has(item.location)) {
-      acc.set(item.location, {
-        structural: [],
-        nonStructural: []
+    if (indexSheet) {
+      indexSheet.addRow({
+        serial: index + 1,
+        structureId,
+        owner: buildOwnerLabel(prepared.owner),
+        location: [
+          prepared.structure.location?.state_code,
+          prepared.structure.location?.district_code,
+          prepared.structure.location?.city_name
+        ]
+          .filter(Boolean)
+          .join(' / '),
+        status: safeText(prepared.structure.status, 'N/A'),
+        worksheet: sheetName
       });
     }
-
-    const bucket = item.category === 'STRUCTURAL DISTRESS' ? 'structural' : 'nonStructural';
-    acc.get(item.location)[bucket].push(item);
-    return acc;
-  }, new Map());
-
-const groupTestsForWord = (tests) =>
-  tests.reduce((acc, test) => {
-    if (!acc.has(test.test_name)) acc.set(test.test_name, []);
-    acc.get(test.test_name).push(test);
-    return acc;
-  }, new Map());
-
-const groupQuantificationsForWord = (rows) =>
-  rows.reduce((acc, row) => {
-    const key = safeText(row.distress, 'OTHER');
-    if (!acc.has(key)) acc.set(key, []);
-    acc.get(key).push(row);
-    return acc;
-  }, new Map());
-
-const renderWordImageGrid = (rows, type) => {
-  if (!rows.length) {
-    return `<p class="empty-state"></p>`;
-  }
-
-  return `
-    <div class="image-grid">
-      ${rows
-        .map((row) => {
-          const imageSrc = toWordImageSource(row.source);
-          const caption = type === 'inspection' ? row.caption : row.test_name;
-
-          return `
-            <div class="image-card">
-              <div class="image-box">
-              ${
-                imageSrc
-                  ? `<img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(caption)}" />`
-                  : 'Image not available in export'
-              }
-              </div>
-              <div class="caption-title">${escapeHtml(caption)}</div>
-            </div>
-          `;
-        })
-        .join('')}
-    </div>
-  `;
-};
-
-const renderObservationSectionWord = (observations) => {
-  if (!observations.length) {
-    return '<table><thead><tr><th class="sno-col">S. No</th><th>Location</th><th>Remarks</th><th>Category</th></tr></thead><tbody></tbody></table>';
-  }
-
-  const rows = ['<table><thead><tr><th class="sno-col">S. No</th><th>Location</th><th>Remarks</th><th>Category</th></tr></thead><tbody>'];
-  observations.forEach((item, index) => {
-    const text = item.remarks ? `${item.component}: ${item.remarks}` : item.component;
-    rows.push(
-      `<tr><td class="sno-col center">${index + 1}</td><td>${escapeHtml(item.location || 'N/A')}</td><td>${escapeHtml(text)}</td><td>${escapeHtml(item.category || 'N/A')}</td></tr>`
-    );
-  });
-  rows.push('</tbody></table>');
-  return rows.join('');
-};
-
-const renderTestResultsWord = (tests) => {
-  const grouped = groupTestsForWord(tests);
-
-  if (!grouped.size) {
-    return '<p class="empty-state"></p>';
-  }
-
-  let testIndex = 1;
-  return Array.from(grouped.entries())
-    .map(([testName, rows]) => {
-      const table = renderWordTable(
-        ['Location', 'Component', 'Date', 'Result', 'Remarks', 'Attachment'],
-        rows.map((row) => [
-          row.scopeLabel,
-          [row.component_type, row.component_id].filter(Boolean).join(' / '),
-          row.test_date || '',
-          row.result_summary || '',
-          row.remarks || '',
-          getAttachmentLabel(row.attachment)
-        ]),
-        { className: 'test-table' }
-      );
-
-      const section = `<div class="test-block"><h3>${testIndex}. ${escapeHtml(testName)}</h3>${table}</div>`;
-      testIndex += 1;
-      return section;
-    })
-    .join('');
-};
-
-const renderSummaryTableWord = (summaryRows) =>
-  `
-    <table>
-      <thead>
-        <tr>
-          <th style="width:50px;" class="center">S. No</th>
-          <th>Description</th>
-          <th style="width:100px;" class="center">Quantity</th>
-          <th style="width:100px;" class="center">Units</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${
-          summaryRows.length
-            ? summaryRows
-                .map(
-                  (row, rowIndex) => `
-                    <tr>
-                      <td class="center">${rowIndex + 1}</td>
-                      <td>${escapeHtml(row.description)}</td>
-                      <td class="center">${escapeHtml(String(row.quantity))}</td>
-                      <td class="center">${escapeHtml(row.units)}</td>
-                    </tr>
-                  `
-                )
-                .join('')
-            : `
-              <tr>
-                <td class="center">&nbsp;</td>
-                <td>&nbsp;</td>
-                <td class="center">&nbsp;</td>
-                <td class="center">&nbsp;</td>
-              </tr>
-            `
-        }
-      </tbody>
-    </table>
-  `;
-
-const renderQuantificationWord = (quantifications) => {
-  const grouped = groupQuantificationsForWord(quantifications);
-
-  if (!grouped.size) {
-    return '<p class="empty-state"></p>';
-  }
-
-  const rows = [
-    `
-    <table>
-      <thead>
-        <tr>
-          <th rowspan="2" style="width:50px;" class="center">S.No</th>
-          <th rowspan="2">Location of Distress</th>
-          <th colspan="4" style="text-align:center;">Distress</th>
-          <th rowspan="2" style="text-align:center;">Length (Rm) / Area (Sqm) / Volume (Cum)</th>
-          <th rowspan="2">Repair Methodology</th>
-        </tr>
-        <tr>
-          <th class="center">Nos</th>
-          <th class="center">L</th>
-          <th class="center">B</th>
-          <th class="center">H</th>
-        </tr>
-      </thead>
-      <tbody>
-    `
-  ];
-
-  grouped.forEach((items, groupName) => {
-    rows.push(`<tr class="quant-group-row"><td colspan="8">${escapeHtml(groupName)}</td></tr>`);
-    items.forEach((row, index) => {
-      rows.push(`
-        <tr>
-          <td class="center">${index + 1}</td>
-          <td>${escapeHtml(row.location_of_distress)}</td>
-          <td class="center">${escapeHtml(String(row.nos))}</td>
-          <td class="center">${escapeHtml(row.length ?? '')}</td>
-          <td class="center">${escapeHtml(row.breadth ?? '')}</td>
-          <td class="center">${escapeHtml(row.height ?? '')}</td>
-          <td class="center">${escapeHtml(formatApproxQuantity(row.quantity))}</td>
-          <td>${escapeHtml(row.repair_methodology)}</td>
-        </tr>
-      `);
-    });
   });
 
-  rows.push('</tbody></table>');
-  return rows.join('');
+  return workbook;
 };
 
-const renderSummaryNoteList = () => '';
+// =================== ROUTES ===================
 
-const renderStructureWord = (structureExport, filtersApplied, index, total) => {
-  const observations = collectStructureObservations(structureExport.structure);
-  const quantifications = collectQuantifications(structureExport.structure);
-  const tests = collectTests(structureExport.structure);
-  const { inspectionImages, testingImages } = collectPhotoRows(observations, tests);
-  const structure = structureExport.structure;
-  const summaryRows = summarizeMethodology(quantifications);
-  const ownerEmployee = [
-    buildOwnerLabel(structureExport.owner),
-    structureExport.owner?.profile?.employee_id ? `(${structureExport.owner.profile.employee_id})` : ''
-  ].filter(Boolean).join(' ');
-  const locationSummary = [
-    structure.location?.state_code,
-    structure.location?.district_code,
-    structure.location?.city_name,
-    structure.location?.location_code
-  ]
-    .filter(Boolean)
-    .join(' / ');
-  const coordinates = [formatCoordinate(structure.location?.latitude), formatCoordinate(structure.location?.longitude)]
-    .filter(Boolean)
-    .join(', ');
-  const blockNames = collectBlockNames(structure);
+const sendReport = async ({ res, reqUser, structures, filterSummary, format, baseFileName, withIndex }) => {
+  const preparedStructures = await prepareStructureReports(structures, filterSummary);
+  const stamp = `${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
 
-  const summaryItems = [
-    ['Structure ID', structure.structural_identity?.structural_identity_number || ''],
-    ['UID', structure.structural_identity?.uid || ''],
-    ['Structure Type', structure.structural_identity?.type_of_structure || ''],
-    ['Structure Subtype', structure.structural_identity?.structure_subtype || ''],
-    ['Age Of Structure', safeText(structure.structural_identity?.age_of_structure)],
-    ['Total Floors', safeText(structure.geometric_details?.number_of_floors)],
-    ['Owner / Employee', ownerEmployee || ''],
-    ['Organization', structureExport.owner?.profile?.organization || structure.administration?.organization || ''],
-    ['Location', locationSummary],
-    ['Coordinates', coordinates],
-    ['Block Name', blockNames],
-    ['Structure Width', safeText(structure.geometric_details?.structure_width)],
-    ['Structure Length', safeText(structure.geometric_details?.structure_length)],
-    ['Structure Height', safeText(structure.geometric_details?.structure_height)],
-    ['Created Date', formatDate(structure.creation_info?.created_date) || ''],
-    ['Last Updated', formatDate(structure.creation_info?.last_updated_date) || ''],
-    ['Applied Filters', filtersApplied || '']
-  ];
-
-  return `
-    <section class="report-block">
-      <div class="brand">SAMS</div>
-      <div><span class="highlight-label">OUTPUT / REPORT FORMAT:</span></div>
-      <table class="meta-table">
-        <tbody>
-          ${summaryItems.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${value ? escapeHtml(value) : '&nbsp;'}</td></tr>`).join('')}
-        </tbody>
-      </table>
-      ${renderWordSection(
-        'OBSERVATIONS',
-        renderObservationSectionWord(observations),
-        'Observation given in the structural and non-structural shall be reflect in the table and images below the table in the output.'
-      )}
-      ${renderWordSection('INSPECTION IMAGES', renderWordImageGrid(inspectionImages, 'inspection'))}
-      <p class="section-note" style="font-size:9pt; text-transform:uppercase; margin-bottom:14px;">The observation entered during the attaching the photo should reflect with image in small font</p>
-      ${renderWordSection(
-        'TEST RESULTS',
-        renderTestResultsWord(tests),
-        'Provision for uploading multiple IMAGE OR PDF OR EXCEL files for each testing format.'
-      )}
-      <p class="section-note" style="margin-bottom:14px;">Images attached during the testing should reflect below the test results in the output.</p>
-      ${renderWordSection(
-        'TESTING IMAGES',
-        renderWordImageGrid(testingImages, 'testing')
-      )}
-      ${renderWordSection('QUANTIFICATION', renderQuantificationWord(quantifications))}
-      ${renderWordSection(
-        'REPAIR METHODOLOGY SUMMARY',
-        renderSummaryTableWord(summaryRows) + renderSummaryNoteList()
-      )}
-    </section>
-  `;
-};
-
-const buildWordDocument = (structures, filtersApplied) => `
-  <html>
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>SAMS - Output / Report Format</title>
-      <style>
-        @page {
-          size: A4;
-          margin: 18mm 16mm;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-          font-family: 'Times New Roman', Times, serif;
-          font-size: 11pt;
-          color: #1f1f1f;
-          background: #fff;
-          padding: 0;
-          max-width: 820px;
-          margin: 0 auto;
-          line-height: 1.4;
-        }
-        .brand {
-          text-align: center;
-          font-family: Calibri, Arial, sans-serif;
-          font-size: 22pt;
-          font-weight: 700;
-          margin-bottom: 10px;
-          letter-spacing: 1px;
-        }
-        .highlight-label {
-          display: inline-block;
-          background: #fff200;
-          font-weight: 700;
-          font-size: 12pt;
-          padding: 2px 6px;
-          margin-bottom: 18px;
-          text-decoration: underline;
-        }
-        h2.section-title {
-          font-size: 13pt;
-          font-weight: 700;
-          text-decoration: underline;
-          margin: 22px 0 6px;
-          font-family: 'Times New Roman', Times, serif;
-        }
-        .section-note {
-          font-size: 10pt;
-          margin-bottom: 10px;
-          color: #1f1f1f;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 16px;
-          font-size: 10pt;
-          table-layout: fixed;
-        }
-        th, td {
-          border: 1px solid #7f7f7f;
-          padding: 5px 7px;
-          vertical-align: top;
-          text-align: left;
-        }
-        th {
-          font-weight: 700;
-          background: #fff;
-        }
-        .obs-location-row td {
-          color: #0070c0;
-          font-weight: 700;
-          text-align: center;
-          font-size: 11pt;
-          background: #fff;
-        }
-        .obs-category-row td {
-          font-weight: 700;
-          text-align: center;
-          font-size: 10pt;
-          background: #fff;
-        }
-        .sno-col { width: 60px; text-align: center; }
-        .image-grid {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 20px;
-          margin: 14px 0;
-        }
-        .image-card {
-          flex: 0 0 calc(50% - 10px);
-          text-align: center;
-          break-inside: avoid;
-        }
-        .image-box {
-          width: 100%;
-          height: 220px;
-          border: 1px solid #999;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #f5f5f5;
-          color: #888;
-          font-size: 10pt;
-          font-style: italic;
-        }
-        .image-box img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        .caption-title { font-size: 10pt; margin-top: 5px; }
-        .quant-group-row td {
-          background: #fff200;
-          font-weight: 700;
-          text-align: center;
-          font-size: 10pt;
-        }
-        .note-block { margin-top: 8px; }
-        .note-block p { font-size: 10pt; margin: 3px 0; }
-        .summary-note {
-          background: #fce4d6;
-          padding: 5px 8px;
-          font-size: 10pt;
-          margin-bottom: 8px;
-          border: 1px solid #f2b98a;
-        }
-        .empty-state { font-size: 10pt; color: #888; padding: 6px 0; font-style: italic; }
-        .test-block { margin-bottom: 14px; }
-        .test-block h3 { font-size: 11pt; font-weight: 400; margin-bottom: 6px; }
-        .center { text-align: center; }
-        .meta-table td:first-child { font-weight: 700; width: 160px; }
-        .meta-table td:last-child { width: auto; }
-        .report-block { page-break-after: always; break-after: page; }
-        .report-block:last-child { page-break-after: auto; break-after: auto; }
-        @media print {
-          body { padding: 0; max-width: none; }
-          .no-print { display: none; }
-        }
-      </style>
-    </head>
-    <body>
-      ${structures.map((structureExport, index) => renderStructureWord(structureExport, filtersApplied, index, structures.length)).join('')}
-    </body>
-  </html>
-`;
-
-const resolveBrowserExecutablePath = () => {
-  const executablePath = BROWSER_CANDIDATES.find((candidate) => fs.existsSync(candidate));
-  if (!executablePath) {
-    const error = new Error('Chrome or Edge executable not found for HTML-to-PDF rendering');
-    error.statusCode = 503;
-    error.expose = true;
-    throw error;
+  if (isPdfFormat(format)) {
+    return sendPdfReport(res, preparedStructures, `${baseFileName}_${stamp}.pdf`);
   }
-  return executablePath;
-};
 
-const sendWordDocument = (res, content, fileName) => {
-  res.setHeader('Content-Type', WORD_MIME);
-  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-  res.send(content);
-};
-
-const sendPdfFromHtml = async (res, html, fileName) => {
-  let browser = null;
-
-  try {
-    browser = await puppeteer.launch({
-      executablePath: resolveBrowserExecutablePath(),
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: {
-        top: '12mm',
-        right: '12mm',
-        bottom: '12mm',
-        left: '12mm'
-      }
-    });
-    const normalizedPdfBuffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
-
-    res.setHeader('Content-Type', PDF_MIME);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('Content-Length', String(normalizedPdfBuffer.length));
-    res.send(normalizedPdfBuffer);
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
+  if (isWordFormat(format)) {
+    return sendWordDocument(res, preparedStructures, `${baseFileName}_${stamp}.doc`);
   }
+
+  const workbook = buildExcelReport(reqUser, preparedStructures, { withIndex });
+  return sendWorkbook(res, workbook, `${baseFileName}_${stamp}.xlsx`);
+};
+
+const handleExportError = (res, error, message) => {
+  console.error(`${message}:`, error);
+  if (res.headersSent) {
+    return res.end();
+  }
+  return res.status(error.statusCode || 500).json({
+    success: false,
+    message,
+    error: error.expose || process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+  });
 };
 
 router.get('/structures/download', authenticateToken, checkExportPermissions, async (req, res) => {
@@ -2117,64 +2964,17 @@ router.get('/structures/download', authenticateToken, checkExportPermissions, as
       });
     }
 
-    const filterSummary = buildFilterSummary(req.query);
-    const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
-
-    if (isPdfFormat(requestedFormat)) {
-      const html = buildWordDocument(structures, filterSummary);
-      const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendPdfFromHtml(res, html, fileName);
-    }
-
-    if (isWordFormat(requestedFormat)) {
-      const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.doc`;
-      return sendWordDocument(res, buildWordDocument(structures, filterSummary), fileName);
-    }
-
-    const workbook = createWorkbook(req.user);
-    const indexSheet = workbook.addWorksheet('Report Index');
-    indexSheet.columns = [
-      { header: 'S. No', key: 'serial', width: 8 },
-      { header: 'Structure ID', key: 'structureId', width: 24 },
-      { header: 'Owner', key: 'owner', width: 24 },
-      { header: 'Location', key: 'location', width: 24 },
-      { header: 'Status', key: 'status', width: 16 },
-      { header: 'Worksheet', key: 'worksheet', width: 24 }
-    ];
-    addTableHeader(indexSheet, 1, ['S. No', 'Structure ID', 'Owner', 'Location', 'Status', 'Worksheet'], COLORS.PRIMARY);
-
-    structures.forEach((structureExport, index) => {
-      const structureId = safeText(
-        structureExport.structure.structural_identity?.structural_identity_number,
-        String(structureExport.structure._id)
-      );
-      const sheetName = sanitizeWorksheetName(`${index + 1}_${structureId}`, `Structure_${index + 1}`);
-      const worksheet = workbook.addWorksheet(sheetName);
-      writeStructureWorksheet(worksheet, structureExport, filterSummary);
-
-      indexSheet.addRow({
-        serial: index + 1,
-        structureId,
-        owner: buildOwnerLabel(structureExport.owner),
-        location: [
-          structureExport.structure.location?.state_code,
-          structureExport.structure.location?.district_code,
-          structureExport.structure.location?.city_name
-        ].filter(Boolean).join(' / '),
-        status: safeText(structureExport.structure.status, 'N/A'),
-        worksheet: sheetName
-      });
+    return await sendReport({
+      res,
+      reqUser: req.user,
+      structures,
+      filterSummary: buildFilterSummary(req.query),
+      format: safeText(req.query.format || req.query.export_format || 'excel').toLowerCase(),
+      baseFileName: 'SAMS_Report',
+      withIndex: true
     });
-
-    const fileName = `SAMS_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
-    return sendWorkbook(res, workbook, fileName);
   } catch (error) {
-    console.error('Report export error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to generate report export',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
+    return handleExportError(res, error, 'Failed to generate report export');
   }
 });
 
@@ -2188,88 +2988,17 @@ router.get('/structures/complete-download', authenticateToken, checkExportPermis
       });
     }
 
-    const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
-    if (isPdfFormat(requestedFormat)) {
-      const html = buildWordDocument(structures, 'Complete export');
-      const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.pdf`;
-      return sendPdfFromHtml(res, html, fileName);
-    }
-
-    if (isWordFormat(requestedFormat)) {
-      const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.doc`;
-      return sendWordDocument(res, buildWordDocument(structures, 'Complete export'), fileName);
-    }
-
-    const workbook = createWorkbook(req.user);
-    structures.forEach((structureExport, index) => {
-      const structureId = safeText(
-        structureExport.structure.structural_identity?.structural_identity_number,
-        String(structureExport.structure._id)
-      );
-      const worksheet = workbook.addWorksheet(
-        sanitizeWorksheetName(`${index + 1}_${structureId}`, `Structure_${index + 1}`)
-      );
-      writeStructureWorksheet(worksheet, structureExport, 'Complete export');
+    return await sendReport({
+      res,
+      reqUser: req.user,
+      structures,
+      filterSummary: 'Complete export',
+      format: safeText(req.query.format || req.query.export_format || 'excel').toLowerCase(),
+      baseFileName: 'SAMS_Complete_Report',
+      withIndex: false
     });
-
-    const fileName = `SAMS_Complete_Report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
-    return sendWorkbook(res, workbook, fileName);
   } catch (error) {
-    console.error('Complete report export error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to generate complete report export',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-router.get('/structures/:id/download', authenticateToken, checkExportPermissions, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const structureMatch = mongoose.Types.ObjectId.isValid(id)
-      ? { 'structures._id': new mongoose.Types.ObjectId(id) }
-      : { 'structures.structural_identity.structural_identity_number': id };
-
-    const structures = await fetchStructuresForExport(req.user, req.query, structureMatch);
-    if (!structures.length) {
-      return res.status(404).json({
-        success: false,
-        message: 'Structure not found'
-      });
-    }
-
-    const structureExport = structures[0];
-    const structureId = safeText(
-      structureExport.structure.structural_identity?.structural_identity_number,
-      String(structureExport.structure._id)
-    );
-    const requestedFormat = safeText(req.query.format || req.query.export_format || 'excel').toLowerCase();
-
-    if (isPdfFormat(requestedFormat)) {
-      const html = buildWordDocument([structureExport], buildFilterSummary(req.query));
-      const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.pdf`;
-      return sendPdfFromHtml(res, html, fileName);
-    }
-
-    if (isWordFormat(requestedFormat)) {
-      const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.doc`;
-      return sendWordDocument(res, buildWordDocument([structureExport], buildFilterSummary(req.query)), fileName);
-    }
-
-    const workbook = createWorkbook(req.user);
-    const worksheet = workbook.addWorksheet(sanitizeWorksheetName(structureId, 'Structure Report'));
-    writeStructureWorksheet(worksheet, structureExport, buildFilterSummary(req.query));
-
-    const fileName = `SAMS_Structure_Report_${structureId}_${Date.now()}.xlsx`;
-    return sendWorkbook(res, workbook, fileName);
-  } catch (error) {
-    console.error('Single structure report export error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to generate structure report export',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
+    return handleExportError(res, error, 'Failed to generate complete report export');
   }
 });
 
@@ -2346,7 +3075,8 @@ router.get('/structures/metadata', authenticateToken, checkExportPermissions, as
         users,
         organizations: Array.from(new Set(users.map((user) => user.organization).filter(Boolean))).sort(),
         pdf_export_supported: true,
-        word_export_supported: true
+        word_export_supported: true,
+        browser_pdf_renderer_available: Boolean(resolveBrowserExecutablePath())
       },
       message: 'Report metadata retrieved successfully'
     });
@@ -2356,6 +3086,40 @@ router.get('/structures/metadata', authenticateToken, checkExportPermissions, as
       success: false,
       message: 'Failed to get report metadata'
     });
+  }
+});
+
+router.get('/structures/:id/download', authenticateToken, checkExportPermissions, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const structureMatch = mongoose.Types.ObjectId.isValid(id)
+      ? { 'structures._id': new mongoose.Types.ObjectId(id) }
+      : { 'structures.structural_identity.structural_identity_number': id };
+
+    const structures = await fetchStructuresForExport(req.user, req.query, structureMatch);
+    if (!structures.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Structure not found'
+      });
+    }
+
+    const structureId = safeText(
+      structures[0].structure.structural_identity?.structural_identity_number,
+      String(structures[0].structure._id)
+    );
+
+    return await sendReport({
+      res,
+      reqUser: req.user,
+      structures: [structures[0]],
+      filterSummary: buildFilterSummary(req.query),
+      format: safeText(req.query.format || req.query.export_format || 'excel').toLowerCase(),
+      baseFileName: `SAMS_Structure_Report_${structureId.replace(/[^A-Za-z0-9_-]+/g, '_')}`,
+      withIndex: false
+    });
+  } catch (error) {
+    return handleExportError(res, error, 'Failed to generate structure report export');
   }
 });
 
