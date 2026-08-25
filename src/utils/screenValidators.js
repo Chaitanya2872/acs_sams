@@ -181,6 +181,11 @@ const multiComponentRatingValidation = [
     .optional()
     .isFloat({ min: 0, max: 10000 })
     .withMessage('Distress length must be between 0 and 10000'),
+
+  body('structures.*.components.*.distress_dimensions.number')
+    .optional()
+    .isFloat({ min: 0, max: 10000 })
+    .withMessage('No. must be between 0 and 10000'),
   
   body('structures.*.components.*.distress_dimensions.breadth')
     .optional()
@@ -255,19 +260,24 @@ const multiComponentRatingValidation = [
           structure.components.forEach((component, index) => {
             const parsedRating = Number(component.rating);
             const hasValidRating = !Number.isNaN(parsedRating) && parsedRating >= 1 && parsedRating <= 5;
+            const dimensions = component.distress_dimensions;
+            const unit = String(dimensions?.unit || "NO'S").trim().toUpperCase();
+
+            // Counts must be supplied explicitly. Zero is a valid entered
+            // count, so test for field presence rather than truthiness.
+            if (unit === "NO'S" &&
+                (!dimensions ||
+                 !Object.prototype.hasOwnProperty.call(dimensions, 'number') ||
+                 dimensions.number === null ||
+                 typeof dimensions.number === 'undefined' ||
+                 String(dimensions.number).trim() === '')) {
+              errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): No. is required when unit is No.s`);
+            }
 
             if (hasValidRating && parsedRating <= 3) {
               // Check for detailed comment
               if (!component.condition_comment || component.condition_comment.trim().length < 1) {
                 errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Detailed condition comment (min 10 chars) is required for ratings 1-3`);
-              }
-              
-              // NEW: Check for distress dimensions for poor ratings
-              if (!component.distress_dimensions || 
-                  (!component.distress_dimensions.length && 
-                   !component.distress_dimensions.breadth && 
-                   !component.distress_dimensions.height)) {
-                errors.push(`${structure.component_type} - Component ${index + 1} (${component.name || 'unnamed'}): Distress dimensions (L, B, or H) are required for ratings 1-3`);
               }
               
               // NEW: Check for repair methodology

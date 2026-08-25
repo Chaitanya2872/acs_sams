@@ -811,6 +811,7 @@ const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
   entries.forEach(({ componentLabel, entry }) => {
     const observationText = getObservationText(entry);
     const dimensions = entry?.distress_dimensions || {};
+    const number = toNumber(dimensions.number);
     const length = toDimension(dimensions.length);
     const breadth = toDimension(dimensions.breadth);
     const height = toDimension(dimensions.height);
@@ -822,7 +823,14 @@ const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
       return;
     }
 
-    const quantBase = { nos: 1, length, breadth, height };
+    const quantBase = {
+      // A NO'S observation has no physical dimensions; its entered count is
+      // the quantity. Older records without `number` retain the prior value.
+      nos: number ?? 1,
+      length,
+      breadth,
+      height
+    };
 
     rows.push({
       scopeLabel,
