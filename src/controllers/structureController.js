@@ -7927,7 +7927,16 @@ async submitForTesting(req, res) {
     
     const { user: structureOwner, structure } = await this.findUserStructure(req.user.userId, id, req.user);
     
-    const allowedStatuses = ['draft', 'location_completed', 'admin_completed', 'geometric_completed', 'ratings_in_progress'];
+    // A structure may already be `submitted` through the regular submission
+    // flow. Testing is an optional follow-up, so allow that status here too.
+    const allowedStatuses = [
+      'draft',
+      'location_completed',
+      'admin_completed',
+      'geometric_completed',
+      'ratings_in_progress',
+      'submitted'
+    ];
     if (!allowedStatuses.includes(structure.status)) {
       return sendErrorResponse(res, 'Structure cannot be submitted for testing from current status', 409);
     }
