@@ -1,10 +1,6 @@
 const multer = require('multer');
-const path = require('path');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
-
-const IMAGE_FORMATS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-const DOC_FORMATS = ['pdf', 'xls', 'xlsx', 'doc', 'docx'];
 
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
@@ -13,7 +9,6 @@ const storage = new CloudinaryStorage({
     return {
       folder: 'sams-structures',
       resource_type: isImage ? 'image' : 'raw',
-      allowed_formats: isImage ? IMAGE_FORMATS : DOC_FORMATS,
       ...(isImage
         ? {
             transformation: [
@@ -29,17 +24,6 @@ const upload = multer({
   storage: storage,
   limits: {
     fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase().replace('.', '');
-    const isImage = file.mimetype && file.mimetype.startsWith('image/');
-    const isDoc = DOC_FORMATS.includes(ext);
-
-    if (isImage || isDoc) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image, PDF, or Excel files are allowed'), false);
-    }
   }
 });
 
@@ -74,13 +58,6 @@ const handleUploadError = (error, req, res, next) => {
         message: `Unexpected file field "${error.field}". Use "photo" or "photos" as the field name`
       });
     }
-  }
-
-  if (error.message === 'Only image, PDF, or Excel files are allowed') {
-    return res.status(400).json({
-      success: false,
-      message: error.message
-    });
   }
 
   next(error);
