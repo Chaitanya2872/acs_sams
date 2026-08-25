@@ -243,6 +243,7 @@ const flattenAdminStructureTestResults = (structure) => {
   pushRows(structure.structure_test_results, {
     scope: 'structure',
     location_label:
+      structure.location?.structure_name ||
       structure.structural_identity?.structure_name ||
       structure.structural_identity?.structural_identity_number ||
       structure.structural_identity?.uid ||
@@ -386,7 +387,7 @@ router.get('/structures', authorizeModuleAction('structures', 'read'), async (re
             uid: structure.structural_identity?.uid,
             structure_number: structure.structural_identity?.structural_identity_number,
             structural_identity_number: structure.structural_identity?.structural_identity_number,
-            structure_name: structure.structural_identity?.structure_name,
+            structure_name: structure.location?.structure_name || structure.structural_identity?.structure_name || '',
             client_name: structure.administrative?.client_name || structure.administration?.client_name,
             status: structure.status,
             type: structure.structural_identity?.type_of_structure,

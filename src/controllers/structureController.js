@@ -1102,7 +1102,7 @@ async saveLocationScreen(req, res) {
     return sendSuccessResponse(res, 200, {
       structure_id: id,
       uid: structure.structural_identity.uid,
-      structure_name: structure.structural_identity.structure_name,
+      structure_name: structure.location?.structure_name || '',
       structural_identity_number: structure.structural_identity.structural_identity_number,
       type_of_structure: structure.structural_identity.type_of_structure,
       structure_subtype: structure.structural_identity.structure_subtype,     // ⭐ NEW
@@ -4255,7 +4255,7 @@ async getAllStructures(req, res) {
       
       const structureData = {
         structure_id: structure._id,
-        structure_name: structure.location?.structure_name || 'jack',
+        structure_name: structure.location?.structure_name || structure.structural_identity?.structure_name || '',
         uid: structure.structural_identity?.uid,
         structural_identity_number: structure.structural_identity?.structural_identity_number,
         client_name: structure.administrative?.client_name || structure.administration?.client_name,

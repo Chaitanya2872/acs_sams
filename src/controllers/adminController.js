@@ -378,7 +378,7 @@ const getAllStructures = catchAsync(async (req, res) => {
     structure_id: structure._id,
     uid: structure.structural_identity?.uid,
     structural_identity_number: structure.structural_identity?.structural_identity_number,
-    structure_name: structure.structural_identity?.structure_name,
+    structure_name: structure.location?.structure_name || structure.structural_identity?.structure_name || '',
     client_name: structure.administration?.client_name,
     location: {
       city_name: structure.structural_identity?.city_name,
