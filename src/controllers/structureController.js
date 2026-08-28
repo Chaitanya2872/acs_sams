@@ -173,6 +173,7 @@ const normalizeDistressDimensions = (dimensionsInput) => {
 
   if (unit === 'RM') {
     return {
+      number,
       length,
       breadth: 0,
       height: 0,
@@ -182,6 +183,7 @@ const normalizeDistressDimensions = (dimensionsInput) => {
 
   if (unit === 'SQM') {
     return {
+      number,
       length,
       breadth,
       height: 0,
@@ -190,6 +192,7 @@ const normalizeDistressDimensions = (dimensionsInput) => {
   }
 
   return {
+    number,
     length,
     breadth,
     height,

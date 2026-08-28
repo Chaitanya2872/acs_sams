@@ -64,14 +64,14 @@ const normalizeDistressDimensionsValue = (value) => {
   }
 
   if (unit === 'RM') {
-    return { length, breadth: 0, height: 0, unit };
+    return { number, length, breadth: 0, height: 0, unit };
   }
 
   if (unit === 'SQM') {
-    return { length, breadth, height: 0, unit };
+    return { number, length, breadth, height: 0, unit };
   }
 
-  return { length, breadth, height, unit };
+  return { number, length, breadth, height, unit };
 };
 
 const normalizeNestedDistressDimensions = (node, visited = new WeakSet()) => {
@@ -1599,5 +1599,9 @@ module.exports = {
   User,
   OTP,
   Token,
-  TestFormat
+  TestFormat,
+  // Exported for regression tests: distress dimensions must survive
+  // normalization intact, including `number` for RM/SQM/CUM units.
+  normalizeDistressDimensionsValue,
+  normalizeNestedDistressDimensions
 };
