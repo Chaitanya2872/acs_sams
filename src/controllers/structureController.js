@@ -1216,9 +1216,10 @@ async saveAdministrativeScreen(req, res) {
   async saveGeometricDetails(req, res) {
   try {
     const { id } = req.params;
-    const { 
+    const {
       number_of_floors, structure_width, structure_length, structure_height,
-      has_parking_floors, number_of_parking_floors 
+      has_parking_floors, number_of_parking_floors,
+      parking_type, parking_floor_type
     } = req.body;
     
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
@@ -1237,7 +1238,17 @@ async saveAdministrativeScreen(req, res) {
       structure_length: parseFloat(structure_length),
       structure_height: parseFloat(structure_height)
     };
-    
+
+    // Persist the parking descriptors. Both are enum paths that do not permit
+    // null, so only assign when a real value was sent; omitting the field
+    // leaves whatever the spread above carried forward.
+    if (typeof parking_type === 'string' && parking_type.trim() !== '') {
+      structure.geometric_details.parking_type = parking_type.trim();
+    }
+    if (typeof parking_floor_type === 'string' && parking_floor_type.trim() !== '') {
+      structure.geometric_details.parking_floor_type = parking_floor_type.trim();
+    }
+
     // Auto-create parking floors if specified
     if (needsParkingOption && has_parking_floors && number_of_parking_floors > 0) {
       const existingParkingFloors = structure.geometric_details.floors?.filter(
@@ -1253,6 +1264,7 @@ async saveAdministrativeScreen(req, res) {
             floor_id: this.generateFloorId(),
             floor_number: floorNumber,
             is_parking_floor: true,
+            parking_floor_type: structure.geometric_details.parking_floor_type || null,
             floor_label_name: `Parking Level ${Math.abs(floorNumber)}`,
             floor_height: 3, // Default parking height
             total_area_sq_mts: structure_width * structure_length,
@@ -1283,6 +1295,8 @@ async saveAdministrativeScreen(req, res) {
         structure_width: structure.geometric_details.structure_width,
         structure_length: structure.geometric_details.structure_length,
         structure_height: structure.geometric_details.structure_height,
+        parking_type: structure.geometric_details.parking_type || null,
+        parking_floor_type: structure.geometric_details.parking_floor_type || null,
         total_area: structure.geometric_details.structure_width * structure.geometric_details.structure_length,
         total_floors_created: structure.geometric_details.floors?.length || 0
       },
@@ -1310,7 +1324,9 @@ async saveAdministrativeScreen(req, res) {
           structure_width: geometricData.structure_width,
           structure_length: geometricData.structure_length,
           structure_height: geometricData.structure_height,
-          total_area: geometricData.structure_width && geometricData.structure_length ? 
+          parking_type: geometricData.parking_type || null,
+          parking_floor_type: geometricData.parking_floor_type || null,
+          total_area: geometricData.structure_width && geometricData.structure_length ?
             geometricData.structure_width * geometricData.structure_length : null
         }
       });

@@ -1151,7 +1151,10 @@ const structureSchema = new mongoose.Schema({
   },
     parking_type: {
       type: String,
-      enum: ['none', 'surface', 'basement', 'stilt', 'mechanical', 'mixed']
+      enum: [
+        'none', 'surface', 'basement', 'stilt', 'mechanical', 'mixed',
+        'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'
+      ]
     },
     parking_floor_type: {
       type: String,

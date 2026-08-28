@@ -582,6 +582,17 @@ const geometricDetailsValidation = [
       return true;
     }),
 
+  body('parking_type')
+    .optional()
+    .isIn([
+      'none', 'surface', 'basement', 'stilt', 'mechanical', 'mixed',
+      'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'
+    ])
+    .withMessage(
+      'Invalid parking_type. Must be one of: none, surface, basement, stilt, mechanical, mixed, ' +
+      'cellar, subcellar_1, subcellar_2, subcellar_3, subcellar_4, subcellar_5'
+    ),
+
   body('parking_floor_type')
     .optional()
     .custom((value, { req }) => {
@@ -590,6 +601,10 @@ const geometricDetailsValidation = [
         if (!value) {
           throw new Error('parking_floor_type is required when has_parking_floors is true');
         }
+      }
+      // The value is now persisted to an enum path, so check it whenever one is
+      // supplied — not only when parking floors are being created.
+      if (value !== undefined && value !== null && value !== '') {
         if (typeof value !== 'string' || !allowed.includes(value)) {
           throw new Error('Invalid parking_floor_type. Must be one of: ' + allowed.join(', '));
         }
