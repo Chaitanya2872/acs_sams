@@ -11,6 +11,7 @@ const {
   sendPaginatedResponse
 } = require('../utils/responseHandler');
 const { MESSAGES, PAGINATION } = require('../utils/constants');
+const { PARKING_FLOOR_TYPES } = require('../utils/screenValidators');
 
 const normalizePhotoList = (photosInput, photoInput) => {
   const fromArray = Array.isArray(photosInput)
@@ -1347,15 +1348,17 @@ async saveAdministrativeScreen(req, res) {
    */
   async getParkingFloorTypes(req, res) {
     try {
-      const parkingFloorTypes = [
-        { value: 'stilt', label: 'Stilt (Ground Level Parking)' },
-        { value: 'cellar', label: 'Cellar (Single Level Below Ground)' },
-        { value: 'subcellar_1', label: 'Subcellar 1 (First Level Below Cellar)' },
-        { value: 'subcellar_2', label: 'Subcellar 2 (Second Level Below Cellar)' },
-        { value: 'subcellar_3', label: 'Subcellar 3 (Third Level Below Cellar)' },
-        { value: 'subcellar_4', label: 'Subcellar 4 (Fourth Level Below Cellar)' },
-        { value: 'subcellar_5', label: 'Subcellar 5 (Fifth Level Below Cellar)' }
-      ];
+      // Derived from the shared enum so this list can never advertise a value
+      // that the parking_floor_type validators and schema would reject.
+      const PARKING_FLOOR_TYPE_LABELS = {
+        'stilt': 'Stilt (Ground Level Parking)',
+        'cellar': 'Cellar (Single Level Below Ground)',
+        'sub cellar': 'Sub Cellar (Below Cellar)'
+      };
+      const parkingFloorTypes = PARKING_FLOOR_TYPES.map((value) => ({
+        value,
+        label: PARKING_FLOOR_TYPE_LABELS[value] || value
+      }));
 
       sendSuccessResponse(res, 'Parking floor types retrieved successfully', {
         parking_floor_types: parkingFloorTypes

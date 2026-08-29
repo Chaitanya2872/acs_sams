@@ -2350,6 +2350,9 @@ const customNonStructuralComponentValidation = [
 
 // =================== EXPORTS ===================
 module.exports = {
+  // Shared enums
+  PARKING_FLOOR_TYPES,
+
   // Basic Screen Validations
   locationValidation,
   administrativeValidation,
