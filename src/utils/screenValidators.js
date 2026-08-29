@@ -22,6 +22,11 @@ const hasAtLeastOnePhoto = (photoField, photosField) => {
   return hasPhotoString || hasPhotoArray || hasPhotosArray;
 };
 
+// Allowed values for geometric_details.parking_floor_type and floors[].parking_floor_type.
+// These are the exact strings the mobile app sends; there is a single unnumbered
+// 'sub cellar' level, so no numbered subcellar_N variants are accepted.
+const PARKING_FLOOR_TYPES = ['stilt', 'cellar', 'sub cellar'];
+
 const RCC_FLAT_NON_STRUCTURAL_COMPONENT_TYPES = [
   'brick_plaster', 'doors_windows', 'flooring_tiles', 'walls', 'paintings',
   'electrical_wiring', 'sanitary_fittings', 'railings', 'water_tanks', 'plumbing',
@@ -596,7 +601,7 @@ const geometricDetailsValidation = [
   body('parking_floor_type')
     .optional()
     .custom((value, { req }) => {
-      const allowed = ['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'];
+      const allowed = PARKING_FLOOR_TYPES;
       if (req.body.has_parking_floors === true || req.body.has_parking_floors === 'true') {
         if (!value) {
           throw new Error('parking_floor_type is required when has_parking_floors is true');
@@ -692,6 +697,18 @@ const floorValidation = [
     .optional()
     .isBoolean()
     .withMessage('Is parking floor must be a boolean'),
+
+  // Guarded here so an unknown value returns a 400 naming the allowed values,
+  // instead of surfacing as a generic 500 from the Mongoose enum on save().
+  body('floors.*.parking_floor_type')
+    .optional({ nullable: true })
+    .custom((value) => {
+      if (value === undefined || value === null || value === '') return true;
+      if (typeof value !== 'string' || !PARKING_FLOOR_TYPES.includes(value)) {
+        throw new Error('Invalid parking_floor_type. Must be one of: ' + PARKING_FLOOR_TYPES.join(', '));
+      }
+      return true;
+    }),
 
   
   body('floors.*.floor_height')

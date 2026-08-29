@@ -646,7 +646,7 @@ const floorSchema = {
   },
   parking_floor_type: {
     type: String,
-    enum: ['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5', null],
+    enum: ['stilt', 'cellar', 'sub cellar', null],
     default: null
   },
   floor_height: {
@@ -1158,7 +1158,7 @@ const structureSchema = new mongoose.Schema({
     },
     parking_floor_type: {
       type: String,
-      enum: ['stilt', 'cellar', 'subcellar_1', 'subcellar_2', 'subcellar_3', 'subcellar_4', 'subcellar_5'],
+      enum: ['stilt', 'cellar', 'sub cellar'],
       sparse: true,
       required: false
     },
