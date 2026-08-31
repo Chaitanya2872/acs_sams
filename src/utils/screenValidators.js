@@ -746,6 +746,59 @@ const floorValidation = [
     .withMessage('Floor notes cannot exceed 1000 characters')
 ];
 
+// A floor update receives one floor object, not the `{ floors: [...] }` payload
+// used by the create endpoint. Keep these fields optional so PATCH-like PUT
+// requests (for example, renaming only the label) are supported.
+const floorUpdateValidation = [
+  body('floor_number')
+    .optional()
+    .isInt({ min: -5, max: 200 })
+    .withMessage('Floor number must be between -5 and 200'),
+  body('is_parking_floor')
+    .optional()
+    .isBoolean()
+    .withMessage('Is parking floor must be a boolean'),
+  body('parking_floor_type')
+    .optional({ nullable: true })
+    .custom((value) => {
+      if (value === null || value === '') return true;
+      if (typeof value !== 'string' || !PARKING_FLOOR_TYPES.includes(value)) {
+        throw new Error('Invalid parking_floor_type. Must be one of: ' + PARKING_FLOOR_TYPES.join(', '));
+      }
+      return true;
+    }),
+  body('floor_height')
+    .optional()
+    .isFloat({ min: 2, max: 100000 })
+    .withMessage('Floor height must be between 2 and 100,000 meters'),
+  body('total_area_sq_mts')
+    .optional()
+    .isFloat({ min: 1, max: 50000 })
+    .withMessage('Total area must be between 1 and 50,000 square meters'),
+  body('floor_label_name')
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('Floor label name is required')
+    .isLength({ min: 1, max: 50 })
+    .withMessage('Floor label name must be 1-50 characters'),
+  body('number_of_flats')
+    .optional()
+    .isInt({ min: 0, max: 100 })
+    .withMessage('Number of flats must be between 0 and 100'),
+  body('number_of_blocks')
+    .optional()
+    .isInt({ min: 0, max: 50 })
+    .withMessage('Number of blocks must be between 0 and 50'),
+  body('floor_notes')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Floor notes cannot exceed 1000 characters')
+];
+
 // =================== FLAT VALIDATION ===================
 const flatValidation = [
   
@@ -2365,6 +2418,7 @@ module.exports = {
   
   // Floors & Flats (for residential/commercial)
   floorValidation,
+  floorUpdateValidation,
   flatValidation,
   
   // Industrial Blocks

@@ -8,6 +8,7 @@ const {
   administrativeValidation, 
   geometricDetailsValidation,
   floorValidation,
+  floorUpdateValidation,
   flatValidation,
   flatCombinedRatingsValidation,
   structureNumberValidation,
@@ -509,7 +510,7 @@ router.post('/:id/floors',
 );
 router.get('/:id/floors/:floorId', structureController.getFloorById);
 router.put('/:id/floors/:floorId', 
-  floorValidation, 
+  floorUpdateValidation, 
   handleValidationErrors, 
   structureController.updateFloor
 );
