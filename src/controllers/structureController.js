@@ -1697,7 +1697,11 @@ async saveBlockRatings(req, res) {
   async updateFloor(req, res) {
   try {
     const { id, floorId } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
+
+    if (typeof updateData.floor_label_name === 'string') {
+      updateData.floor_label_name = updateData.floor_label_name.trim();
+    }
 
     const { user, structure } = await this.findUserStructure(req.user.userId, id, req.user);
 
@@ -1717,6 +1721,10 @@ async saveBlockRatings(req, res) {
     });
 
     structure.creation_info.last_updated_date = new Date();
+    // Floors are deeply nested under User.structures. Explicitly mark the
+    // parent path so label-only edits are persisted even when Mongoose does
+    // not detect a direct assignment on the nested floor document.
+    user.markModified('structures');
     await user.save();
 
     sendUpdatedResponse(res, {
