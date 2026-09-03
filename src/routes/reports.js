@@ -95,12 +95,7 @@ const TEST_NAME_LABELS = {
   custom: 'CUSTOM TEST'
 };
 
-// Report notes reproduced from the agreed SAMS OUTPUT format.
-const QUANTIFICATION_NOTES = [
-  'The distress, L, B, H, Repair methodology entered in the structural rating screen should reflect in this table format.',
-  'Need editing option in this table format.',
-  'Structural and non-structural distress should reflect in this table separately.'
-];
+const REPORT_PLACEHOLDER = '--';
 
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PDF_MIME = 'application/pdf';
@@ -207,7 +202,9 @@ const toDimension = (value) => {
 
 const toCount = (value) => {
   const num = toNumber(value);
-  return num !== null && num > 0 ? num : 1;
+  // Preserve an explicitly entered zero. Only old records with no value at all
+  // receive the historical default of one.
+  return num !== null && num >= 0 ? num : 1;
 };
 
 /**
@@ -238,10 +235,10 @@ const formatApproxQuantity = (value) => {
 
 /**
  * Unit / multiplier rules per repair methodology, per the client's Bill of Quantity summary.
- * Grouting is billed by weight: actual running-metre quantity x 8 = KGS.
+ * Cementitious grouting is billed by weight: actual quantity x 3 = KGS.
  */
 const REPAIR_METHOD_RULES = [
-  { keywords: ['epoxy grouting', 'cement grouting', 'grouting'], units: 'KGS', multiplier: 8 },
+  { keywords: ['cementitious grouting', 'cement grouting', 'grouting'], units: 'KGS', multiplier: 3 },
   { keywords: ['micro concrete', 'microconcrete', 'concrete jacketing', 'jacketing', 'encasement'], units: 'CUM' },
   {
     keywords: [
@@ -289,13 +286,9 @@ const summarizeMethodology = (rows) => {
   });
 
   return Array.from(summaryMap.values()).map((item) => {
-    const actual = Number(item.actual.toFixed(2));
     const quantity = Number((item.actual * item.multiplier).toFixed(2));
     return {
-      description:
-        item.multiplier > 1
-          ? `${item.description} (actual quantity ${actual} multiplied by ${item.multiplier})`
-          : item.description,
+      description: item.description,
       quantity,
       units: item.units
     };
@@ -391,7 +384,11 @@ const getAttachmentLabel = (value) => {
 
   const normalized = source.replace(/\\/g, '/').split('?')[0];
   const name = normalized.split('/').pop();
-  return safeText(name, source);
+  try {
+    return safeText(decodeURIComponent(name), source);
+  } catch (error) {
+    return safeText(name, source);
+  }
 };
 
 // =================== IMAGE LOADING ===================
@@ -815,11 +812,11 @@ const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
     const length = toDimension(dimensions.length);
     const breadth = toDimension(dimensions.breadth);
     const height = toDimension(dimensions.height);
-    const repairMethodology = safeText(entry?.repair_methodology, 'Not Specified');
+    const repairMethodology = safeText(entry?.repair_methodology);
     const hasDimensions = length !== null || breadth !== null || height !== null;
     const hasContent = Boolean(observationText || hasDimensions || safeText(entry?.repair_methodology));
 
-    if (!hasContent) {
+    if (!hasContent || !repairMethodology) {
       return;
     }
 
@@ -939,6 +936,9 @@ const collectQuantifications = (structure) => {
       const explicitQuantity = toNumber(entry.quantity);
       const computed = computeQuantity({ nos, length, breadth, height });
 
+      const repairMethodology = safeText(entry.repair_methodology);
+      if (!repairMethodology) return;
+
       rows.push({
         scopeLabel,
         section,
@@ -949,10 +949,10 @@ const collectQuantifications = (structure) => {
         length,
         breadth,
         height,
-        // A saved quantity of 0 is the schema default, not a real measurement.
-        quantity: explicitQuantity && explicitQuantity > 0 ? explicitQuantity : computed,
+        // Preserve an explicit zero; derive only when quantity was not supplied.
+        quantity: explicitQuantity !== null ? explicitQuantity : computed,
         unit: safeText(entry.unit).toUpperCase() || inferUnitFromDimensions({ length, breadth, height }),
-        repair_methodology: safeText(entry.repair_methodology, 'Not Specified')
+        repair_methodology: repairMethodology
       });
     });
   };
@@ -1026,7 +1026,14 @@ const collectQuantifications = (structure) => {
     });
   });
 
-  return rows;
+  let foundationSeen = false;
+  return rows.filter((row) => {
+    const isFoundation = normalizeComponentLookupKey(row.category || row.distress) === 'foundation';
+    if (!isFoundation) return true;
+    if (foundationSeen) return false;
+    foundationSeen = true;
+    return true;
+  });
 };
 
 // Every field the mobile/web clients have used for "upload multiple files per test format".
@@ -1267,6 +1274,33 @@ const withUnit = (value, unit) => {
   return text ? `${text} ${unit}` : '';
 };
 
+const deriveYearOfConstruction = (identity, geometry) => {
+  const savedYear = toNumber(geometry.year_of_construction);
+  if (savedYear !== null && savedYear > 0) return String(savedYear);
+  const age = toNumber(identity.age_of_structure);
+  return age !== null && age >= 0 ? String(new Date().getFullYear() - age) : '';
+};
+
+const deriveBasementFloorCount = (geometry) => {
+  const saved = toNumber(geometry.basement_floors);
+  if (saved !== null && saved > 0) return String(saved);
+  const floors = Array.isArray(geometry.floors) ? geometry.floors : [];
+  const count = floors.filter((floor) => {
+    const type = safeText(floor.parking_floor_type).toLowerCase();
+    return type.includes('cellar') || type.includes('basement') || toNumber(floor.floor_number) < 0;
+  }).length;
+  return String(count);
+};
+
+const deriveParkingFloorTypes = (geometry) => {
+  const direct = prettifyEnum(geometry.parking_floor_type);
+  if (direct) return direct;
+  const floors = Array.isArray(geometry.floors) ? geometry.floors : [];
+  return Array.from(
+    new Set(floors.filter((floor) => floor.is_parking_floor).map((floor) => prettifyEnum(floor.parking_floor_type)).filter(Boolean))
+  ).join(', ');
+};
+
 /**
  * Structure / location / administrative details, grouped into labelled tables so the
  * report reads as a proper detail sheet rather than one long key-value list.
@@ -1280,29 +1314,24 @@ const buildStructureDetailSections = (structureExport, filtersApplied) => {
   // only because older documents were written with that key.
   const administrative = structure.administrative || structure.administration || {};
   const geometry = structure.geometric_details || {};
-  const creation = structure.creation_info || {};
-
   return [
     {
       title: 'STRUCTURE DETAILS',
       rows: [
         ['Structure Name', safeText(location.structure_name)],
         ['Structure ID', safeText(identity.structural_identity_number)],
-        ['UID', safeText(identity.uid)],
         ['Type Of Structure', prettifyEnum(identity.type_of_structure)],
         ['Structure Subtype', prettifyEnum(identity.structure_subtype)],
         ['Commercial Subtype', prettifyEnum(identity.commercial_subtype)],
         ['Age Of Structure', withUnit(identity.age_of_structure, 'Years')],
-        ['Year Of Construction', safeText(geometry.year_of_construction)],
+        ['Year Of Construction', deriveYearOfConstruction(identity, geometry)],
         ['Number Of Floors', safeText(geometry.number_of_floors)],
-        ['Basement Floors', safeText(geometry.basement_floors)],
-        ['Total Built-Up Area', withUnit(geometry.total_built_up_area_sq_mts, 'Sq.M')],
-        ['Total Carpet Area', withUnit(geometry.total_carpet_area_sq_mts, 'Sq.M')],
+        ['Basement Floors', deriveBasementFloorCount(geometry)],
         ['Structure Length', withUnit(geometry.structure_length, 'M')],
         ['Structure Width', withUnit(geometry.structure_width, 'M')],
         ['Structure Height', withUnit(geometry.structure_height, 'M')],
-        ['Parking Type', prettifyEnum(geometry.parking_type)],
-        ['Parking Floor Type', prettifyEnum(geometry.parking_floor_type)],
+        ['Parking Type', prettifyEnum(geometry.parking_type || (deriveParkingFloorTypes(geometry) ? 'available' : ''))],
+        ['Parking Floor Type', deriveParkingFloorTypes(geometry)],
         ['Block Names', collectBlockNames(structure), { span: true }]
       ]
     },
@@ -1320,7 +1349,7 @@ const buildStructureDetailSections = (structureExport, filtersApplied) => {
       ]
     },
     {
-      title: 'ADMINISTRATIVE DETAILS',
+      title: 'CLIENT',
       rows: [
         ['Client Name', safeText(administrative.client_name)],
         ['Custodian', safeText(administrative.custodian)],
@@ -1330,16 +1359,6 @@ const buildStructureDetailSections = (structureExport, filtersApplied) => {
         ['Organization', safeText(administrative.organization || owner?.profile?.organization)],
         ['Inspected By', buildOwnerLabel(owner)],
         ['Employee ID', safeText(owner?.profile?.employee_id)]
-      ]
-    },
-    {
-      title: 'REPORT DETAILS',
-      rows: [
-        ['Status', prettifyEnum(structure.status)],
-        ['Created Date', formatDate(creation.created_date)],
-        ['Last Updated', formatDate(creation.last_updated_date)],
-        ['Report Generated', formatDate(new Date())],
-        ['Applied Filters', safeText(filtersApplied), { span: true }]
       ]
     }
   ];
@@ -1441,7 +1460,7 @@ const QUANT_COLUMN_COUNT = 8;
 const renderDetailSectionHtml = (section) => {
   const cell = (label, value) =>
     `<td class="detail-label">${escapeHtml(label)}</td><td class="detail-value">${
-      safeText(value) ? escapeHtml(value) : '&nbsp;'
+      escapeHtml(safeText(value, REPORT_PLACEHOLDER))
     }</td>`;
 
   const rows = [];
@@ -1455,7 +1474,7 @@ const renderDetailSectionHtml = (section) => {
       }
       rows.push(
         `<tr><td class="detail-label">${escapeHtml(label)}</td><td class="detail-value" colspan="3">${
-          safeText(value) ? escapeHtml(value) : '&nbsp;'
+          escapeHtml(safeText(value, REPORT_PLACEHOLDER))
         }</td></tr>`
       );
       return;
@@ -1487,16 +1506,15 @@ const renderDetailSectionsHtml = (sections) => sections.map(renderDetailSectionH
 
 /**
  * OBSERVATIONS, in the client's format:
- * S. No | Location/Remarks, grouped by location then by structural / non-structural,
- * with the serial number restarting inside each distress group.
+ * Element name | Location of distress, grouped by location and distress category.
  */
 const renderObservationsHtml = (observationGroups) => {
   const rows = [
-    '<table class="obs-table"><thead><tr><th class="sno-col">S. No</th><th>Location/Remarks</th></tr></thead><tbody>'
+    '<table class="obs-table"><thead><tr><th>Element Name</th><th>Location of Distress</th></tr></thead><tbody>'
   ];
 
   if (!observationGroups.size) {
-    rows.push('<tr><td class="sno-col center">&nbsp;</td><td>No observations recorded</td></tr>');
+    rows.push(`<tr><td>${REPORT_PLACEHOLDER}</td><td>${REPORT_PLACEHOLDER}</td></tr>`);
   }
 
   observationGroups.forEach((buckets, location) => {
@@ -1508,9 +1526,9 @@ const renderObservationsHtml = (observationGroups) => {
     ].forEach(([sectionLabel, items]) => {
       if (!items.length) return;
       rows.push(`<tr class="obs-category-row"><td colspan="2">${escapeHtml(sectionLabel)}</td></tr>`);
-      items.forEach((item, index) => {
+      items.forEach((item) => {
         rows.push(
-          `<tr><td class="sno-col center">${index + 1}</td><td>${escapeHtml(buildObservationLine(item))}</td></tr>`
+          `<tr><td>${escapeHtml(safeText(item.component, REPORT_PLACEHOLDER))}</td><td>${escapeHtml(safeText(item.remarks, item.location || REPORT_PLACEHOLDER))}</td></tr>`
         );
       });
     });
@@ -1721,7 +1739,7 @@ const renderAttachmentsHtml = (fileAttachments) => {
                 <td class="center">${index + 1}</td>
                 <td>${escapeHtml(file.location)}</td>
                 <td>${escapeHtml(file.context)}</td>
-                <td>${escapeHtml(file.name)}</td>
+                <td><a href="${escapeHtml(file.source)}">${escapeHtml(file.name)}</a></td>
               </tr>
             `
           )
@@ -1730,13 +1748,6 @@ const renderAttachmentsHtml = (fileAttachments) => {
     </table>
   `;
 };
-
-const renderNotesHtml = () => `
-  <div class="note-block">
-    <p><strong>Note :</strong></p>
-    ${QUANTIFICATION_NOTES.map((note, index) => `<p>${index + 1}. ${escapeHtml(note)}</p>`).join('')}
-  </div>
-`;
 
 const renderSection = (title, body, subtitle = '') => `
   <h2 class="section-title">${escapeHtml(title)}</h2>
@@ -1747,7 +1758,7 @@ const renderSection = (title, body, subtitle = '') => `
 const renderStructureHtml = (prepared, imageRef) => `
   <section class="report-block">
     <div class="brand">SAMS</div>
-    <div><span class="highlight-label">OUTPUT / REPORT FORMAT:</span></div>
+    <div><span class="highlight-label">REPORT</span></div>
     ${renderDetailSectionsHtml(prepared.detailSections)}
     ${renderSection(
       'OBSERVATIONS',
@@ -1756,14 +1767,7 @@ const renderStructureHtml = (prepared, imageRef) => `
     )}
     ${renderSection('INSPECTION IMAGES', renderImageGridHtml(prepared.inspectionImages, imageRef))}
     <p class="section-note small-caps">The observation entered during the attaching the photo should reflect with image in small font</p>
-    ${renderSection(
-      'TEST RESULTS',
-      renderTestResultsHtml(prepared.testGroups),
-      'Provision for uploading multiple IMAGE OR PDF OR EXCEL files for each testing format.'
-    )}
-    <p class="section-note">Images attached during the testing should reflect below the test results in the output.</p>
-    ${renderSection('TESTING IMAGES', renderImageGridHtml(prepared.testingImages, imageRef))}
-    ${renderSection('ATTACHED FILES', renderAttachmentsHtml(prepared.fileAttachments))}
+    ${renderSection('ANNEXURES', renderAttachmentsHtml(prepared.fileAttachments))}
     ${renderSection('QUANTIFICATION', renderQuantificationHtml(prepared.quantificationSections))}
     ${renderSection(
       'BILL OF QUANTITY SUMMARY - STRUCTURAL',
@@ -1772,7 +1776,6 @@ const renderStructureHtml = (prepared, imageRef) => `
     )}
     ${renderSection('BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', renderSummaryTableHtml(prepared.summary.nonStructural))}
     ${renderSection('BILL OF QUANTITY SUMMARY - TOTAL', renderSummaryTableHtml(prepared.summary.combined))}
-    ${renderNotesHtml()}
   </section>
 `;
 
@@ -1856,10 +1859,10 @@ const REPORT_STYLES = `
   .quant-total-row td { font-weight: bold; background: #f2f2f2; }
   .image-grid { border: none; }
   .image-grid td { border: none; width: 50%; text-align: center; vertical-align: top; padding: 6px; }
-  .image-box { border: 1px solid #999999; padding: 3px; }
+  .image-box { border: 1px solid #999999; padding: 3px; height: 135px; }
   /* Word honours the width attribute on the tag; the max-* rules keep tall portrait
      photos in check for the Chrome-rendered PDF. */
-  .image-box img { max-width: 100%; max-height: 280px; }
+  .image-box img { width: 100%; height: 135px; object-fit: contain; }
   .image-missing { font-size: 9pt; font-style: italic; color: #888888; }
   .caption-title { font-size: 9pt; margin-top: 3px; }
   .caption-meta { font-size: 8pt; color: #555555; }
@@ -1867,12 +1870,14 @@ const REPORT_STYLES = `
   .note-block p { font-size: 10pt; margin: 2pt 0; }
   .report-block { page-break-after: always; }
   .report-block:last-child { page-break-after: auto; }
+  .page-footer { position: fixed; bottom: -10mm; width: 100%; text-align: center; font-size: 9pt; }
+  .page-number:after { content: counter(page); }
 `;
 
 const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    <title>SAMS - Output / Report Format</title>
+    <title>SAMS - Report</title>
     <!--[if gte mso 9]><xml>
       <w:WordDocument>
         <w:View>Print</w:View>
@@ -1883,6 +1888,7 @@ const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:sc
     <style>${REPORT_STYLES}</style>
   </head>
   <body>
+    <div class="page-footer">Page <span class="page-number"></span></div>
     <div class="WordSection1">
       ${preparedStructures.map((prepared) => renderStructureHtml(prepared, imageRef)).join('')}
     </div>
@@ -2168,7 +2174,7 @@ const renderStructurePdf = (doc, prepared, index) => {
     .fillColor('#000000')
     .font('Helvetica-Bold')
     .fontSize(11)
-    .text('OUTPUT / REPORT FORMAT:', doc.page.margins.left + 4, labelY + 4, { lineBreak: false });
+    .text('REPORT', doc.page.margins.left + 4, labelY + 4, { lineBreak: false });
   doc.y = labelY + 22;
   pdfResetX(doc);
 
@@ -2189,14 +2195,14 @@ const renderStructurePdf = (doc, prepared, index) => {
     section.rows.forEach(([label, value, options]) => {
       if (options?.span) {
         flush();
-        pdfTableRow(doc, [label, safeText(value)], detailSpanWidths);
+        pdfTableRow(doc, [label, safeText(value, REPORT_PLACEHOLDER)], detailSpanWidths);
         return;
       }
       if (pending) {
-        pdfTableRow(doc, [pending[0], pending[1], label, safeText(value)], detailWidths);
+        pdfTableRow(doc, [pending[0], safeText(pending[1], REPORT_PLACEHOLDER), label, safeText(value, REPORT_PLACEHOLDER)], detailWidths);
         pending = null;
       } else {
-        pending = [label, safeText(value)];
+        pending = [label, safeText(value, REPORT_PLACEHOLDER)];
       }
     });
 
@@ -2208,10 +2214,10 @@ const renderStructurePdf = (doc, prepared, index) => {
 
   // OBSERVATIONS
   pdfSectionTitle(doc, 'OBSERVATIONS');
-  const obsWidths = [45, PDF_CONTENT_WIDTH - 45];
-  pdfTableRow(doc, ['S. No', 'Location/Remarks'], obsWidths, { header: true });
+  const obsWidths = [190, PDF_CONTENT_WIDTH - 190];
+  pdfTableRow(doc, ['Element Name', 'Location of Distress'], obsWidths, { header: true });
   if (!prepared.observationGroups.size) {
-    pdfTableRow(doc, ['', 'No observations recorded'], obsWidths);
+    pdfTableRow(doc, [REPORT_PLACEHOLDER, REPORT_PLACEHOLDER], obsWidths);
   } else {
     prepared.observationGroups.forEach((buckets, location) => {
       pdfBandRow(doc, safeText(location).toUpperCase(), '#DDEBF7');
@@ -2221,8 +2227,8 @@ const renderStructurePdf = (doc, prepared, index) => {
       ].forEach(([sectionLabel, items]) => {
         if (!items.length) return;
         pdfBandRow(doc, sectionLabel, '#F2F2F2');
-        items.forEach((item, rowIndex) => {
-          pdfTableRow(doc, [String(rowIndex + 1), buildObservationLine(item)], obsWidths);
+        items.forEach((item) => {
+          pdfTableRow(doc, [safeText(item.component, REPORT_PLACEHOLDER), safeText(item.remarks, item.location || REPORT_PLACEHOLDER)], obsWidths);
         });
       });
     });
@@ -2231,44 +2237,8 @@ const renderStructurePdf = (doc, prepared, index) => {
   pdfSectionTitle(doc, 'INSPECTION IMAGES');
   renderPdfImageGrid(doc, prepared.inspectionImages);
 
-  // TEST RESULTS
-  pdfSectionTitle(doc, 'TEST RESULTS');
-  if (!prepared.testGroups.size) {
-    pdfParagraph(doc, 'No test results recorded.', { font: 'Helvetica-Oblique', color: '#888888' });
-  } else {
-    const testWidths = [95, 75, 60, 50, 95, 78, 70];
-    let testIndex = 1;
-    prepared.testGroups.forEach((rows, testName) => {
-      ensurePdfSpace(doc, 20);
-      pdfParagraph(doc, `${testIndex}. ${testName}`, { font: 'Helvetica-Bold', fontSize: 10 });
-      pdfTableRow(doc, ['Location', 'Component', 'Tested By', 'Date', 'Result', 'Remarks', 'Attachments'], testWidths, {
-        header: true
-      });
-      rows.forEach((row) => {
-        pdfTableRow(
-          doc,
-          [
-            row.scopeLabel,
-            [row.component_type, row.component_id].filter(Boolean).join(' / '),
-            row.tested_by,
-            row.test_date,
-            row.result_summary,
-            row.remarks,
-            row.attachments.map((attachment) => attachment.name).join('\n')
-          ],
-          testWidths
-        );
-      });
-      testIndex += 1;
-      doc.moveDown(0.2);
-    });
-  }
-
-  pdfSectionTitle(doc, 'TESTING IMAGES');
-  renderPdfImageGrid(doc, prepared.testingImages);
-
-  // ATTACHED FILES
-  pdfSectionTitle(doc, 'ATTACHED FILES');
+  // Documents remain available as annexures even though testing data is excluded.
+  pdfSectionTitle(doc, 'ANNEXURES');
   if (!prepared.fileAttachments.length) {
     pdfParagraph(doc, 'No additional documents attached.', { font: 'Helvetica-Oblique', color: '#888888' });
   } else {
@@ -2348,12 +2318,6 @@ const renderStructurePdf = (doc, prepared, index) => {
     }
   });
 
-  // NOTES
-  pdfSectionTitle(doc, 'NOTE');
-  QUANTIFICATION_NOTES.forEach((note, noteIndex) => {
-    ensurePdfSpace(doc, 16);
-    pdfParagraph(doc, `${noteIndex + 1}. ${note}`);
-  });
 };
 
 const sendPdfBuffer = (res, buffer, fileName) => {
@@ -2373,6 +2337,16 @@ const renderPdfWithPdfKit = (preparedStructures) =>
 
     try {
       preparedStructures.forEach((prepared, index) => renderStructurePdf(doc, prepared, index));
+      const pageRange = doc.bufferedPageRange();
+      for (let pageIndex = pageRange.start; pageIndex < pageRange.start + pageRange.count; pageIndex += 1) {
+        doc.switchToPage(pageIndex);
+        doc.font('Helvetica').fontSize(8).fillColor('#555555').text(
+          `Page ${pageIndex + 1} of ${pageRange.count}`,
+          doc.page.margins.left,
+          doc.page.height - 24,
+          { width: PDF_CONTENT_WIDTH, align: 'center', lineBreak: false }
+        );
+      }
       doc.end();
     } catch (error) {
       reject(error);
@@ -2501,24 +2475,16 @@ const addExcelObservationSection = (worksheet, startRow, observationGroups) => {
   let row = startRow;
   addMergedSectionRow(worksheet, row, 'OBSERVATIONS', COLORS.SECTION, 9);
   row += 1;
-  row = writeRow(
-    worksheet,
-    row,
-    [
-      'Observation given in the structural and non-structural shall be reflect in the table and images below the table in the output.'
-    ],
-    { font: FONTS.SMALL }
-  );
-  worksheet.mergeCells(row - 1, 1, row - 1, 9);
-
-  addTableHeader(worksheet, row, ['S. No', 'Location/Remarks'], COLORS.PRIMARY);
-  worksheet.mergeCells(row, 2, row, 9);
+  addTableHeader(worksheet, row, ['Element Name', '', '', '', 'Location of Distress', '', '', '', ''], COLORS.PRIMARY);
+  worksheet.mergeCells(row, 1, row, 4);
+  worksheet.mergeCells(row, 5, row, 9);
   row += 1;
 
   if (!observationGroups.size) {
-    worksheet.getCell(row, 1).value = '';
-    worksheet.getCell(row, 2).value = 'No observations recorded';
-    worksheet.mergeCells(row, 2, row, 9);
+    worksheet.getCell(row, 1).value = REPORT_PLACEHOLDER;
+    worksheet.getCell(row, 5).value = REPORT_PLACEHOLDER;
+    worksheet.mergeCells(row, 1, row, 4);
+    worksheet.mergeCells(row, 5, row, 9);
     styleRowCells(worksheet, row, 1, 9);
     return row + 1;
   }
@@ -2537,10 +2503,11 @@ const addExcelObservationSection = (worksheet, startRow, observationGroups) => {
       addMergedSectionRow(worksheet, row, sectionLabel, COLORS.SUBSECTION, 9, { horizontal: 'center' });
       row += 1;
 
-      items.forEach((item, index) => {
-        worksheet.getCell(row, 1).value = index + 1;
-        worksheet.getCell(row, 2).value = buildObservationLine(item);
-        worksheet.mergeCells(row, 2, row, 9);
+      items.forEach((item) => {
+        worksheet.getCell(row, 1).value = safeText(item.component, REPORT_PLACEHOLDER);
+        worksheet.getCell(row, 5).value = safeText(item.remarks, item.location || REPORT_PLACEHOLDER);
+        worksheet.mergeCells(row, 1, row, 4);
+        worksheet.mergeCells(row, 5, row, 9);
         styleRowCells(worksheet, row, 1, 9);
         row += 1;
       });
@@ -2648,7 +2615,7 @@ const addExcelTestSection = (worksheet, startRow, testGroups) => {
 
 const addExcelAttachmentSection = (worksheet, startRow, fileAttachments) => {
   let row = startRow;
-  addMergedSectionRow(worksheet, row, 'ATTACHED FILES', COLORS.SECTION, 9);
+  addMergedSectionRow(worksheet, row, 'ANNEXURES', COLORS.SECTION, 9);
   row += 1;
   addTableHeader(worksheet, row, ['S. No', 'Location', 'Context', 'File', '', 'Source', '', '', ''], COLORS.PRIMARY);
   worksheet.mergeCells(row, 4, row, 5);
@@ -2663,7 +2630,7 @@ const addExcelAttachmentSection = (worksheet, startRow, fileAttachments) => {
     worksheet.getCell(row, 1).value = index + 1;
     worksheet.getCell(row, 2).value = file.location;
     worksheet.getCell(row, 3).value = file.context;
-    worksheet.getCell(row, 4).value = file.name;
+    worksheet.getCell(row, 4).value = { text: file.name, hyperlink: file.source, tooltip: 'Open annexure' };
     worksheet.getCell(row, 6).value = file.source;
     worksheet.mergeCells(row, 4, row, 5);
     worksheet.mergeCells(row, 6, row, 9);
@@ -2760,35 +2727,24 @@ const addExcelSummarySection = (worksheet, startRow, title, summaryRows) => {
   return row;
 };
 
-const addExcelNotes = (worksheet, startRow) => {
-  let row = startRow;
-  addMergedSectionRow(worksheet, row, 'NOTE', COLORS.NOTE, 9);
-  row += 1;
-  QUANTIFICATION_NOTES.forEach((note, index) => {
-    addMergedSectionRow(worksheet, row, `${index + 1}. ${note}`, COLORS.NOTE, 9, { font: FONTS.SMALL });
-    row += 1;
-  });
-  return row;
-};
-
 const addStructureHeader = (worksheet, prepared) => {
   worksheet.mergeCells('A1:I1');
   worksheet.getCell('A1').value = 'SAMS';
   worksheet.getCell('A1').font = FONTS.TITLE;
   worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
 
-  addMergedSectionRow(worksheet, 2, 'OUTPUT / REPORT FORMAT', COLORS.HIGHLIGHT, 9);
+  addMergedSectionRow(worksheet, 2, 'REPORT', COLORS.HIGHLIGHT, 9);
 
   let row = 4;
 
   // Label | Value | Label | Value across the 9 columns, matching the Word/PDF layout.
   const writeDetailPair = (left, right) => {
     worksheet.getCell(row, 1).value = left[0];
-    worksheet.getCell(row, 2).value = left[1];
+    worksheet.getCell(row, 2).value = safeText(left[1], REPORT_PLACEHOLDER);
     worksheet.mergeCells(row, 2, row, 4);
     if (right) {
       worksheet.getCell(row, 5).value = right[0];
-      worksheet.getCell(row, 6).value = right[1];
+      worksheet.getCell(row, 6).value = safeText(right[1], REPORT_PLACEHOLDER);
       worksheet.mergeCells(row, 6, row, 9);
     } else {
       worksheet.mergeCells(row, 5, row, 9);
@@ -2815,7 +2771,7 @@ const addStructureHeader = (worksheet, prepared) => {
           pending = null;
         }
         worksheet.getCell(row, 1).value = label;
-        worksheet.getCell(row, 2).value = safeText(value);
+        worksheet.getCell(row, 2).value = safeText(value, REPORT_PLACEHOLDER);
         worksheet.mergeCells(row, 2, row, 9);
         styleRowCells(worksheet, row, 1, 9);
         worksheet.getCell(row, 1).font = { ...FONTS.BODY, bold: true };
@@ -2845,16 +2801,13 @@ const writeStructureWorksheet = (workbook, worksheet, prepared) => {
   let row = addStructureHeader(worksheet, prepared);
   row = addExcelObservationSection(worksheet, row, prepared.observationGroups) + 1;
   row = addExcelImageSection(workbook, worksheet, row, 'INSPECTION IMAGES', prepared.inspectionImages) + 1;
-  row = addExcelTestSection(worksheet, row, prepared.testGroups) + 1;
-  row = addExcelImageSection(workbook, worksheet, row, 'TESTING IMAGES', prepared.testingImages) + 1;
   row = addExcelAttachmentSection(worksheet, row, prepared.fileAttachments) + 1;
   row = addExcelQuantificationSection(worksheet, row, prepared.quantificationSections) + 1;
   row = addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - STRUCTURAL', prepared.summary.structural) + 1;
   row =
     addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', prepared.summary.nonStructural) +
     1;
-  row = addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - TOTAL', prepared.summary.combined) + 1;
-  addExcelNotes(worksheet, row);
+  addExcelSummarySection(worksheet, row, 'BILL OF QUANTITY SUMMARY - TOTAL', prepared.summary.combined);
 
   worksheet.views = [{ state: 'frozen', ySplit: 3 }];
 };
