@@ -340,17 +340,6 @@ const formatCoordinate = (value) => {
   return String(Number(numeric.toFixed(6)));
 };
 
-const collectBlockNames = (structure) => {
-  const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
-  const blockNames = floors.flatMap((floor) =>
-    (Array.isArray(floor.blocks) ? floor.blocks : [])
-      .map((block) => safeText(block?.block_name || block?.block_number || block?.block_id))
-      .filter(Boolean)
-  );
-
-  return Array.from(new Set(blockNames)).join(', ');
-};
-
 const sanitizeWorksheetName = (name, fallback) => {
   const cleaned = safeText(name, fallback).replace(/[\\/*?:[\]]/g, ' ').trim();
   return (cleaned || fallback).slice(0, 31);
@@ -554,10 +543,89 @@ const loadImageAsset = async (source) => {
     buffer,
     mimeType: mimeType || 'image/jpeg',
     fileName: `sams_image_${String(embeddedImageSequence).padStart(3, '0')}${extension}`,
-    dataUri: `data:${mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`
+    dataUri: `data:${mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`,
+    naturalSize: getImageDimensions(buffer, mimeType || 'image/jpeg')
   };
 
   return register(asset);
+};
+
+/**
+ * Reads the true pixel dimensions straight out of the image bytes.
+ * MS Word's HTML/MHTML renderer does not understand CSS `object-fit`, so without
+ * knowing the real aspect ratio we can only force a box size and Word stretches
+ * (distorts) the photo to fill it. Computing width/height here lets us instead emit
+ * <img width height> attributes that Word (and every other renderer) honours directly.
+ * Supports the formats these reports actually embed: JPEG, PNG, GIF, BMP, WEBP.
+ */
+const getImageDimensions = (buffer, mimeType) => {
+  try {
+    if (!buffer || buffer.length < 24) return null;
+
+    if (mimeType === 'image/png' && buffer.readUInt32BE(0) === 0x89504e47) {
+      return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+    }
+
+    if (mimeType === 'image/gif' && buffer.toString('ascii', 0, 3) === 'GIF') {
+      return { width: buffer.readUInt16LE(6), height: buffer.readUInt16LE(8) };
+    }
+
+    if (mimeType === 'image/bmp' && buffer.toString('ascii', 0, 2) === 'BM') {
+      return { width: buffer.readInt32LE(18), height: Math.abs(buffer.readInt32LE(22)) };
+    }
+
+    if (mimeType === 'image/webp' && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+      const chunk = buffer.toString('ascii', 12, 16);
+      if (chunk === 'VP8 ') {
+        return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff };
+      }
+      if (chunk === 'VP8L') {
+        const bits = buffer.readUInt32LE(21);
+        return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+      }
+      if (chunk === 'VP8X') {
+        return {
+          width: (buffer[24] | (buffer[25] << 8) | (buffer[26] << 16)) + 1,
+          height: (buffer[27] | (buffer[28] << 8) | (buffer[29] << 16)) + 1
+        };
+      }
+      return null;
+    }
+
+    if (mimeType === 'image/jpeg' && buffer.readUInt16BE(0) === 0xffd8) {
+      let offset = 2;
+      while (offset < buffer.length - 8) {
+        if (buffer[offset] !== 0xff) break;
+        const marker = buffer[offset + 1];
+        // SOF0-SOF3, SOF5-SOF7, SOF9-SOF11, SOF13-SOF15 carry the frame dimensions.
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+        }
+        const segmentLength = buffer.readUInt16BE(offset + 2);
+        offset += 2 + segmentLength;
+      }
+      return null;
+    }
+
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+/**
+ * Fits `natural` width/height inside a maxWidth x maxHeight box, preserving aspect
+ * ratio, so the explicit <img width height> attributes never crop or distort a photo.
+ */
+const fitWithinBox = (natural, maxWidth, maxHeight) => {
+  if (!natural || !natural.width || !natural.height) {
+    return { width: maxWidth, height: maxHeight };
+  }
+  const scale = Math.min(maxWidth / natural.width, maxHeight / natural.height, 1);
+  return {
+    width: Math.max(1, Math.round(natural.width * scale)),
+    height: Math.max(1, Math.round(natural.height * scale))
+  };
 };
 
 const attachImageAssets = async (rows) => {
@@ -869,7 +937,9 @@ const collectObservationsFromScope = (scopeType, scope, structuralContainer, non
       observations.push({
         location: locationLabel,
         category: section,
-        component: safeText(entry?.name) ? `${componentLabel} (${safeText(entry.name)})` : componentLabel,
+        // Only the general component label is shown (e.g. "Beams"), not the specific
+        // instance name the field engineer may have entered for that component.
+        component: componentLabel,
         remarks: note || '',
         rating,
         photos,
@@ -1301,6 +1371,13 @@ const deriveParkingFloorTypes = (geometry) => {
   ).join(', ');
 };
 
+// The report header used to always print the literal string "SAMS"; it now shows the
+// client's name instead, falling back to "SAMS" only when no client name was captured.
+const getClientName = (structureExport) => {
+  const administrative = structureExport?.structure?.administrative || structureExport?.structure?.administration || {};
+  return safeText(administrative.client_name, 'SAMS');
+};
+
 /**
  * Structure / location / administrative details, grouped into labelled tables so the
  * report reads as a proper detail sheet rather than one long key-value list.
@@ -1331,8 +1408,7 @@ const buildStructureDetailSections = (structureExport, filtersApplied) => {
         ['Structure Width', withUnit(geometry.structure_width, 'M')],
         ['Structure Height', withUnit(geometry.structure_height, 'M')],
         ['Parking Type', prettifyEnum(geometry.parking_type || (deriveParkingFloorTypes(geometry) ? 'available' : ''))],
-        ['Parking Floor Type', deriveParkingFloorTypes(geometry)],
-        ['Block Names', collectBlockNames(structure), { span: true }]
+        ['Parking Floor Type', deriveParkingFloorTypes(geometry)]
       ]
     },
     {
@@ -1541,6 +1617,11 @@ const renderObservationsHtml = (observationGroups) => {
 /**
  * Word has no flexbox, so the 2-up image grid must be a real table.
  */
+// Box the images are laid out in; kept in one place so the HTML attributes below and
+// the .image-box CSS rule stay in sync.
+const IMAGE_BOX_MAX_WIDTH = 280;
+const IMAGE_BOX_MAX_HEIGHT = 135;
+
 const renderImageGridHtml = (rows, imageRef) => {
   if (!rows.length) {
     return '<p class="empty-state">No images attached.</p>';
@@ -1550,8 +1631,12 @@ const renderImageGridHtml = (rows, imageRef) => {
     const src = imageRef(row.asset);
     const caption = safeText(row.caption, 'Untitled');
     const meta = safeText(row.location || row.scopeLabel);
+    // Word's HTML renderer ignores CSS object-fit, so the box size must come from real
+    // <img width height> attributes (computed from the actual photo) or portrait/landscape
+    // photos get stretched to fill the fixed box instead of being scaled proportionally.
+    const fitted = fitWithinBox(row.asset?.naturalSize, IMAGE_BOX_MAX_WIDTH, IMAGE_BOX_MAX_HEIGHT);
     const body = src
-      ? `<img src="${escapeHtml(src)}" width="300" alt="${escapeHtml(caption)}" />`
+      ? `<img src="${escapeHtml(src)}" width="${fitted.width}" height="${fitted.height}" alt="${escapeHtml(caption)}" />`
       : `<span class="image-missing">Image could not be embedded (${escapeHtml(getAttachmentLabel(row.source))})</span>`;
 
     return `
@@ -1757,7 +1842,7 @@ const renderSection = (title, body, subtitle = '') => `
 
 const renderStructureHtml = (prepared, imageRef) => `
   <section class="report-block">
-    <div class="brand">SAMS</div>
+    <div class="brand">${escapeHtml(getClientName(prepared))}</div>
     <div><span class="highlight-label">REPORT</span></div>
     ${renderDetailSectionsHtml(prepared.detailSections)}
     ${renderSection(
@@ -1780,7 +1865,17 @@ const renderStructureHtml = (prepared, imageRef) => `
 `;
 
 const REPORT_STYLES = `
-  @page WordSection1 { size: 21cm 29.7cm; margin: 18mm 16mm; }
+  /* Consistent breathing room at the top/bottom of every page, plus a page border.
+     "border" + "mso-border-alt"/"mso-padding-alt" on @page is what Word's own HTML
+     importer reads to draw a repeating page border in the native .doc it produces. */
+  @page WordSection1 {
+    size: 21cm 29.7cm;
+    margin: 26mm 18mm 26mm 18mm;
+    border: 1pt solid #7F7F7F;
+    mso-border-alt: solid #7F7F7F 1pt;
+    padding: 10mm;
+    mso-padding-alt: 10mm 10mm 10mm 10mm;
+  }
   div.WordSection1 { page: WordSection1; }
   body {
     font-family: 'Times New Roman', Times, serif;
@@ -1859,10 +1954,18 @@ const REPORT_STYLES = `
   .quant-total-row td { font-weight: bold; background: #f2f2f2; }
   .image-grid { border: none; }
   .image-grid td { border: none; width: 50%; text-align: center; vertical-align: top; padding: 6px; }
-  .image-box { border: 1px solid #999999; padding: 3px; height: 135px; }
-  /* Word honours the width attribute on the tag; the max-* rules keep tall portrait
-     photos in check for the Chrome-rendered PDF. */
-  .image-box img { width: 100%; height: 135px; object-fit: contain; }
+  .image-box {
+    border: 1px solid #999999;
+    padding: 3px;
+    height: 137px;
+    display: table-cell;
+    vertical-align: middle;
+    text-align: center;
+  }
+  /* The actual size now comes from the width/height attributes on each <img> tag
+     (computed per-photo to preserve aspect ratio); these rules are just a safety net
+     for browsers/Chrome-rendered PDF and never override Word's own attribute-based sizing. */
+  .image-box img { max-width: 100%; max-height: 135px; }
   .image-missing { font-size: 9pt; font-style: italic; color: #888888; }
   .caption-title { font-size: 9pt; margin-top: 3px; }
   .caption-meta { font-size: 8pt; color: #555555; }
@@ -1872,6 +1975,17 @@ const REPORT_STYLES = `
   .report-block:last-child { page-break-after: auto; }
   .page-footer { position: fixed; bottom: -10mm; width: 100%; text-align: center; font-size: 9pt; }
   .page-number:after { content: counter(page); }
+  /* Chrome's print-to-PDF path ignores the @page border above, so we repeat a fixed-
+     position bordered frame the same way the footer above repeats on every page. */
+  .page-border {
+    position: fixed;
+    top: 6mm;
+    left: 6mm;
+    right: 6mm;
+    bottom: 6mm;
+    border: 1pt solid #7F7F7F;
+    pointer-events: none;
+  }
 `;
 
 const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
@@ -1888,6 +2002,7 @@ const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:sc
     <style>${REPORT_STYLES}</style>
   </head>
   <body>
+    <div class="page-border"></div>
     <div class="page-footer">Page <span class="page-number"></span></div>
     <div class="WordSection1">
       ${preparedStructures.map((prepared) => renderStructureHtml(prepared, imageRef)).join('')}
@@ -2053,6 +2168,7 @@ const pdfTableRow = (doc, columns, widths, options = {}) => {
 
   columns.forEach((value, index) => {
     const width = widths[index];
+    const linkUrl = safeText(options.links && options.links[index]);
     if (options.fill) {
       doc.rect(currentX, y, width, rowHeight).fill(options.fill);
     }
@@ -2060,11 +2176,17 @@ const pdfTableRow = (doc, columns, widths, options = {}) => {
     doc
       .font(font)
       .fontSize(fontSize)
-      .fillColor('#000000')
+      .fillColor(linkUrl ? '#0563C1' : '#000000')
       .text(safeText(value, ''), currentX + 3, y + 3, {
         width: width - 6,
-        align: options.align || 'left'
+        align: options.align || 'left',
+        underline: Boolean(linkUrl)
       });
+    // Makes the attachment file name a clickable, openable link in the exported PDF.
+    if (linkUrl) {
+      doc.link(currentX, y, width, rowHeight, linkUrl);
+    }
+    doc.fillColor('#000000');
     currentX += width;
   });
 
@@ -2164,7 +2286,7 @@ const renderStructurePdf = (doc, prepared, index) => {
     .font('Helvetica-Bold')
     .fontSize(18)
     .fillColor('#1F1F1F')
-    .text('SAMS', { align: 'center', width: PDF_CONTENT_WIDTH });
+    .text(getClientName(prepared), { align: 'center', width: PDF_CONTENT_WIDTH });
   pdfResetX(doc);
   doc.moveDown(0.3);
 
@@ -2245,7 +2367,9 @@ const renderStructurePdf = (doc, prepared, index) => {
     const attachmentWidths = [40, 150, 150, PDF_CONTENT_WIDTH - 340];
     pdfTableRow(doc, ['S. No', 'Location', 'Context', 'File'], attachmentWidths, { header: true });
     prepared.fileAttachments.forEach((file, fileIndex) => {
-      pdfTableRow(doc, [String(fileIndex + 1), file.location, file.context, file.name], attachmentWidths);
+      pdfTableRow(doc, [String(fileIndex + 1), file.location, file.context, file.name], attachmentWidths, {
+        links: [null, null, null, file.source]
+      });
     });
   }
 
@@ -2329,7 +2453,13 @@ const sendPdfBuffer = (res, buffer, fileName) => {
 
 const renderPdfWithPdfKit = (preparedStructures) =>
   new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 36, bufferPages: true });
+    // Extra top/bottom margin gives each page breathing room above the title and
+    // above/below the footer; left/right stay close to the previous 36pt default.
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 54, bottom: 54, left: 36, right: 36 },
+      bufferPages: true
+    });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -2340,10 +2470,24 @@ const renderPdfWithPdfKit = (preparedStructures) =>
       const pageRange = doc.bufferedPageRange();
       for (let pageIndex = pageRange.start; pageIndex < pageRange.start + pageRange.count; pageIndex += 1) {
         doc.switchToPage(pageIndex);
+
+        // A border frame on every page, inset slightly inside the page margins.
+        const borderInset = 14;
+        doc
+          .rect(
+            borderInset,
+            borderInset,
+            doc.page.width - borderInset * 2,
+            doc.page.height - borderInset * 2
+          )
+          .lineWidth(0.75)
+          .strokeColor('#7F7F7F')
+          .stroke();
+
         doc.font('Helvetica').fontSize(8).fillColor('#555555').text(
           `Page ${pageIndex + 1} of ${pageRange.count}`,
           doc.page.margins.left,
-          doc.page.height - 24,
+          doc.page.height - 30,
           { width: PDF_CONTENT_WIDTH, align: 'center', lineBreak: false }
         );
       }
@@ -2367,7 +2511,7 @@ const renderPdfWithBrowser = async (executablePath, html) => {
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
-      margin: { top: '12mm', right: '12mm', bottom: '12mm', left: '12mm' }
+      margin: { top: '18mm', right: '14mm', bottom: '18mm', left: '14mm' }
     });
     return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
   } finally {
@@ -2729,7 +2873,7 @@ const addExcelSummarySection = (worksheet, startRow, title, summaryRows) => {
 
 const addStructureHeader = (worksheet, prepared) => {
   worksheet.mergeCells('A1:I1');
-  worksheet.getCell('A1').value = 'SAMS';
+  worksheet.getCell('A1').value = getClientName(prepared);
   worksheet.getCell('A1').font = FONTS.TITLE;
   worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
 
