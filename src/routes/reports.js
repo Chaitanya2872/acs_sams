@@ -7,6 +7,7 @@ const http = require('http');
 const https = require('https');
 const puppeteer = require('puppeteer-core');
 const mongoose = require('mongoose');
+const cloudinary = require('../config/cloudinary');
 const { User } = require('../models/schemas');
 const { authenticateToken } = require('../middlewares/auth');
 const { getUserRoles, hasRole } = require('../utils/roles');
@@ -379,6 +380,144 @@ const getAttachmentLabel = (value) => {
     return safeText(name, source);
   }
 };
+
+// Two independent bugs make a downloaded "document" attachment fail to open:
+// 1) Cloudinary blocks direct/unsigned delivery of "raw" PDF and ZIP files (its anti-abuse
+//    "restricted media types" security setting) — a plain secure_url to those returns 401.
+// 2) Documents uploaded via this app's own upload middleware never had a `format`/extension
+//    tagged on the Cloudinary asset, so their secure_url has no file extension at all and a
+//    generic `application/octet-stream` content-type — a browser has no way to know it's a
+//    PDF/DOCX/etc, so it saves a file with no extension that the OS can't open.
+// Both are fixed by routing document links through our own /documents/download proxy: it
+// resolves the true asset via Cloudinary's signed Admin-API download (not subject to the CDN
+// block) and re-serves it with a Content-Type/Content-Disposition we control, using the
+// document's original filename (stored separately in Mongo) to recover the right extension
+// even for older, extension-less uploads.
+const CLOUDINARY_URL_PATTERN = /^https?:\/\/res\.cloudinary\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(?:v\d+\/)?(.+)$/i;
+
+const DOCUMENT_MIME_BY_EXT = {
+  ...IMAGE_MIME_BY_EXT,
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.txt': 'text/plain',
+  '.csv': 'text/csv',
+  '.rtf': 'application/rtf',
+  '.zip': 'application/zip'
+};
+
+const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+const DOCUMENT_FETCH_TIMEOUT_MS = 20000;
+
+const API_BASE_URL = (process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, '');
+
+/**
+ * Resolves a stored Cloudinary "raw" document URL to a signed Admin-API download link that
+ * bypasses the CDN's PDF/ZIP delivery block. `extensionHint` (from the document's own stored
+ * filename) recovers the correct format for older uploads whose URL has no extension at all.
+ * Returns null for anything that isn't one of our own Cloudinary raw assets.
+ */
+const resolveCloudinaryRawDownload = (source, extensionHint = '') => {
+  const value = safeText(source);
+  if (!value) return null;
+
+  const match = value.match(CLOUDINARY_URL_PATTERN);
+  if (!match) return null;
+
+  const [, cloudName, resourceType, deliveryType, publicIdWithExt] = match;
+  if (resourceType !== 'raw' || cloudName !== cloudinary.config().cloud_name) return null;
+
+  const format = path.extname(publicIdWithExt).replace(/^\./, '') || safeText(extensionHint).replace(/^\./, '').toLowerCase();
+  if (!format) return null;
+
+  try {
+    return cloudinary.utils.private_download_url(publicIdWithExt, format, {
+      resource_type: resourceType,
+      type: deliveryType
+    });
+  } catch (error) {
+    return null;
+  }
+};
+
+/**
+ * Builds the link used for a document attachment inside exported reports. Cloudinary raw
+ * assets are routed through our own download-proxy (see the /documents/download route below)
+ * so the saved file always gets the right name/extension/Content-Type; anything else (data
+ * URIs, legacy local /uploads/ paths, external links) is left untouched.
+ */
+const buildDocumentDownloadLink = (source, name) => {
+  const value = safeText(source);
+  if (!value || !/^https?:\/\//i.test(value)) return value;
+
+  const resolved = resolveCloudinaryRawDownload(value, path.extname(safeText(name)));
+  if (!resolved) return value;
+
+  const params = new URLSearchParams({ url: value });
+  if (name) params.set('name', name);
+  return `${API_BASE_URL}/api/reports/documents/download?${params.toString()}`;
+};
+
+const fetchDocumentBinary = (url, redirectsLeft = 4) =>
+  new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+
+    let request;
+    try {
+      const client = url.startsWith('https:') ? https : http;
+      request = client.get(url, { timeout: DOCUMENT_FETCH_TIMEOUT_MS }, (response) => {
+        const status = response.statusCode || 0;
+
+        if (status >= 300 && status < 400 && response.headers.location && redirectsLeft > 0) {
+          response.resume();
+          const next = new URL(response.headers.location, url).toString();
+          fetchDocumentBinary(next, redirectsLeft - 1).then(finish);
+          return;
+        }
+
+        if (status !== 200) {
+          response.resume();
+          finish(null);
+          return;
+        }
+
+        const chunks = [];
+        let size = 0;
+        response.on('data', (chunk) => {
+          size += chunk.length;
+          if (size > MAX_DOCUMENT_BYTES) {
+            response.destroy();
+            finish(null);
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on('end', () =>
+          finish({ buffer: Buffer.concat(chunks), contentType: safeText(response.headers['content-type']) })
+        );
+        response.on('error', () => finish(null));
+      });
+    } catch (error) {
+      finish(null);
+      return;
+    }
+
+    request.on('timeout', () => {
+      request.destroy();
+      finish(null);
+    });
+    request.on('error', () => finish(null));
+  });
 
 // =================== IMAGE LOADING ===================
 
@@ -834,9 +973,10 @@ const getEntryDocuments = (entry) =>
   (Array.isArray(entry?.pdf_files) ? entry.pdf_files : [])
     .map((file) => ({
       name: safeText(file?.filename, getAttachmentLabel(file?.file_path)),
-      source: safeText(file?.file_path || file?.filename)
+      rawSource: safeText(file?.file_path || file?.filename)
     }))
-    .filter((file) => file.source && !isImageSource(file.source));
+    .filter((file) => file.rawSource && !isImageSource(file.rawSource))
+    .map((file) => ({ name: file.name, source: buildDocumentDownloadLink(file.rawSource, file.name) }));
 
 const buildObservationLookup = (structuralContainer, nonStructuralContainer) => {
   const lookup = new Map();
@@ -3050,6 +3190,50 @@ const handleExportError = (res, error, message) => {
     error: error.expose || process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
   });
 };
+
+// Proxies a stored document's Cloudinary "raw" asset so it downloads with the correct
+// filename/extension/Content-Type (see the comment above buildDocumentDownloadLink for why
+// that isn't true of the stored Cloudinary URL itself). Left unauthenticated, same as the
+// plain Cloudinary links it replaces, since it's meant to stay clickable from inside an
+// already-exported report opened well after the viewer's session has ended. `url` is
+// restricted to this app's own Cloudinary cloud/raw assets to avoid becoming an open proxy.
+router.get('/documents/download', async (req, res) => {
+  try {
+    const rawUrl = safeText(req.query.url);
+    const suggestedName = safeText(req.query.name);
+
+    if (!rawUrl) {
+      return res.status(400).json({ success: false, message: 'Missing url parameter' });
+    }
+
+    const downloadUrl = resolveCloudinaryRawDownload(rawUrl, path.extname(suggestedName));
+    if (!downloadUrl) {
+      return res.status(400).json({ success: false, message: 'Unsupported document URL' });
+    }
+
+    const fetched = await fetchDocumentBinary(downloadUrl);
+    if (!fetched || !fetched.buffer || !fetched.buffer.length) {
+      return res.status(502).json({ success: false, message: 'Failed to fetch document from storage' });
+    }
+
+    const extFromName = path.extname(suggestedName).toLowerCase();
+    const extFromUrl = getFileExtension(rawUrl);
+    const ext = extFromName || extFromUrl;
+
+    const finalName = suggestedName
+      ? (path.extname(suggestedName) ? suggestedName : `${suggestedName}${ext}`)
+      : `document${ext}`;
+
+    const contentType = DOCUMENT_MIME_BY_EXT[ext] || fetched.contentType || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${finalName.replace(/[\r\n"]/g, '_')}"`);
+    res.setHeader('Content-Length', String(fetched.buffer.length));
+    return res.send(fetched.buffer);
+  } catch (error) {
+    return handleExportError(res, error, 'Failed to download document');
+  }
+});
 
 router.get('/structures/download', authenticateToken, checkExportPermissions, async (req, res) => {
   try {
