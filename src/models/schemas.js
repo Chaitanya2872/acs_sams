@@ -250,27 +250,27 @@ const quantificationEntrySchema = {
   nos: {
     type: Number,
     min: [0, 'Nos cannot be negative'],
-    default: 1
+    default: null
   },
   length: {
     type: Number,
     min: [0, 'Length cannot be negative'],
-    default: 0
+    default: null
   },
   breadth: {
     type: Number,
     min: [0, 'Breadth cannot be negative'],
-    default: 0
+    default: null
   },
   height: {
     type: Number,
     min: [0, 'Height cannot be negative'],
-    default: 0
+    default: null
   },
   quantity: {
     type: Number,
     min: [0, 'Quantity cannot be negative'],
-    default: 0
+    default: null
   },
   unit: {
     type: String,

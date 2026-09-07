@@ -1,3 +1,4 @@
+const { createWordDocument } = require('../utils/wordReport');
 const express = require('express');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
@@ -96,11 +97,11 @@ const TEST_NAME_LABELS = {
   custom: 'CUSTOM TEST'
 };
 
-const REPORT_PLACEHOLDER = '--';
+const REPORT_PLACEHOLDER = '\u2014';
 
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PDF_MIME = 'application/pdf';
-const WORD_MIME = 'application/msword';
+const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const BROWSER_CANDIDATES = [
   process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -190,7 +191,7 @@ const flattenMixedObject = (value) => {
 };
 
 const toNumber = (value) => {
-  if (value === null || value === undefined || value === '') return null;
+  if (value == null || (typeof value === 'string' && ['', '\u2014'].includes(value.trim()))) return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 };
@@ -203,9 +204,8 @@ const toDimension = (value) => {
 
 const toCount = (value) => {
   const num = toNumber(value);
-  // Preserve an explicitly entered zero. Only old records with no value at all
-  // receive the historical default of one.
-  return num !== null && num >= 0 ? num : 1;
+  // Preserve missing counts and explicitly entered zeroes separately.
+  return num !== null && num >= 0 ? num : null;
 };
 
 /**
@@ -215,9 +215,10 @@ const toCount = (value) => {
  */
 const computeQuantity = ({ nos, length, breadth, height }) => {
   const count = toCount(nos);
+  if (count === null && [length, breadth, height].every(value => value == null)) return null;
   return [length, breadth, height]
     .filter((dimension) => dimension !== null && dimension !== undefined)
-    .reduce((total, dimension) => total * dimension, count);
+    .reduce((total, dimension) => total * dimension, count ?? 1);
 };
 
 const inferUnitFromDimensions = ({ length, breadth, height }) => {
@@ -270,7 +271,8 @@ const summarizeMethodology = (rows) => {
     const method = safeText(row.repair_methodology, 'Not Specified');
     const key = method.toLowerCase();
     const rule = resolveRepairRule(key);
-    const quantity = toNumber(row.quantity) ?? 0;
+    const quantity = toNumber(row.quantity);
+    if (quantity === null) return;
 
     if (!summaryMap.has(key)) {
       summaryMap.set(key, {
@@ -1029,9 +1031,8 @@ const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
     }
 
     const quantBase = {
-      // A NO'S observation has no physical dimensions; its entered count is
-      // the quantity. Older records without `number` retain the prior value.
-      nos: number ?? 1,
+      // Keep a missing count distinct from an explicitly entered value.
+      nos: number,
       length,
       breadth,
       height
@@ -1139,15 +1140,14 @@ const collectQuantifications = (structure) => {
 
   const addRows = (entries, scopeLabel, section, observationLookup) => {
     (Array.isArray(entries) ? entries : []).forEach((entry) => {
-      const length = toDimension(entry.length);
-      const breadth = toDimension(entry.breadth);
-      const height = toDimension(entry.height);
+      const length = toNumber(entry.length);
+      const breadth = toNumber(entry.breadth);
+      const height = toNumber(entry.height);
       const nos = toCount(entry.nos);
       const explicitQuantity = toNumber(entry.quantity);
       const computed = computeQuantity({ nos, length, breadth, height });
 
       const repairMethodology = safeText(entry.repair_methodology);
-      if (!repairMethodology) return;
 
       rows.push({
         scopeLabel,
@@ -1628,18 +1628,6 @@ const prepareStructureReports = async (structures, filtersApplied) => {
   return prepared;
 };
 
-const collectReportAssets = (preparedStructures) => {
-  const assets = new Map();
-  preparedStructures.forEach((prepared) => {
-    [...prepared.inspectionImages, ...prepared.testingImages].forEach((row) => {
-      if (row.asset && !assets.has(row.asset.fileName)) {
-        assets.set(row.asset.fileName, row.asset);
-      }
-    });
-  });
-  return Array.from(assets.values());
-};
-
 const buildFilterSummary = (query = {}) => {
   const keys = [
     'user_id',
@@ -1883,20 +1871,20 @@ const renderQuantificationHtml = (quantificationSections) => {
 
     groups.forEach((items, groupName) => {
       parts.push(`<tr class="quant-group-row"><td colspan="${QUANT_COLUMN_COUNT}">${escapeHtml(groupName)}</td></tr>`);
-      let groupTotal = 0;
+      let groupTotal = null;
 
       items.forEach((row, index) => {
-        groupTotal += toNumber(row.quantity) ?? 0;
+        if (toNumber(row.quantity) !== null) groupTotal = (groupTotal ?? 0) + toNumber(row.quantity);
         parts.push(`
           <tr>
             <td class="center">${index + 1}</td>
-            <td>${escapeHtml(row.location_of_distress)}</td>
-            <td class="center">${escapeHtml(String(row.nos))}</td>
-            <td class="center">${escapeHtml(row.length ?? '')}</td>
-            <td class="center">${escapeHtml(row.breadth ?? '')}</td>
-            <td class="center">${escapeHtml(row.height ?? '')}</td>
-            <td class="center">${escapeHtml(formatApproxQuantity(row.quantity))}</td>
-            <td>${escapeHtml(row.repair_methodology)}</td>
+            <td>${escapeHtml(safeText(row.location_of_distress, REPORT_PLACEHOLDER))}</td>
+            <td class="center">${escapeHtml(safeText(row.nos, REPORT_PLACEHOLDER))}</td>
+            <td class="center">${escapeHtml(safeText(row.length, REPORT_PLACEHOLDER))}</td>
+            <td class="center">${escapeHtml(safeText(row.breadth, REPORT_PLACEHOLDER))}</td>
+            <td class="center">${escapeHtml(safeText(row.height, REPORT_PLACEHOLDER))}</td>
+            <td class="center">${escapeHtml(safeText(formatApproxQuantity(row.quantity), REPORT_PLACEHOLDER))}</td>
+            <td>${escapeHtml(safeText(row.repair_methodology, REPORT_PLACEHOLDER))}</td>
           </tr>
         `);
       });
@@ -1904,7 +1892,7 @@ const renderQuantificationHtml = (quantificationSections) => {
       parts.push(`
         <tr class="quant-total-row">
           <td colspan="6">Total - ${escapeHtml(groupName)}</td>
-          <td class="center">${escapeHtml(formatApproxQuantity(groupTotal))}</td>
+          <td class="center">${escapeHtml(safeText(formatApproxQuantity(groupTotal), REPORT_PLACEHOLDER))}</td>
           <td>&nbsp;</td>
         </tr>
       `);
@@ -2015,8 +2003,12 @@ const REPORT_STYLES = `
     mso-border-alt: solid #7F7F7F 1pt;
     padding: 10mm;
     mso-padding-alt: 10mm 10mm 10mm 10mm;
+    mso-footer: f1;
+    mso-header-margin: 12mm;
+    mso-footer-margin: 12mm;
   }
   div.WordSection1 { page: WordSection1; }
+  .MsoFooter { font-size: 9pt; text-align: center; margin: 0; }
   body {
     font-family: 'Times New Roman', Times, serif;
     font-size: 11pt;
@@ -2113,8 +2105,6 @@ const REPORT_STYLES = `
   .note-block p { font-size: 10pt; margin: 2pt 0; }
   .report-block { page-break-after: always; }
   .report-block:last-child { page-break-after: auto; }
-  .page-footer { position: fixed; bottom: -10mm; width: 100%; text-align: center; font-size: 9pt; }
-  .page-number:after { content: counter(page); }
   /* Chrome's print-to-PDF path ignores the @page border above, so we repeat a fixed-
      position bordered frame the same way the footer above repeats on every page. */
   .page-border {
@@ -2143,7 +2133,11 @@ const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:sc
   </head>
   <body>
     <div class="page-border"></div>
-    <div class="page-footer">Page <span class="page-number"></span></div>
+    <!--[if gte mso 9]>
+    <div style='mso-element:footer' id=f1>
+      <p class=MsoFooter>Page <span style='mso-field-code:" PAGE "'></span> of <span style='mso-field-code:" NUMPAGES "'></span></p>
+    </div>
+    <![endif]-->
     <div class="WordSection1">
       ${preparedStructures.map((prepared) => renderStructureHtml(prepared, imageRef)).join('')}
     </div>
@@ -2152,77 +2146,10 @@ const buildReportHtml = (preparedStructures, imageRef) => `<html xmlns:o="urn:sc
 
 // =================== WORD (MHTML) OUTPUT ===================
 
-/**
- * Word only reliably embeds images from an MHTML package (it ignores `data:` URIs
- * in HTML-as-.doc files), so the Word export is built as multipart/related.
- */
-const encodeQuotedPrintable = (input) => {
-  const bytes = Buffer.from(input, 'utf8');
-  const lines = [];
-  let line = '';
-
-  for (let index = 0; index < bytes.length; index += 1) {
-    const byte = bytes[index];
-    if (byte === 0x0d) continue;
-    if (byte === 0x0a) {
-      lines.push(line);
-      line = '';
-      continue;
-    }
-
-    const chunk =
-      byte >= 33 && byte <= 126 && byte !== 0x3d
-        ? String.fromCharCode(byte)
-        : `=${byte.toString(16).toUpperCase().padStart(2, '0')}`;
-
-    if (line.length + chunk.length > 73) {
-      lines.push(`${line}=`);
-      line = '';
-    }
-    line += chunk;
-  }
-
-  lines.push(line);
-  return lines.join('\r\n');
-};
-
-const MHTML_BASE_LOCATION = 'file:///C:/SAMS/report';
-
-const buildWordMhtml = (html, assets) => {
-  const boundary = '----=_NextPart_SAMS_REPORT';
-  const parts = [
-    'MIME-Version: 1.0',
-    `Content-Type: multipart/related; type="text/html"; boundary="${boundary}"`,
-    'X-Document-Type: Word.Document',
-    '',
-    `--${boundary}`,
-    'Content-Type: text/html; charset="utf-8"',
-    'Content-Transfer-Encoding: quoted-printable',
-    `Content-Location: ${MHTML_BASE_LOCATION}/report.htm`,
-    '',
-    encodeQuotedPrintable(html)
-  ];
-
-  assets.forEach((asset) => {
-    parts.push(
-      `--${boundary}`,
-      `Content-Type: ${asset.mimeType}`,
-      'Content-Transfer-Encoding: base64',
-      `Content-Location: ${MHTML_BASE_LOCATION}/${asset.fileName}`,
-      '',
-      asset.buffer.toString('base64').replace(/(.{76})/g, '$1\r\n')
-    );
-  });
-
-  parts.push(`--${boundary}--`, '');
-  return parts.join('\r\n');
-};
-
-const sendWordDocument = (res, preparedStructures, fileName) => {
-  const html = buildReportHtml(preparedStructures, (asset) => (asset ? asset.fileName : ''));
-  const assets = collectReportAssets(preparedStructures);
-  const buffer = Buffer.from(buildWordMhtml(html, assets), 'utf8');
-
+const sendWordDocument = async (res, preparedStructures, fileName) => {
+  const html = buildReportHtml(preparedStructures, (asset) =>
+    asset ? `data:${asset.mimeType};base64,${asset.buffer.toString('base64')}` : '');
+  const buffer = await createWordDocument(html);
   res.setHeader('Content-Type', WORD_MIME);
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
   res.setHeader('Content-Length', String(buffer.length));
@@ -2535,20 +2462,20 @@ const renderStructurePdf = (doc, prepared, index) => {
           quantWidths,
           { header: true }
         );
-        let groupTotal = 0;
+        let groupTotal = null;
         items.forEach((row, rowIndex) => {
-          groupTotal += toNumber(row.quantity) ?? 0;
+          if (toNumber(row.quantity) !== null) groupTotal = (groupTotal ?? 0) + toNumber(row.quantity);
           pdfTableRow(
             doc,
             [
               String(rowIndex + 1),
-              row.location_of_distress,
-              String(row.nos),
-              row.length ?? '',
-              row.breadth ?? '',
-              row.height ?? '',
-              formatApproxQuantity(row.quantity),
-              row.repair_methodology
+              safeText(row.location_of_distress, REPORT_PLACEHOLDER),
+              safeText(row.nos, REPORT_PLACEHOLDER),
+              safeText(row.length, REPORT_PLACEHOLDER),
+              safeText(row.breadth, REPORT_PLACEHOLDER),
+              safeText(row.height, REPORT_PLACEHOLDER),
+              safeText(formatApproxQuantity(row.quantity), REPORT_PLACEHOLDER),
+              safeText(row.repair_methodology, REPORT_PLACEHOLDER)
             ],
             quantWidths
           );
@@ -2556,7 +2483,7 @@ const renderStructurePdf = (doc, prepared, index) => {
         // The label cell spans S.No..H, mirroring the colspan used in the Word/HTML table.
         pdfTableRow(
           doc,
-          [`Total - ${groupName}`, formatApproxQuantity(groupTotal), ''],
+          [`Total - ${groupName}`, safeText(formatApproxQuantity(groupTotal), REPORT_PLACEHOLDER), ''],
           [quantWidths.slice(0, 6).reduce((sum, width) => sum + width, 0), quantWidths[6], quantWidths[7]],
           { font: 'Helvetica-Bold' }
         );
@@ -2595,9 +2522,10 @@ const renderPdfWithPdfKit = (preparedStructures) =>
   new Promise((resolve, reject) => {
     // Extra top/bottom margin gives each page breathing room above the title and
     // above/below the footer; left/right stay close to the previous 36pt default.
+    // 74pt ≈ 26mm, matching the browser-rendered PDF path's page margins.
     const doc = new PDFDocument({
       size: 'A4',
-      margins: { top: 54, bottom: 54, left: 36, right: 36 },
+      margins: { top: 74, bottom: 74, left: 36, right: 36 },
       bufferPages: true
     });
     const chunks = [];
@@ -2651,7 +2579,16 @@ const renderPdfWithBrowser = async (executablePath, html) => {
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
-      margin: { top: '18mm', right: '14mm', bottom: '18mm', left: '14mm' }
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate: `
+        <div style="width:100%; font-size:8px; font-family:Helvetica,Arial,sans-serif; color:#555555; text-align:center;">
+          Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+        </div>
+      `,
+      // Extra top/bottom margin gives each page breathing room above the title and
+      // above/below the footer's page number.
+      margin: { top: '26mm', right: '14mm', bottom: '26mm', left: '14mm' }
     });
     return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
   } finally {
@@ -2958,18 +2895,19 @@ const addExcelQuantificationSection = (worksheet, startRow, quantificationSectio
       addTableHeader(worksheet, row, QUANT_HEADERS, COLORS.PRIMARY);
       row += 1;
 
-      let groupTotal = 0;
+      let groupTotal = null;
       items.forEach((entry, index) => {
-        groupTotal += toNumber(entry.quantity) ?? 0;
+        if (toNumber(entry.quantity) !== null) groupTotal = (groupTotal ?? 0) + toNumber(entry.quantity);
+        const quantityDisplay = formatApproxQuantity(entry.quantity);
         row = writeRow(worksheet, row, [
           index + 1,
-          entry.location_of_distress,
-          entry.nos,
-          entry.length ?? '',
-          entry.breadth ?? '',
-          entry.height ?? '',
-          Number(formatApproxQuantity(entry.quantity) || 0),
-          entry.repair_methodology,
+          entry.location_of_distress || REPORT_PLACEHOLDER,
+          entry.nos ?? REPORT_PLACEHOLDER,
+          entry.length ?? REPORT_PLACEHOLDER,
+          entry.breadth ?? REPORT_PLACEHOLDER,
+          entry.height ?? REPORT_PLACEHOLDER,
+          quantityDisplay === '' ? REPORT_PLACEHOLDER : Number(quantityDisplay),
+          entry.repair_methodology || REPORT_PLACEHOLDER,
           entry.unit
         ]);
       });
@@ -2977,7 +2915,7 @@ const addExcelQuantificationSection = (worksheet, startRow, quantificationSectio
       row = writeRow(
         worksheet,
         row,
-        ['', `Total - ${groupName}`, '', '', '', '', Number(formatApproxQuantity(groupTotal) || 0), '', ''],
+        ['', `Total - ${groupName}`, '', '', '', '', groupTotal === null ? REPORT_PLACEHOLDER : Number(formatApproxQuantity(groupTotal)), '', ''],
         { font: { ...FONTS.BODY, bold: true }, fill: solidFill('FFF2F2F2') }
       );
     });
@@ -3172,7 +3110,7 @@ const sendReport = async ({ res, reqUser, structures, filterSummary, format, bas
   }
 
   if (isWordFormat(format)) {
-    return sendWordDocument(res, preparedStructures, `${baseFileName}_${stamp}.doc`);
+    return sendWordDocument(res, preparedStructures, `${baseFileName}_${stamp}.docx`);
   }
 
   const workbook = buildExcelReport(reqUser, preparedStructures, { withIndex });

@@ -1951,42 +1951,50 @@ const quantificationValidation = [
     .withMessage('Repair methodology cannot exceed 2000 characters'),
 
   body('structural.*.nos')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Nos must be a non-negative number'),
 
   body('non_structural.*.nos')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Nos must be a non-negative number'),
 
   body('structural.*.length')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Length must be a non-negative number'),
 
   body('structural.*.breadth')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Breadth must be a non-negative number'),
 
   body('structural.*.height')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Height must be a non-negative number'),
 
   body('non_structural.*.length')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Length must be a non-negative number'),
 
   body('non_structural.*.breadth')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Breadth must be a non-negative number'),
 
   body('non_structural.*.height')
-    .optional()
+    .optional({ nullable: true })
+    .customSanitizer(value => typeof value === 'string' && ['', '\u2014'].includes(value.trim()) ? null : value)
     .isFloat({ min: 0 })
     .withMessage('Height must be a non-negative number')
 ];

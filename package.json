@@ -29,6 +29,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@turbodocx/html-to-docx": "^1.22.2",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
     "compression": "^1.8.1",
@@ -40,6 +41,7 @@
     "express-validator": "^7.2.1",
     "helmet": "^7.2.0",
     "jsonwebtoken": "^9.0.2",
+    "juice": "^10.0.1",
     "mongodb": "^6.18.0",
     "mongoose": "^7.8.7",
     "morgan": "^1.10.1",
