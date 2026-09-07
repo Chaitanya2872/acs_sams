@@ -1,3 +1,4 @@
+const { randomUUID } = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
@@ -7,12 +8,8 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: (req, file) => {
     const isImage = file.mimetype && file.mimetype.startsWith('image/');
-    // Non-image documents are stored as Cloudinary "raw" assets. Without a `format` here,
-    // Cloudinary gives the asset no file extension at all (and a generic
-    // application/octet-stream content-type), so a downloaded document has no way to tell
-    // the OS what kind of file it is and won't open. Tagging the original extension fixes
-    // that; see reports.js's document-download proxy for why the resulting URL still needs
-    // to be resolved through Cloudinary's signed Admin API rather than fetched directly.
+    // Raw assets require the extension in their public ID. A format option
+    // alone does not reliably preserve it. Use a unique ID to avoid collisions.
     const extension = path.extname(file.originalname || '').replace(/^\./, '').toLowerCase();
     return {
       folder: 'sams-structures',
@@ -23,7 +20,7 @@ const storage = new CloudinaryStorage({
               { width: 1024, height: 1024, crop: 'limit', quality: 'auto' },
             ],
           }
-        : (extension ? { format: extension } : {})),
+        : { public_id: `${randomUUID()}${extension ? `.${extension}` : ''}` }),
     };
   },
 });

@@ -235,6 +235,14 @@ const formatApproxQuantity = (value) => {
   return String(Number(numeric.toFixed(2)));
 };
 
+const formatQuantityWithUnit = (row) => {
+  const quantity = formatApproxQuantity(row.quantity);
+  if (!quantity) return REPORT_PLACEHOLDER;
+  const rawUnit = safeText(row.unit).toUpperCase();
+  const unit = ['NOS', "NO'S", 'NO', 'NUMBER'].includes(rawUnit) ? 'Nos' : rawUnit;
+  return `${quantity}${unit ? ` ${unit}` : ''}`;
+};
+
 /**
  * Unit / multiplier rules per repair methodology, per the client's Bill of Quantity summary.
  * Cementitious grouting is billed by weight: actual quantity x 3 = KGS.
@@ -415,53 +423,55 @@ const DOCUMENT_MIME_BY_EXT = {
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 const DOCUMENT_FETCH_TIMEOUT_MS = 20000;
 
-const API_BASE_URL = (process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, '');
+const API_BASE_URL = (process.env.API_BASE_URL || 'https://sams.acstechnologies.co.in').replace(/\/+$/, '');
 
-/**
- * Resolves a stored Cloudinary "raw" document URL to a signed Admin-API download link that
- * bypasses the CDN's PDF/ZIP delivery block. `extensionHint` (from the document's own stored
- * filename) recovers the correct format for older uploads whose URL has no extension at all.
- * Returns null for anything that isn't one of our own Cloudinary raw assets.
- */
-const resolveCloudinaryRawDownload = (source, extensionHint = '') => {
-  const value = safeText(source);
-  if (!value) return null;
-
-  const match = value.match(CLOUDINARY_URL_PATTERN);
-  if (!match) return null;
-
-  const [, cloudName, resourceType, deliveryType, publicIdWithExt] = match;
-  if (resourceType !== 'raw' || cloudName !== cloudinary.config().cloud_name) return null;
-
-  const format = path.extname(publicIdWithExt).replace(/^\./, '') || safeText(extensionHint).replace(/^\./, '').toLowerCase();
-  if (!format) return null;
-
+// Only public documents in our configured cloud can use the report proxy.
+// Raw public IDs include their extension; image-PDF IDs do not.
+const parseCloudinaryDocument = (source, name = '') => {
   try {
-    return cloudinary.utils.private_download_url(publicIdWithExt, format, {
-      resource_type: resourceType,
-      type: deliveryType
-    });
-  } catch (error) {
+    const url = new URL(source);
+    if (url.hostname !== 'res.cloudinary.com' || !['https:', 'http:'].includes(url.protocol)) return null;
+    const match = url.pathname.match(/^\/([^/]+)\/(raw|image)\/(upload)\/(?:v\d+\/)?(.+)$/);
+    if (!match) return null;
+    const [, cloudName, resourceType, deliveryType, encodedId] = match;
+    if (cloudName !== cloudinary.config().cloud_name) return null;
+    const publicId = decodeURIComponent(encodedId);
+    const extension = path.extname(publicId).toLowerCase() || path.extname(name).toLowerCase();
+    if (resourceType === 'image' && extension !== '.pdf') return null;
+    return { source: url.origin + url.pathname, resourceType, deliveryType, publicId, extension };
+  } catch (_) {
     return null;
   }
 };
 
-/**
- * Builds the link used for a document attachment inside exported reports. Cloudinary raw
- * assets are routed through our own download-proxy (see the /documents/download route below)
- * so the saved file always gets the right name/extension/Content-Type; anything else (data
- * URIs, legacy local /uploads/ paths, external links) is left untouched.
- */
+const resolveCloudinaryRawDownload = (source, extensionHint = '') => {
+  const asset = parseCloudinaryDocument(source, `document${extensionHint}`);
+  if (!asset) return null;
+  const publicId = asset.resourceType === 'image'
+    ? asset.publicId.replace(/\.pdf$/i, '') : asset.publicId;
+  return cloudinary.utils.private_download_url(publicId, asset.extension.slice(1), {
+    resource_type: asset.resourceType, type: asset.deliveryType
+  });
+};
+
 const buildDocumentDownloadLink = (source, name) => {
-  const value = safeText(source);
-  if (!value || !/^https?:\/\//i.test(value)) return value;
-
-  const resolved = resolveCloudinaryRawDownload(value, path.extname(safeText(name)));
-  if (!resolved) return value;
-
+  const value = safeText(source).replace(/\\/g, '/');
+  if (/^\/?uploads\//i.test(value)) return `${API_BASE_URL}/${value.replace(/^\/+/, '')}`;
+  if (!parseCloudinaryDocument(value, safeText(name))) return value;
   const params = new URLSearchParams({ url: value });
   if (name) params.set('name', name);
   return `${API_BASE_URL}/api/reports/documents/download?${params.toString()}`;
+};
+
+const detectDocumentExtension = (buffer) => {
+  if (buffer.subarray(0, 5).toString() === '%PDF-') return '.pdf';
+  if (buffer.subarray(0, 2).toString() === 'PK') {
+    if (buffer.includes(Buffer.from('word/'))) return '.docx';
+    if (buffer.includes(Buffer.from('xl/'))) return '.xlsx';
+    if (buffer.includes(Buffer.from('ppt/'))) return '.pptx';
+    return '.zip';
+  }
+  return '';
 };
 
 const fetchDocumentBinary = (url, redirectsLeft = 4) =>
@@ -974,10 +984,10 @@ const getEntryPhotos = (entry) => {
 const getEntryDocuments = (entry) =>
   (Array.isArray(entry?.pdf_files) ? entry.pdf_files : [])
     .map((file) => ({
-      name: safeText(file?.filename, getAttachmentLabel(file?.file_path)),
-      rawSource: safeText(file?.file_path || file?.filename)
+      name: typeof file === 'string' ? getAttachmentLabel(file) : safeText(file?.filename, getAttachmentLabel(file?.file_path)),
+      rawSource: typeof file === 'string' ? file : safeText(file?.file_path || file?.filename)
     }))
-    .filter((file) => file.rawSource && !isImageSource(file.rawSource))
+    .filter((file) => file.rawSource && (getFileExtension(file.name) === '.pdf' || !isImageSource(file.rawSource)))
     .map((file) => ({ name: file.name, source: buildDocumentDownloadLink(file.rawSource, file.name) }));
 
 const buildObservationLookup = (structuralContainer, nonStructuralContainer) => {
@@ -1024,9 +1034,9 @@ const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
     const height = toDimension(dimensions.height);
     const repairMethodology = safeText(entry?.repair_methodology);
     const hasDimensions = length !== null || breadth !== null || height !== null;
-    const hasContent = Boolean(observationText || hasDimensions || safeText(entry?.repair_methodology));
+    const hasContent = Boolean(observationText || hasDimensions || number !== null || repairMethodology);
 
-    if (!hasContent || !repairMethodology) {
+    if (!hasContent) {
       return;
     }
 
@@ -1368,7 +1378,7 @@ const collectPhotoRows = (observations, tests) => {
           test_name: test.test_name,
           scopeLabel: test.scopeLabel,
           caption: `${test.test_name} - ${test.scopeLabel}`,
-          source: attachment.source
+          source: buildDocumentDownloadLink(attachment.source, attachment.name)
         });
       });
   });
@@ -1398,7 +1408,7 @@ const collectFileAttachments = (observations, tests) => {
           location: test.scopeLabel,
           context: test.test_name,
           name: attachment.name,
-          source: attachment.source
+          source: buildDocumentDownloadLink(attachment.source, attachment.name)
         });
       });
   });
@@ -1846,7 +1856,7 @@ const renderQuantificationHtml = (quantificationSections) => {
         <th rowspan="2" class="sno-col center">S.No</th>
         <th rowspan="2">Location of Distress</th>
         <th colspan="4" class="center">Distress</th>
-        <th rowspan="2" class="center">Length (Rm) /<br />Area (Sqm) /<br />Volume (Cum)</th>
+        <th rowspan="2" class="center">Quantity<br />(Nos / Rm / Sqm / Cum)</th>
         <th rowspan="2">Repair Methodology</th>
       </tr>
       <tr>
@@ -1883,7 +1893,7 @@ const renderQuantificationHtml = (quantificationSections) => {
             <td class="center">${escapeHtml(safeText(row.length, REPORT_PLACEHOLDER))}</td>
             <td class="center">${escapeHtml(safeText(row.breadth, REPORT_PLACEHOLDER))}</td>
             <td class="center">${escapeHtml(safeText(row.height, REPORT_PLACEHOLDER))}</td>
-            <td class="center">${escapeHtml(safeText(formatApproxQuantity(row.quantity), REPORT_PLACEHOLDER))}</td>
+            <td class="center">${escapeHtml(formatQuantityWithUnit(row))}</td>
             <td>${escapeHtml(safeText(row.repair_methodology, REPORT_PLACEHOLDER))}</td>
           </tr>
         `);
@@ -2446,7 +2456,7 @@ const renderStructurePdf = (doc, prepared, index) => {
   if (!prepared.quantificationSections.length) {
     pdfTableRow(
       doc,
-      ['S.No', 'Location of Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Rm / Sqm / Cum', 'Repair Methodology'],
+      ['S.No', 'Location of Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Nos / Rm / Sqm / Cum', 'Repair Methodology'],
       quantWidths,
       { header: true }
     );
@@ -2458,7 +2468,7 @@ const renderStructurePdf = (doc, prepared, index) => {
         pdfBandRow(doc, groupName, '#FFF200');
         pdfTableRow(
           doc,
-          ['S.No', 'Location of Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Rm / Sqm / Cum', 'Repair Methodology'],
+          ['S.No', 'Location of Distress', 'Nos', 'L (M)', 'B (M)', 'H (M)', 'Nos / Rm / Sqm / Cum', 'Repair Methodology'],
           quantWidths,
           { header: true }
         );
@@ -2474,7 +2484,7 @@ const renderStructurePdf = (doc, prepared, index) => {
               safeText(row.length, REPORT_PLACEHOLDER),
               safeText(row.breadth, REPORT_PLACEHOLDER),
               safeText(row.height, REPORT_PLACEHOLDER),
-              safeText(formatApproxQuantity(row.quantity), REPORT_PLACEHOLDER),
+              formatQuantityWithUnit(row),
               safeText(row.repair_methodology, REPORT_PLACEHOLDER)
             ],
             quantWidths
@@ -2869,7 +2879,7 @@ const QUANT_HEADERS = [
   'L (M)',
   'B (M)',
   'H (M)',
-  'Length (Rm) / Area (Sqm) / Volume (Cum)',
+  'Quantity (Nos / Rm / Sqm / Cum)',
   'Repair Methodology',
   'Unit'
 ];
@@ -3129,12 +3139,8 @@ const handleExportError = (res, error, message) => {
   });
 };
 
-// Proxies a stored document's Cloudinary "raw" asset so it downloads with the correct
-// filename/extension/Content-Type (see the comment above buildDocumentDownloadLink for why
-// that isn't true of the stored Cloudinary URL itself). Left unauthenticated, same as the
-// plain Cloudinary links it replaces, since it's meant to stay clickable from inside an
-// already-exported report opened well after the viewer's session has ended. `url` is
-// restricted to this app's own Cloudinary cloud/raw assets to avoid becoming an open proxy.
+// Report links open outside the app's authenticated session. Restrict this
+// endpoint to public-upload documents in our own cloud; never proxy private assets.
 router.get('/documents/download', async (req, res) => {
   try {
     const rawUrl = safeText(req.query.url);
@@ -3149,23 +3155,25 @@ router.get('/documents/download', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Unsupported document URL' });
     }
 
-    const fetched = await fetchDocumentBinary(downloadUrl);
+    const asset = parseCloudinaryDocument(rawUrl, suggestedName);
+    let fetched = await fetchDocumentBinary(downloadUrl);
+    if (!fetched) fetched = await fetchDocumentBinary(asset.source);
     if (!fetched || !fetched.buffer || !fetched.buffer.length) {
       return res.status(502).json({ success: false, message: 'Failed to fetch document from storage' });
     }
 
     const extFromName = path.extname(suggestedName).toLowerCase();
     const extFromUrl = getFileExtension(rawUrl);
-    const ext = extFromName || extFromUrl;
+    const ext = detectDocumentExtension(fetched.buffer) || extFromName || extFromUrl;
 
     const finalName = suggestedName
-      ? (path.extname(suggestedName) ? suggestedName : `${suggestedName}${ext}`)
+      ? `${path.basename(suggestedName, path.extname(suggestedName))}${ext}`
       : `document${ext}`;
 
     const contentType = DOCUMENT_MIME_BY_EXT[ext] || fetched.contentType || 'application/octet-stream';
 
+    res.attachment(finalName.replace(/[\r\n]/g, '_'));
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${finalName.replace(/[\r\n"]/g, '_')}"`);
     res.setHeader('Content-Length', String(fetched.buffer.length));
     return res.send(fetched.buffer);
   } catch (error) {

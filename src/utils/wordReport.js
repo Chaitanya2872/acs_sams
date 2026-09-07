@@ -13,7 +13,10 @@ const createWordDocument = async (html) => {
     .replace(/<\/section>\s*<section/g, '</section><div class="page-break"></div><section')
     .replace(/<section([^>]*)>/g, (_, attributes) =>
       `<div${attributes.replace(/page-break-after\s*:[^;"]+;?/g, '')}>`)
-    .replace(/<\/section>/g, '</div>');
+    .replace(/<\/section>/g, '</div>')
+    // The converter preserves HTML entities in href values and then XML-escapes
+    // them again. Restore query separators so Word receives '&name=', not '&amp;name='.
+    .replace(/\bhref="([^"]*)"/g, (_, href) => `href="${href.replace(/&amp;/g, '&')}"`);
   const result = await HTMLtoDOCX(inlined, null, {
     title: 'SAMS Structure Report',
     creator: 'SAMS',
