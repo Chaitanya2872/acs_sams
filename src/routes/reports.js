@@ -270,13 +270,14 @@ const resolveRepairRule = (methodKey) =>
 
 /**
  * Sums the quantification rows per repair methodology so the Bill of Quantity summary
- * always reflects exactly what is printed in the quantification table above it.
+ * includes only rows with a specified repair methodology and a quantity.
  */
 const summarizeMethodology = (rows) => {
   const summaryMap = new Map();
 
   rows.forEach((row) => {
-    const method = safeText(row.repair_methodology, 'Not Specified');
+    const method = safeText(row.repair_methodology);
+    if (!method || /^(not\s+specified|n\/?a|[-\u2013\u2014]+)$/i.test(method)) return;
     const key = method.toLowerCase();
     const rule = resolveRepairRule(key);
     const quantity = toNumber(row.quantity);
@@ -1022,10 +1023,19 @@ const resolveQuantificationLocation = (entry, observationLookup, scopeLabel) => 
   return safeText(observationText, scopeLabel);
 };
 
+// Ratings 4 and 5 are good; saved rows may only retain the condition text.
+const isGoodCondition = (entry) => {
+  const rating = toNumber(entry?.rating);
+  if (rating !== null && rating >= 4 && rating <= 5) return true;
+  return [entry?.condition, entry?.condition_comment, entry?.location_of_distress]
+    .some(value => /^(?:in\s+)?good(?:\s+condition)?[.!]?$/i.test(safeText(value)));
+};
+
 const buildDerivedQuantificationRows = (entries, scopeLabel, section) => {
   const rows = [];
 
   entries.forEach(({ componentLabel, entry }) => {
+    if (isGoodCondition(entry)) return;
     const observationText = getObservationText(entry);
     const dimensions = entry?.distress_dimensions || {};
     const number = toNumber(dimensions.number);
@@ -1148,8 +1158,16 @@ const collectQuantifications = (structure) => {
   const rows = [];
   const floors = Array.isArray(structure?.geometric_details?.floors) ? structure.geometric_details.floors : [];
 
-  const addRows = (entries, scopeLabel, section, observationLookup) => {
+  const addRows = (entries, scopeLabel, section, observationLookup, componentEntries) => {
     (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      if (isGoodCondition(entry)) return;
+      const categoryKey = normalizeComponentLookupKey(entry.category);
+      const location = safeText(entry.location_of_distress).toLowerCase();
+      const matches = componentEntries.filter(({ componentKey, componentLabel, entry: source }) =>
+        [componentKey, componentLabel, source?.name].some(alias => normalizeComponentLookupKey(alias) === categoryKey) &&
+        (!location || [getObservationText(source), source?.name].some(text => safeText(text).toLowerCase() === location))
+      );
+      if (matches.length && matches.every(({ entry: source }) => isGoodCondition(source))) return;
       const length = toNumber(entry.length);
       const breadth = toNumber(entry.breadth);
       const height = toNumber(entry.height);
@@ -1189,7 +1207,7 @@ const collectQuantifications = (structure) => {
     const hasSavedNonStructural = Array.isArray(nonStructuralEntries) && nonStructuralEntries.length > 0;
 
     if (hasSavedStructural) {
-      addRows(structuralEntries, scopeLabel, STRUCTURAL_SECTION, observationLookup);
+      addRows(structuralEntries, scopeLabel, STRUCTURAL_SECTION, observationLookup, getComponentEntries(structuralContainer, STRUCTURAL_COMPONENTS));
     } else {
       rows.push(
         ...buildDerivedQuantificationRows(
@@ -1201,7 +1219,7 @@ const collectQuantifications = (structure) => {
     }
 
     if (hasSavedNonStructural) {
-      addRows(nonStructuralEntries, scopeLabel, NON_STRUCTURAL_SECTION, observationLookup);
+      addRows(nonStructuralEntries, scopeLabel, NON_STRUCTURAL_SECTION, observationLookup, getComponentEntries(nonStructuralContainer, NON_STRUCTURAL_COMPONENTS));
     } else {
       rows.push(
         ...buildDerivedQuantificationRows(
@@ -1992,13 +2010,13 @@ const renderStructureHtml = (prepared, imageRef) => `
     <p class="section-note small-caps">The observation entered during the attaching the photo should reflect with image in small font</p>
     ${renderSection('ANNEXURES', renderAttachmentsHtml(prepared.fileAttachments))}
     ${renderSection('QUANTIFICATION', renderQuantificationHtml(prepared.quantificationSections))}
-    ${renderSection(
+    ${prepared.summary.structural.length ? renderSection(
       'BILL OF QUANTITY SUMMARY - STRUCTURAL',
       renderSummaryTableHtml(prepared.summary.structural),
       'Quantities in the quantification table are summed for each repair methodology type.'
-    )}
-    ${renderSection('BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', renderSummaryTableHtml(prepared.summary.nonStructural))}
-    ${renderSection('BILL OF QUANTITY SUMMARY - TOTAL', renderSummaryTableHtml(prepared.summary.combined))}
+    ) : ''}
+    ${prepared.summary.nonStructural.length ? renderSection('BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', renderSummaryTableHtml(prepared.summary.nonStructural)) : ''}
+    ${prepared.summary.combined.length ? renderSection('BILL OF QUANTITY SUMMARY - TOTAL', renderSummaryTableHtml(prepared.summary.combined)) : ''}
   </section>
 `;
 
@@ -2508,6 +2526,7 @@ const renderStructurePdf = (doc, prepared, index) => {
     ['BILL OF QUANTITY SUMMARY - NON-STRUCTURAL', prepared.summary.nonStructural],
     ['BILL OF QUANTITY SUMMARY - TOTAL', prepared.summary.combined]
   ].forEach(([title, rows]) => {
+    if (!rows.length) return;
     pdfSectionTitle(doc, title);
     pdfTableRow(doc, ['S. No', 'Description', 'Quantity', 'Units'], summaryWidths, { header: true });
     if (!rows.length) {
@@ -2935,6 +2954,7 @@ const addExcelQuantificationSection = (worksheet, startRow, quantificationSectio
 };
 
 const addExcelSummarySection = (worksheet, startRow, title, summaryRows) => {
+  if (!summaryRows.length) return startRow;
   let row = startRow;
   addMergedSectionRow(worksheet, row, title, COLORS.SECTION, 9);
   row += 1;

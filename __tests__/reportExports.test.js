@@ -18,7 +18,7 @@ const sandbox = {
   setTimeout, clearTimeout, URL, URLSearchParams
 };
 vm.runInNewContext(fs.readFileSync(filename, 'utf8') + `
-  module.exports = { parseCloudinaryDocument, resolveCloudinaryRawDownload, buildDocumentDownloadLink, getEntryDocuments, detectDocumentExtension, formatQuantityWithUnit, prepareStructureReport, sendWordDocument, collectQuantifications, renderQuantificationHtml, groupQuantificationsBySection };
+  module.exports = { summarizeMethodology, renderStructureHtml, addExcelSummarySection, parseCloudinaryDocument, resolveCloudinaryRawDownload, buildDocumentDownloadLink, getEntryDocuments, detectDocumentExtension, formatQuantityWithUnit, prepareStructureReport, sendWordDocument, collectQuantifications, renderQuantificationHtml, groupQuantificationsBySection };
 `, sandbox, { filename });
 const reports = sandbox.module.exports;
 
@@ -148,3 +148,55 @@ test('Word response is a native DOCX with body tables, images, links and a page 
   expect(relationships).toContain('/api/reports/documents/download?url=');
   expect(relationships).toContain('&amp;name=rating+file.pdf');
 }, 30000);
+
+
+test('good condition entries are omitted from saved and derived quantifications at every scope', () => {
+  const scope = () => ({
+    structural_rating: { beams: [
+      { rating: 4, condition_comment: 'Sound beam', distress_dimensions: { number: 2 } },
+      { rating: 3, condition_comment: 'Cracked beam', distress_dimensions: { number: 3 } }
+    ] },
+    quantifications: { structural: [
+      { category: 'Beams', location_of_distress: 'Sound beam', nos: 2 },
+      { category: 'Beams', location_of_distress: 'Cracked beam', nos: 3 },
+      { category: 'Columns', location_of_distress: ' Good condition. ', nos: 4 }
+    ] },
+    non_structural_rating: { walls: [
+      { rating: 5, distress_dimensions: { number: 5 } },
+      { condition_comment: 'Good condition', distress_dimensions: { number: 6 } },
+      { rating: 2, condition_comment: 'Cracked wall', distress_dimensions: { number: 7 } }
+    ] }
+  });
+  const rows = reports.collectQuantifications({ geometric_details: { floors: [
+    { ...scope(), floor_number: 1, flats: [{ ...scope(), flat_number: 'A' }], blocks: [{ ...scope(), block_name: 'B' }] }
+  ] } });
+  expect(rows).toHaveLength(6);
+  expect(rows.map(row => row.quantity)).toEqual([3, 7, 3, 7, 3, 7]);
+});
+
+test('BOQ omits unspecified methods and retains valid quantities including zero', () => {
+  const rows = [undefined, '', '  ', ' Not Specified ', 'NOT SPECIFIED', '\u2014', 'N/A']
+    .map(repair_methodology => ({ repair_methodology, quantity: 10 }));
+  rows.push({ repair_methodology: 'Patch repair', quantity: 2, unit: 'SQM' },
+    { repair_methodology: 'Patch repair', quantity: 3, unit: 'SQM' },
+    { repair_methodology: 'Painting', quantity: 0, unit: 'SQM' });
+  expect(reports.summarizeMethodology(rows)).toEqual([
+    { description: 'Patch repair', quantity: 5, units: 'SQM' },
+    { description: 'Painting', quantity: 0, units: 'SQM' }
+  ]);
+});
+
+test('HTML used by PDF and Word and Excel omit empty BOQ sections', async () => {
+  const prepared = await reports.prepareStructureReport({ structure, user: {} }, '');
+  expect(reports.renderStructureHtml(prepared, () => '')).not.toContain('BILL OF QUANTITY');
+  const ExcelJS = require('exceljs');
+  const worksheet = new ExcelJS.Workbook().addWorksheet('Report');
+  expect(reports.addExcelSummarySection(worksheet, 1, 'BILL OF QUANTITY', [])).toBe(1);
+  expect(worksheet.rowCount).toBe(0);
+  prepared.summary.structural = [{ description: 'Patch repair', quantity: 2, units: 'SQM' }];
+  const html = reports.renderStructureHtml(prepared, () => '');
+  expect(html).toContain('BILL OF QUANTITY SUMMARY - STRUCTURAL');
+  expect(html).not.toContain('BILL OF QUANTITY SUMMARY - NON-STRUCTURAL');
+  reports.addExcelSummarySection(worksheet, 1, 'BILL OF QUANTITY', prepared.summary.structural);
+  expect(worksheet.getCell('B3').value).toBe('Patch repair');
+});
